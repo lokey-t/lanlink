@@ -1,0 +1,6 @@
+LanLink 0.1.0
+
+This application includes ZXing core 3.5.3.
+Copyright ZXing authors.
+Source: https://github.com/zxing/zxing
+License: Apache License 2.0, included in ZXING-LICENSE.txt.

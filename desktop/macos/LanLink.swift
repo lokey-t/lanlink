@@ -1,0 +1,610 @@
+import SwiftUI
+import AppKit
+import UniformTypeIdentifiers
+import ServiceManagement
+
+enum Palette {
+    static let surface = Color(red: 0.977, green: 0.984, blue: 0.997)
+    static let canvas = Color(red: 0.945, green: 0.961, blue: 0.988)
+    static let line = Color(red: 0.867, green: 0.899, blue: 0.949)
+}
+struct FlatButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var enabled
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.font(.system(size: 13, weight: .medium)).padding(.horizontal, 15).padding(.vertical, 10)
+            .foregroundStyle(Color(red: 0.28, green: 0.39, blue: 0.58))
+            .background(configuration.isPressed ? Color.blue.opacity(0.10) : Color.white, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Palette.line, lineWidth: 1)).opacity(enabled ? 1 : 0.4)
+    }
+}
+struct Device: Identifiable {
+    var id: String; var name: String; var platform: String; var online = false; var local = false
+    var symbol: String { platform == "android" ? "iphone" : "desktopcomputer" }
+}
+
+// No WebView: AppKit windows, SwiftUI controls and inherited process pipes.
+@MainActor final class Model: ObservableObject {
+    @Published var state: [String: Any] = [:]
+    @Published var devices: [Device] = []
+    @Published var notice = "正在连接设备服务…"
+    @Published var selected: String?
+    @Published var screen: NSImage?
+    @Published var remoteID: String?
+    @Published var controlling = false
+    @Published var remotePhone = false
+    @Published var adbDevice: Device?
+    @Published var permissionsVisible = false
+    @Published var sidebarPage = "devices"
+    @Published var controlConflict = false
+    var fallbackAccepted = false; var showingInputModeDialog = false; var handlingFallback = false
+    var freshControl = true; var remoteOpenedAt = 0.0
+    @Published var autoControl = false
+    @Published var startupEnabled = SMAppService.mainApp.status == .enabled
+    var consentAlert: NSAlert?; var consentRequest = ""; var permissionWindow: NSWindow?
+    var controlVersion = 0
+    var root = Bundle.main.resourceURL!
+    var process: Process?; var input = Pipe(); var output = Pipe(); var errors = Pipe()
+    var pending: [String: CheckedContinuation<[String: Any], Error>] = [:]
+    var sequence = 0; var closing = false; var poll: Task<Void, Never>?
+    var remoteTask: Task<Void, Never>?; var inputTail: Task<Void, Never>?
+    var stream = Data(); var statusItem: NSStatusItem?; var remoteWindow: NSWindow?
+    var edges: [String: String] { state["edges"] as? [String: String] ?? [:] }
+    var dwell: Int { state["dwell"] as? Int ?? 450 }
+    var isMaster: Bool { state["master"] as? Bool ?? false }
+    var permissions: [String: Bool] { state["permissions"] as? [String: Bool] ?? [:] }
+    func launch() {
+        let p = Process(); p.executableURL = root.appendingPathComponent("runtime/node")
+        let args = CommandLine.arguments
+        let data = args.firstIndex(of: "--data").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? NSHomeDirectory() + "/.lanlink"
+        p.arguments = [root.appendingPathComponent("src/native-host.js").path, "--data", data]
+        if args.contains("--simulate") { p.arguments!.append("--simulate") }
+        if args.contains("--no-discovery") { p.arguments!.append("--no-discovery") }
+        p.standardInput = input; p.standardOutput = output; p.standardError = errors
+        output.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            Task { @MainActor in self?.consume(data) }
+        }
+        errors.fileHandleForReading.readabilityHandler = { handle in _ = handle.availableData }
+        p.terminationHandler = { [weak self] _ in Task { @MainActor in self?.failed("设备服务已退出，请重新启动 LanLink") } }
+        do { try p.run(); process = p } catch { notice = error.localizedDescription }
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        item.button?.image = NSImage(systemSymbolName: "rectangle.connected.to.line.below", accessibilityDescription: "LanLink")
+        let menu = NSMenu(); menu.addItem(withTitle: "打开 LanLink", action: #selector(AppDelegate.showMain), keyEquivalent: "")
+        menu.addItem(withTitle: "返回本机键鼠", action: #selector(AppDelegate.releaseControl), keyEquivalent: "")
+        menu.addItem(.separator()); menu.addItem(withTitle: "退出 LanLink", action: #selector(AppDelegate.quitApp), keyEquivalent: "q")
+        item.menu = menu; statusItem = item
+    }
+    func consume(_ bytes: Data) {
+        if bytes.isEmpty { return }; stream.append(bytes)
+        while let index = stream.firstIndex(of: 10) {
+            let line = stream.prefix(upTo: index); stream.removeSubrange(...index)
+            guard let msg = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else { continue }
+            if msg["ready"] as? Bool == true {
+                poll = Task { while !Task.isCancelled { await refresh(); try? await Task.sleep(nanoseconds: 1_500_000_000) } }
+            }
+            if let error = msg["fatal"] as? String { failed(error) }
+            guard let id = msg["id"] as? String, let continuation = pending.removeValue(forKey: id) else { continue }
+            if let error = msg["error"] as? String { continuation.resume(throwing: failure(error)) }
+            else { continuation.resume(returning: msg["result"] as? [String: Any] ?? [:]) }
+        }
+    }
+    func failure(_ text: String) -> NSError { NSError(domain: "LanLink", code: 1, userInfo: [NSLocalizedDescriptionKey: text]) }
+    func failed(_ message: String) { for promise in pending.values { promise.resume(throwing: failure(message)) }; pending.removeAll(); poll?.cancel(); if !closing { notice = message; devices = devices.map { var d = $0; if !d.local { d.online = false }; return d } } }
+    func call(_ method: String, _ args: [String: Any] = [:]) async throws -> [String: Any] {
+        guard let p = process, p.isRunning else { throw failure("设备服务不可用") }
+        sequence += 1; let id = String(sequence)
+        var line = try JSONSerialization.data(withJSONObject: ["id": id, "method": method, "args": args]); line.append(10)
+        return try await withCheckedThrowingContinuation { continuation in
+            pending[id] = continuation
+            do { try input.fileHandleForWriting.write(contentsOf: line) } catch { pending.removeValue(forKey: id)?.resume(throwing: error) }
+            Task { try? await Task.sleep(nanoseconds: 130_000_000_000); if let promise = pending.removeValue(forKey: id) { promise.resume(throwing: failure("操作超时")) } }
+        }
+    }
+    func perform(_ method: String, _ args: [String: Any] = [:], success: String = "") { Task { do { _ = try await call(method, args); notice = success; await refresh() } catch { notice = error.localizedDescription } } }
+    func refresh() async {
+        do {
+            state = try await call("state"); var all = [Device(id: state["id"] as? String ?? "local", name: state["name"] as? String ?? "本机", platform: "darwin", online: true, local: true)]
+            refreshRequests(); startupEnabled = SMAppService.mainApp.status == .enabled
+            for (id, info) in state["knownDevices"] as? [String: [String: Any]] ?? [:] { all.append(Device(id: id, name: info["name"] as? String ?? "已配对设备", platform: info["platform"] as? String ?? "")) }
+            for info in state["peers"] as? [[String: Any]] ?? [] {
+                guard let id = info["id"] as? String else { continue }; all.removeAll { $0.id == id }
+                all.append(Device(id: id, name: info["name"] as? String ?? "已配对设备", platform: info["platform"] as? String ?? "", online: true))
+            }
+            for id in edges.values where !id.isEmpty && !all.contains(where: { $0.id == id }) { all.append(Device(id: id, name: "已设置设备", platform: "")) }
+            devices = all.sorted { if $0.local != $1.local { return $0.local }; return $0.name < $1.name }
+            if let at = state["shutdownAt"] as? Double { notice = "收到关机请求，\(max(0, Int((at / 1000 - Date().timeIntervalSince1970).rounded(.up)))) 秒后执行；点击本机设备可取消" }
+            if let remoteID, state["active"] as? String != remoteID { controlling = false }
+        } catch { notice = error.localizedDescription }
+    }
+    func place(_ id: String, _ edge: String) {
+        guard devices.contains(where: { $0.id == id && !$0.local }) else { return }
+        var next = edges; let old = next.first { $0.value == id }?.key; let occupied = next[edge] ?? ""
+        for key in Array(next.keys) where next[key] == id { next[key] = "" }
+        if let old, old != edge { next[old] = occupied }; next[edge] = id
+        perform("settings", ["edges": next], success: isMaster ? "布局已保存" : "布局已保存；点击本机设备启用键鼠主设备")
+    }
+    func removeLayout(_ id: String) { var next = edges; for key in Array(next.keys) where next[key] == id { next[key] = "" }; perform("settings", ["edges": next], success: "布局已保存") }
+    func sendFiles(_ d: Device) {
+        let dialog = NSOpenPanel(); dialog.canChooseDirectories = false; dialog.allowsMultipleSelection = true
+        dialog.message = "文件将通过剪贴板粘贴到目标应用；目标应用需支持文件粘贴。"
+        if dialog.runModal() == .OK { perform("send-files", ["id": d.id, "files": dialog.urls.map(\.path)], success: "文件已送达目标应用") }
+    }
+    func shutdown(_ d: Device) { let alert = NSAlert(); alert.messageText = "请求 \(d.name) 在 30 秒后关机？"; alert.informativeText = "请先保存目标设备中的工作。"; alert.addButton(withTitle: "关机"); alert.addButton(withTitle: "取消"); if alert.runModal() == .alertFirstButtonReturn { perform("shutdown", ["id": d.id], success: "已发送关机请求，可在设备菜单中取消") } }
+    func openRemote(_ d: Device) {
+        if let w = remoteWindow { w.makeKeyAndOrderFront(nil); return }
+        remoteID = d.id; controlling = false; screen = nil; remotePhone = d.platform == "android"; autoControl = true; freshControl = true; fallbackAccepted = false; controlConflict = false; remoteOpenedAt = Date().timeIntervalSince1970*1000
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 700), styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered, defer: false)
+        w.title = "远程控制 · " + d.name; w.contentViewController = NSHostingController(rootView: RemoteView(model: self)); w.isReleasedWhenClosed = false; w.delegate = NSApp.delegate as? AppDelegate; w.center(); w.makeKeyAndOrderFront(nil); remoteWindow = w
+        let peer = (state["peers"] as? [[String: Any]] ?? []).first { $0["id"] as? String == d.id }
+        let caps = peer?["capabilities"] as? [String: Any] ?? [:]
+        fitRemote(width: caps["width"] as? Double ?? 1280, height: caps["height"] as? Double ?? 720)
+        remoteTask = Task { var retry = Date.distantPast; var streaming = false; var legacy = false; var jpegOnly = false; while !Task.isCancelled && remoteID == d.id {
+            if let ended = state["controlEnded"] as? [String: Any], ended["id"] as? String == d.id, (ended["at"] as? Double ?? 0) >= remoteOpenedAt { release(); remoteWindow?.close(); notice="对方已结束控制"; break }
+            if autoControl && !controlling && Date() >= retry { retry = Date().addingTimeInterval(0.5); await beginRemoteControl() }
+            if controlConflict { try? await Task.sleep(nanoseconds: 500_000_000); continue }
+            do {
+                if !legacy && !streaming { _ = try await call("stream-open", ["id": d.id, "jpegOnly": jpegOnly]); streaming = true }
+                if Task.isCancelled || remoteID != d.id { _ = try? await call("stream-close", ["id": d.id]); break }
+                let frame = try await call(streaming ? "stream-next" : "screen", ["id": d.id])
+                if remoteID == d.id, let text = frame["data"] as? String, let data = Data(base64Encoded: text) { screen = NSImage(data: data); notice = streaming ? "\(frame["codec"] as? String == "h264" ? "H.264 串流" : "兼容串流") · \(frame["fps"] as? Int ?? 0) fps" : "截图兼容模式" }
+                if legacy { try? await Task.sleep(nanoseconds: 50_000_000) }
+            } catch {
+                notice = error.localizedDescription
+                if notice.hasPrefix("CONTROL_ENDED:") { release(); remoteWindow?.close(); notice="对方已结束控制"; break }
+                if notice.hasPrefix("CONTROL_CONFLICT:") { controlConflict = true; autoControl = false; controlling = false }
+                if notice.contains("不支持") || notice.contains("接口不存在") { legacy = true }
+                else if !notice.hasPrefix("CONSENT_") && !notice.hasPrefix("PERMISSION_") { if jpegOnly { legacy = true }; jpegOnly = true }
+                if streaming { _ = try? await call("stream-close", ["id": d.id]); streaming = false }
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+            }
+        } }
+    }
+    func fitRemote(width: Double, height: Double) {
+        guard width.isFinite, height.isFinite, width > 0, height > 0, let w = remoteWindow else { return }
+        let area = (w.screen ?? NSScreen.main)?.visibleFrame.size ?? NSSize(width: 1280, height: 800)
+        let chrome = remotePhone ? 30.0 : 130.0, side = remotePhone ? 60.0 : 36.0
+        let scale = min(1, min((area.width - side - 30) / width, (area.height - chrome - 50) / height))
+        w.setContentSize(NSSize(width: max(remotePhone ? 280 : 320, width * scale + side), height: max(320, height * scale + chrome))); w.center()
+    }
+    func beginRemoteControl() async {
+        guard let id = remoteID, autoControl, !controlling, !handlingFallback else { return }
+        if remotePhone, inputMode(id) == "accessibility-limited", !fallbackAccepted { fallbackAccepted = confirmFallback(); if !fallbackAccepted { autoControl = false; notice = "备用控制未启用，可从 ADB 开启增强控制"; return } }
+        let version = controlVersion; let fresh = freshControl; freshControl = false
+        do { _ = try await call("control", ["id": id, "capture": false, "newSession": fresh, "fallbackAccepted": fallbackAccepted]); guard remoteID == id, autoControl, version == controlVersion else { _ = try? await call("release"); return }; controlling = true; notice = "正在控制" }
+        catch { notice = error.localizedDescription; if notice.hasPrefix("CONTROL_CONFLICT:") { controlConflict = true }; if !notice.hasPrefix("CONSENT_PENDING:") && !notice.hasPrefix("PERMISSION_REQUIRED:") { autoControl = false } }
+    }
+    func release() { autoControl = false; fallbackAccepted = false; controlVersion += 1; controlling = false; perform("release") }
+    func inputMode(_ id: String) -> String { ((state["peers"] as? [[String: Any]] ?? []).first { $0["id"] as? String == id }?["capabilities"] as? [String: Any])?["inputMode"] as? String ?? "" }
+    func confirmFallback() -> Bool {
+        showingInputModeDialog = true; defer { showingInputModeDialog = false }
+        let alert = NSAlert(); alert.messageText = "使用无障碍备用控制？"
+        alert.informativeText = "此手机尚未启用 Root / ADB 增强控制。备用模式支持点击、长按和滑动；拖动会在松开鼠标后执行，悬停、游戏和复杂快捷键受限。此旧版手机请升级到 0.3.9 并启用 ADB / Root 输入助手。\n\n可在设备菜单选择「ADB 键鼠授权」开启增强控制。"
+        alert.addButton(withTitle: "使用备用模式"); alert.addButton(withTitle: "取消"); return alert.runModal() == .alertFirstButtonReturn
+    }
+    func switchControl(_ device: Device) {
+        let fallback = device.platform == "android" && inputMode(device.id) == "accessibility-limited"
+        if fallback && !confirmFallback() { return }
+        perform("control", ["id": device.id, "capture": true, "newSession": true, "fallbackAccepted": fallback])
+    }
+    func showAdb(_ device: Device) { sidebarPage = "adb"; permissionsVisible = false; adbDevice = device; (NSApp.delegate as? AppDelegate)?.showMain() }
+    func removeDevice(_ device: Device) {
+        let alert=NSAlert(); alert.messageText="移出设备？"; alert.informativeText="将 "+device.name+" 移出组。该设备需要重新配对，其他离线成员会保留身份。"; alert.addButton(withTitle:"移出"); alert.addButton(withTitle:"取消")
+        if alert.runModal() == .alertFirstButtonReturn { perform("device-remove",["id":device.id],success:"设备已移出组") }; selected=nil
+    }
+    var controlledBy: String? {
+        let owner = state["owner"] as? String ?? ""
+        guard let id = owner.isEmpty ? (state["viewers"] as? [String])?.first : owner, !id.isEmpty else { return nil }; return devices.first { $0.id==id }?.name ?? "其他设备"
+    }
+    func setStartup(_ enabled: Bool) {
+        do { if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }; startupEnabled = SMAppService.mainApp.status == .enabled; if SMAppService.mainApp.status == .requiresApproval { SMAppService.openSystemSettingsLoginItems(); notice = "请在系统登录项中允许 LanLink" } }
+        catch { notice = error.localizedDescription; startupEnabled = SMAppService.mainApp.status == .enabled }
+    }
+    func refreshRequests() {
+        if let fallback = state["fallbackNotice"] as? [String: Any], !handlingFallback {
+            handlingFallback = true
+            Task {
+                let accepted = confirmFallback()
+                do {
+                    _ = try await call("fallback-dismiss")
+                    if let id = fallback["id"] as? String, remoteID == id { controlling = false; fallbackAccepted = accepted; autoControl = accepted; freshControl = true; if accepted { remoteWindow?.makeKeyAndOrderFront(nil) } }
+                    else if accepted { _ = try await call("control", ["id": fallback["id"] ?? "", "edge": fallback["edge"] ?? "", "capture": fallback["capture"] ?? false, "newSession": true, "fallbackAccepted": true]) }
+                } catch { notice = error.localizedDescription }
+                handlingFallback = false
+            }
+        }
+        let requests = state["consentRequests"] as? [[String: Any]] ?? []
+        if let alert = consentAlert, !requests.contains(where: { $0["requestId"] as? String == consentRequest }) { alert.window.sheetParent?.endSheet(alert.window, returnCode: .cancel); consentAlert = nil }
+        if consentAlert == nil, let request = requests.first, let main = (NSApp.delegate as? AppDelegate)?.mainWindow {
+            let alert = NSAlert(); alert.messageText = "首次控制确认"; alert.informativeText = "\(request["name"] as? String ?? "设备") 希望控制这台 Mac。选择允许的功能，同意后记住此设备。"
+            alert.addButton(withTitle: "同意并记住"); alert.addButton(withTitle: "暂不允许")
+            let keys = ["input", "screen", "clipboard", "shutdown"], names = ["键鼠操作", "查看屏幕", "剪贴板与文件", "远程关机"]
+            let stack = NSStackView(); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 12
+            let checks = names.map { name -> NSButton in let b = NSButton(checkboxWithTitle: name, target: nil, action: nil); b.state = .on; stack.addArrangedSubview(b); return b }
+            stack.frame = NSRect(x: 0, y: 0, width: 340, height: 140); alert.accessoryView = stack; consentAlert = alert; consentRequest = request["requestId"] as? String ?? ""
+            main.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
+            alert.beginSheetModal(for: main) { [weak self] response in Task { @MainActor in
+                guard let self else { return }
+                let permissions = Dictionary(uniqueKeysWithValues: zip(keys, checks.map { $0.state == .on }))
+                do { _ = try await self.call("consent-decide", ["id": request["id"] ?? "", "requestId": request["requestId"] ?? "", "accepted": response == .alertFirstButtonReturn, "permissions": permissions]) } catch { self.notice = error.localizedDescription }
+                self.consentAlert = nil
+            } }
+        }
+        if state["permissionNotice"] is [String: Any], permissionWindow == nil {
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 360), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            w.title = "协作权限"; w.contentViewController = NSHostingController(rootView: PermissionHelpView(model: self)); w.isReleasedWhenClosed = false; w.delegate = NSApp.delegate as? AppDelegate; permissionWindow = w; w.center(); w.makeKeyAndOrderFront(nil)
+        }
+    }
+    func closeRemote() { if let id = remoteID { perform("stream-close", ["id": id]) }; remoteTask?.cancel(); remoteTask = nil; remoteID = nil; remoteWindow = nil; screen = nil; release() }
+    func sendInput(_ event: [String: Any]) {
+        guard controlling, let id = remoteID else { return }; let prior = inputTail
+        inputTail = Task { await prior?.value; guard controlling, remoteID == id else { return }; do { _ = try await call("input", ["id": id, "input": event]) } catch { notice = error.localizedDescription; release() } }
+    }
+    func quit() {
+        guard !closing else { return }; closing = true; poll?.cancel(); remoteTask?.cancel(); try? input.fileHandleForWriting.close()
+        Task { for _ in 0..<90 { if process?.isRunning != true { NSApp.reply(toApplicationShouldTerminate: true); return }; try? await Task.sleep(nanoseconds: 100_000_000) }; process?.terminate(); NSApp.reply(toApplicationShouldTerminate: true) }
+    }
+}
+
+struct Glass: NSViewRepresentable {
+    var material: NSVisualEffectView.Material = .sidebar
+    var mode: NSVisualEffectView.BlendingMode = .behindWindow
+    func makeNSView(context: Context) -> NSVisualEffectView { let view = NSVisualEffectView(); view.material = material; view.blendingMode = mode; view.state = .active; return view }
+    func updateNSView(_ view: NSVisualEffectView, context: Context) { }
+}
+struct DeviceTile: View {
+    @ObservedObject var model: Model; let device: Device; var compact = false
+    var detail: String { device.local ? (model.isMaster ? "本机 · 主设备" : "本机") : model.state["active"] as? String == device.id ? "正在控制" : device.online ? "在线" : "离线" }
+    var body: some View {
+        Group { if compact { HStack(spacing: 14) { icon; labels } } else { VStack(spacing: 12) { icon; labels } } }
+            .padding(compact ? 16 : 18).frame(width: compact ? 180 : 180, height: compact ? 42 : 90)
+            .background(device.local ? Color.blue.opacity(0.075) : Color.white, in: RoundedRectangle(cornerRadius: 18))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(model.selected == device.id ? Color.blue.opacity(0.45) : Palette.line))
+            .contentShape(RoundedRectangle(cornerRadius: 16)).onTapGesture { model.selected = device.id }
+            .popover(isPresented: Binding(get: { model.selected == device.id && compact }, set: { if !$0 { model.selected = nil } })) { DeviceActions(model: model, device: device).padding(14).frame(width: 230).background(Glass(material: .popover, mode: .withinWindow)) }
+            .contextMenu { DeviceActions(model: model, device: device) }
+            .onDrag { NSItemProvider(object: device.id as NSString) }
+    }
+    var icon: some View { Image(systemName: device.symbol).font(.system(size: compact ? 24 : 30, weight: .light)).foregroundStyle(Color(red: 0.31, green: 0.43, blue: 0.65)) }
+    var labels: some View { VStack(alignment: compact ? .leading : .center, spacing: 6) { Text(device.name).fontWeight(.medium).lineLimit(1); HStack(spacing: 5) { if !device.local { Circle().fill(device.online ? Color.mint : Color.gray).frame(width: 6, height: 6) }; Text(detail).font(.caption).foregroundStyle(.secondary) } } }
+}
+struct DeviceActions: View {
+    @ObservedObject var model: Model; let device: Device
+    var body: some View { VStack(alignment: .leading, spacing: 12) {
+        Text(device.name).font(.headline); Divider()
+        if device.local {
+            Button(model.isMaster ? "停用键鼠主设备" : "设为键鼠主设备") { model.perform("settings", ["master": !model.isMaster]); model.selected = nil }
+            Button("返回本机键鼠") { model.release(); model.selected = nil }
+            Button("取消关机") { model.perform("cancel-shutdown"); model.selected = nil }.disabled(model.state["shutdownAt"] == nil || model.state["shutdownAt"] is NSNull)
+        } else {
+            Group {
+                Button("设备详情与权限") { model.selected = nil; model.sidebarPage = "permissions"; model.permissionsVisible = true }
+                Button("远程控制") { model.selected = nil; model.openRemote(device) }
+                Button("切换键鼠到此设备") { model.switchControl(device); model.selected = nil }
+                if device.platform == "android" { Button("ADB 键鼠授权") { model.selected = nil; model.showAdb(device) } }
+                Button("粘贴共享内容") { model.perform("device-paste", ["id": device.id]); model.selected = nil }
+                Button("发送文件…") { model.selected = nil; model.sendFiles(device) }
+            }.disabled(!device.online)
+            Divider()
+            Button("重置此设备的本机授权") { model.perform("consent-revoke", ["id": device.id], success: "下次控制本机时需重新确认"); model.selected = nil }
+            Menu("调整方位") { ForEach(["left", "right", "top", "bottom"], id: \.self) { edge in Button(["left": "左侧", "right": "右侧", "top": "上方", "bottom": "下方"][edge]!) { model.place(device.id, edge); model.selected = nil } } }
+            Button("移出设备…") { model.removeDevice(device) }
+            Button("移出布局") { model.removeLayout(device.id); model.selected = nil }.disabled(!model.edges.values.contains(device.id))
+            if device.platform != "android" { Divider(); Button("关机…") { model.selected = nil; model.shutdown(device) }.disabled(!device.online); Button("取消关机") { model.perform("cancel-shutdown", ["id": device.id]) }.disabled(!device.online) }
+        }
+    }.buttonStyle(.plain) }
+}
+struct LayoutCanvas: View {
+    @ObservedObject var model: Model; @State var editTime = false; @State var time = "500"
+    let positions: [String: CGPoint] = ["local": CGPoint(x: 500, y: 290), "left": CGPoint(x: 165, y: 290), "right": CGPoint(x: 835, y: 290), "top": CGPoint(x: 500, y: 90), "bottom": CGPoint(x: 500, y: 490)]
+    func position(_ d: Device) -> CGPoint? { d.local ? positions["local"] : model.edges.first(where: { $0.value == d.id }).flatMap { positions[$0.key] } }
+    var body: some View { GeometryReader { geometry in
+        let used = model.devices.compactMap(position)
+        let dx = (1000 - ((used.map(\.x).max() ?? 500) + (used.map(\.x).min() ?? 500))) / 2
+        let dy = (580 - ((used.map(\.y).max() ?? 290) + (used.map(\.y).min() ?? 290))) / 2
+        let scale = min(geometry.size.width / 1000, geometry.size.height / 580)
+        ZStack(alignment: .topLeading) {
+            Canvas { ctx, _ in
+                for x in stride(from: 15, to: 1000, by: 30) { for y in stride(from: 10, to: 580, by: 30) { ctx.fill(Path(ellipseIn: CGRect(x: x, y: y, width: 1.3, height: 1.3)), with: .color(.blue.opacity(0.13))) } }
+                for (edge, id) in model.edges where !id.isEmpty { if let p = positions[edge] { var line = Path(); line.move(to: CGPoint(x: 500 + dx, y: 290 + dy)); line.addLine(to: CGPoint(x: p.x + dx, y: p.y + dy)); ctx.stroke(line, with: .color(.blue.opacity(0.4)), lineWidth: 1) } }
+            }
+            ForEach(["left", "right", "top", "bottom"], id: \.self) { edge in if !(model.edges[edge] ?? "").isEmpty, let p = positions[edge] { Button("\(model.dwell) ms") { time = String(model.dwell); editTime = true }.font(.caption).buttonStyle(FlatButtonStyle()).position(x: (p.x + 500) / 2 + dx, y: (p.y + 290) / 2 + dy) } }
+            ForEach(model.devices) { d in if let p = position(d) { DeviceTile(model: model, device: d).position(x: p.x + dx, y: p.y + dy) } }
+            if model.devices.count == 1 { Text("添加设备后，将顶部气泡拖至本机四周").font(.caption).foregroundStyle(.secondary).position(x: 500, y: 440) }
+        }.frame(width: 1000, height: 580).scaleEffect(scale, anchor: .topLeading)
+        .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
+        .onDrop(of: [.text], isTargeted: nil) { providers, point in
+            guard let provider = providers.first else { return false }
+            let x = point.x / scale - dx - 500, y = point.y / scale - dy - 290
+            let edge = abs(x) > abs(y) ? (x < 0 ? "left" : "right") : (y < 0 ? "top" : "bottom")
+            _ = provider.loadObject(ofClass: NSString.self) { value, _ in if let id = value as? String { Task { @MainActor in model.place(id, edge) } } }; return true
+        }
+    }.sheet(isPresented: $editTime) { VStack(alignment: .leading, spacing: 18) { Text("边缘切换").font(.title2); Text("停留时间（毫秒，所有边缘共用）"); TextField("100–3000", text: $time); HStack { Button("取消") { editTime = false }; Button("保存") { if let value = Int(time), (100...3000).contains(value) { model.perform("settings", ["dwell": value], success: "切换时间已保存"); editTime = false } } } }.padding(28).frame(width: 340) } }
+}
+
+struct Home: View {
+    @ObservedObject var model: Model; @State var settings = false; @State var pairing = false
+    var body: some View { HStack(spacing: 0) {
+        VStack(alignment: .leading, spacing: 14) {
+            Label("LanLink", systemImage: "square.on.square").font(.title2).padding(.bottom, 18)
+            Button { settings = false; model.adbDevice = nil; model.permissionsVisible = false; model.sidebarPage = "devices" } label: { Label("设备", systemImage: "desktopcomputer").padding(12).frame(maxWidth: .infinity, alignment: .leading).background(model.sidebarPage == "devices" ? Color.blue.opacity(0.10) : Color.clear, in: RoundedRectangle(cornerRadius: 12)) }
+            Button { settings = false; model.adbDevice = nil; model.sidebarPage = "permissions"; model.permissionsVisible = true } label: { Label("本组设备权限", systemImage: "checkmark.shield").padding(12).frame(maxWidth: .infinity, alignment: .leading).background(model.sidebarPage == "permissions" ? Color.blue.opacity(0.10) : Color.clear, in: RoundedRectangle(cornerRadius: 12)) }
+            Button { settings = false; model.permissionsVisible = false; model.adbDevice = nil; model.sidebarPage = "adb" } label: { Label("安卓 ADB 授权", systemImage: "cable.connector").padding(12).frame(maxWidth: .infinity, alignment: .leading).background(model.sidebarPage == "adb" ? Color.blue.opacity(0.10) : Color.clear, in: RoundedRectangle(cornerRadius: 12)) }
+            Button { settings = true; model.adbDevice = nil; model.permissionsVisible = false; model.sidebarPage = "settings" } label: { Label("设置", systemImage: "gearshape").padding(12).frame(maxWidth: .infinity, alignment: .leading).background(settings ? Color.blue.opacity(0.10) : Color.clear, in: RoundedRectangle(cornerRadius: 12)) }
+            Spacer()
+            if let name = model.controlledBy { VStack(alignment: .leading, spacing: 10) { Label("正在被控制", systemImage: "dot.radiowaves.left.and.right").font(.caption.weight(.semibold)); Text(name + " 正在操作或查看本机").font(.caption).fixedSize(horizontal: false, vertical: true); Button("取消远程控制") { model.perform("stop-inbound") }.buttonStyle(FlatButtonStyle()) }.padding(12).frame(maxWidth: .infinity, alignment: .leading).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16)).overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.green.opacity(0.20))) }
+            Button { settings = false; model.adbDevice = nil; model.permissionsVisible = false; model.sidebarPage = "information" } label: { Label("我的信息", systemImage: "person.crop.circle").padding(12).background(model.sidebarPage == "information" ? Color.blue.opacity(0.10) : Color.clear, in: RoundedRectangle(cornerRadius: 12)) }
+        }.buttonStyle(.plain).padding(16).frame(width: 190).background(Glass())
+        ZStack {
+            VStack(alignment: .leading, spacing: 18) {
+                HStack { Text("设备与布局").font(.system(size: 26, weight: .semibold)); Spacer(); Button("＋ 添加设备") { pairing = true }.buttonStyle(FlatButtonStyle()) }
+                ScrollView(.horizontal) { HStack(spacing: 10) { ForEach(model.devices) { d in DeviceTile(model: model, device: d, compact: true) } }.padding(1) }
+                Text("拖动调整方位，点击设备进行操作。").font(.caption).foregroundStyle(.secondary)
+                LayoutCanvas(model: model).padding(10).frame(maxHeight: .infinity).background(Palette.canvas, in: RoundedRectangle(cornerRadius: 20))
+                Text(model.notice).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                Divider(); HStack { Text("键鼠控制：" + (model.devices.first { $0.id == (model.state["active"] as? String) }?.name ?? "本机")).font(.caption); Spacer(); Button("返回本机 · Control + Option + F12") { model.release() }.buttonStyle(.plain).font(.caption) }
+            }.opacity(settings || model.adbDevice != nil || model.sidebarPage != "devices" ? 0 : 1).allowsHitTesting(!settings && model.adbDevice == nil && model.sidebarPage == "devices").accessibilityHidden(settings || model.adbDevice != nil || model.sidebarPage != "devices")
+            SettingsView(model: model, active: settings).opacity(settings && model.adbDevice == nil && !model.permissionsVisible ? 1 : 0).allowsHitTesting(settings && model.adbDevice == nil && !model.permissionsVisible).accessibilityHidden(!settings || model.adbDevice != nil || model.permissionsVisible)
+            if model.permissionsVisible { DevicePermissionsView(model: model) }
+            if model.sidebarPage == "adb", model.adbDevice == nil { AdbHubView(model: model) }
+            if model.sidebarPage == "information" { InformationView(model: model, pairing: $pairing) }
+            if let device = model.adbDevice { AdbAuthorizationView(model: model, device: device).id(device.id) }
+        }.padding(28).frame(maxWidth: .infinity, maxHeight: .infinity).background(Palette.surface, in: RoundedRectangle(cornerRadius: 22)).padding(.trailing, 16).padding(.bottom, 16)
+    }.frame(minWidth: 1050, minHeight: 720).sheet(isPresented: $pairing) { PairingView(model: model) }.onChange(of: model.adbDevice?.id) { _, id in if id != nil { settings = false } } }
+}
+struct InformationView: View {
+    @ObservedObject var model: Model; @Binding var pairing: Bool
+    var body: some View { VStack(alignment: .leading, spacing: 24) {
+        Text("我的信息").font(.title2)
+        VStack(alignment: .leading, spacing: 18) {
+            Text(model.state["name"] as? String ?? "本机").font(.title3)
+            Text("设备标识：" + (model.state["id"] as? String ?? "")).textSelection(.enabled)
+            Text("所属组：" + (model.state["groupId"] as? String ?? "")).textSelection(.enabled)
+        }.padding(24).frame(maxWidth: .infinity, alignment: .leading).background(.white, in: RoundedRectangle(cornerRadius: 20))
+        Button("添加设备 / 管理组") { pairing = true }; Spacer()
+    }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).background(Palette.surface).buttonStyle(FlatButtonStyle()) }
+}
+struct AdbHubView: View {
+    @ObservedObject var model: Model
+    var body: some View { VStack(alignment: .leading, spacing: 24) {
+        Text("安卓 ADB 授权").font(.title2)
+        Text("选择本组手机，为其启用键鼠操作与自动恢复。").foregroundStyle(.secondary)
+        ScrollView { VStack(spacing: 16) { ForEach(model.devices.filter { $0.platform == "android" }) { device in
+            HStack { Text(device.name + (device.online ? " · 在线" : " · 离线")); Spacer(); Button("管理授权") { model.showAdb(device) }.disabled(!device.online) }.padding(24).background(.white, in: RoundedRectangle(cornerRadius: 20))
+        } } }
+        if !model.devices.contains(where: { $0.platform == "android" }) { Text("本组暂无安卓设备，请先添加手机。").foregroundStyle(.secondary) }
+    }.frame(maxWidth: .infinity,maxHeight: .infinity,alignment: .topLeading).background(Palette.surface).buttonStyle(FlatButtonStyle()) }
+}
+struct DevicePermissionsView: View {
+    @ObservedObject var model: Model
+    @State private var devices: [[String: Any]] = []
+    @State private var message = "正在读取组内权限…"
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack { Text("本组设备权限").font(.title2); Spacer(); Button("返回设备") { model.permissionsVisible = false; model.sidebarPage = "devices" } }
+            Text(message).font(.caption).foregroundStyle(.secondary)
+            ScrollView { VStack(spacing: 16) {
+                ForEach(devices.indices, id: \.self) { index in deviceCard(devices[index]) }
+            } }
+        }.frame(maxWidth: .infinity, maxHeight: .infinity).background(Palette.surface).buttonStyle(FlatButtonStyle())
+        .task {
+            while !Task.isCancelled {
+                do { let result = try await model.call("group-permissions"); devices = result["devices"] as? [[String: Any]] ?? []; message = "自动刷新 · 应用开关、系统能力以及对本电脑的授权" }
+                catch { message = error.localizedDescription }
+                do { try await Task.sleep(nanoseconds: 4_000_000_000) } catch { break }
+            }
+        }
+    }
+    func deviceCard(_ device: [String: Any]) -> some View {
+        let rows = device["permissions"] as? [[String: Any]] ?? []
+        return VStack(alignment: .leading, spacing: 14) {
+            Text((device["name"] as? String ?? "设备") + (device["online"] as? Bool == true ? " · 在线" : " · 离线")).font(.headline)
+            if let note = device["message"] as? String, !note.isEmpty { Text(note).font(.caption).foregroundStyle(.secondary) }
+            ForEach(rows.indices, id: \.self) { index in
+                HStack {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(rows[index]["label"] as? String ?? "")
+                        Text("应用：" + (rows[index]["app"] as? String ?? "未知") + "   系统：" + (rows[index]["system"] as? String ?? "未知") + "   对本机：" + (rows[index]["consent"] as? String ?? "未知")).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer(); Text(rows[index]["status"] as? String ?? "未知").font(.caption)
+                }
+            }
+            if device["local"] as? Bool == true {
+                Divider(); Text("本机协作权限").font(.headline)
+                ForEach(["input", "screen", "clipboard", "shutdown"], id: \.self) { key in
+                    Toggle(["input":"允许控制键鼠", "screen":"允许查看屏幕", "clipboard":"共享剪贴板", "shutdown":"允许远程关机"][key]!, isOn: Binding(get: { model.permissions[key] == true }, set: { value in model.perform("settings", ["permissions": [key:value]]) }))
+                }
+                Text("macOS 系统权限需在系统设置中允许。").font(.caption).foregroundStyle(.secondary)
+            }
+            if let engine = device["engine"] as? [String: Any] { Text(engine["message"] as? String ?? "").font(.caption).foregroundStyle(.secondary) }
+            if device["platform"] as? String == "android", device["online"] as? Bool == true {
+                Button("ADB 键鼠授权 / 自动恢复") { model.showAdb(Device(id: device["id"] as? String ?? "", name: device["name"] as? String ?? "手机", platform: "android", online: true)) }
+            }
+        }.padding(22).frame(maxWidth: .infinity, alignment: .leading).background(Color.white, in: RoundedRectangle(cornerRadius: 20))
+    }
+}
+
+struct AdbAuthorizationView: View {
+    @ObservedObject var model: Model; let device: Device
+    @State var transports: [[String: String]] = []; @State var selected = ""; @State var message = ""
+    @State var busy = false; @State var authorizing = false
+    func refresh() async {
+        guard !busy else { return }; busy = true; selected = ""; defer { busy = false }
+        do { let result = try await model.call("adb-devices"); transports = (result["devices"] as? [[String: Any]] ?? []).map { ["serial": $0["serial"] as? String ?? "", "status": $0["status"] as? String ?? "", "model": $0["model"] as? String ?? "Android 设备"] }; message = result["message"] as? String ?? ""; if message.isEmpty { message = transports.isEmpty ? "未检测到手机，请检查数据线和 USB 调试。" : "选择与上方对应的手机。启用时会核对应用并等待目标手机确认。" } }
+        catch { message = error.localizedDescription }
+    }
+    func authorize() async {
+        guard !busy, !selected.isEmpty else { return }; busy = true; authorizing = true; defer { busy = false; authorizing = false }
+        message = "请留意手机上的 LanLink 授权提示，并确认允许此电脑启用增强控制…"
+        do { let result = try await model.call("adb-authorize", ["id": device.id, "serial": selected]); message = result["message"] as? String ?? "增强控制已启用，可以返回设备页开始控制。" }
+        catch { message = error.localizedDescription.hasPrefix("CONSENT_PENDING:") ? "请在手机的 LanLink 中同意此电脑的请求，同意后再次点击授权。" : error.localizedDescription }
+    }
+    func transportStatus(_ value: String) -> String { ["device": "可授权", "unauthorized": "等待手机允许 USB 调试", "offline": "离线，请重新连接"][value] ?? value }
+    var body: some View { VStack(alignment: .leading, spacing: 22) {
+        HStack { Text("ADB 键鼠授权").font(.system(size: 26, weight: .semibold)); Spacer(); Button("返回手机列表") { model.adbDevice = nil; model.sidebarPage = "adb" } }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                Text("为 " + device.name + " 启用 ADB 增强控制").font(.headline)
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("连接手机，开启增强控制").font(.title3.weight(.semibold))
+                    Text("1  用 USB 连接手机，在开发者选项中开启「USB 调试」。\n2  解锁手机，确认「允许 USB 调试」，然后刷新下方设备。\n3  选择对应手机，点击授权，并在手机的 LanLink 中确认。").lineSpacing(8)
+                    Text("电脑需安装 Android SDK Platform-Tools，可通过 Android Studio 的 SDK 管理器安装。部分手机还需开启厂商的「USB 调试（安全设置）」。应用重启后助手会重连；手机重启后，已信任的 USB / 无线调试可用时自动恢复。").font(.caption).foregroundStyle(.secondary)
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(22).background(.white, in: RoundedRectangle(cornerRadius: 18))
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack { Text("连接到这台 Mac 的手机").font(.headline); Spacer(); Button("刷新设备") { Task { await refresh() } }.disabled(busy) }
+                    ForEach(Array(transports.enumerated()), id: \.offset) { item in
+                        let transport = item.element
+                        let serial = transport["serial"] ?? "", status = transport["status"] ?? ""
+                        Button { selected = serial } label: { HStack(spacing: 12) { Image(systemName: selected == serial ? "largecircle.fill.circle" : "circle").foregroundStyle(.blue); VStack(alignment: .leading, spacing: 5) { Text((transport["model"] ?? "Android 设备").replacingOccurrences(of: "_", with: " ") + " · " + transportStatus(status)); Text(serial).font(.caption).foregroundStyle(.secondary) }; Spacer() }.padding(.vertical, 7).contentShape(Rectangle()) }.buttonStyle(.plain).disabled(status != "device" || busy)
+                    }
+                }.padding(22).frame(maxWidth: .infinity, alignment: .leading).background(.white, in: RoundedRectangle(cornerRadius: 18))
+            }.frame(maxWidth: 800).frame(maxWidth: .infinity)
+        }
+        HStack(spacing: 18) { Button("取消自动恢复") { Task { do { let result = try await model.call("adb-forget", ["id": device.id]); message = result["message"] as? String ?? "已取消自动恢复" } catch { message = error.localizedDescription } } }.disabled(busy); Text(message).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true); Spacer(); Button(authorizing ? "正在授权…" : "为选中手机授权") { Task { await authorize() } }.disabled(busy || selected.isEmpty) }
+    }.buttonStyle(FlatButtonStyle()).background(Palette.surface).task { await refresh() } }
+}
+struct PermissionHelpView: View {
+    @ObservedObject var model: Model
+    var body: some View { VStack(alignment: .leading, spacing: 18) {
+        Text("开启协作权限").font(.title2)
+        Text("完成授权后，等待中的远程窗口会自动重试。").font(.caption).foregroundStyle(.secondary)
+        ForEach(["input", "screen", "clipboard", "shutdown"], id: \.self) { key in
+            let allowed = model.permissions[key] == true
+            let system = (model.state["capabilities"] as? [String: Any])?[key] as? Bool != false
+            HStack {
+                Text(["input": "键鼠操作", "screen": "屏幕录制", "clipboard": "剪贴板与文件", "shutdown": "远程关机"][key]!)
+                Spacer()
+                Button(allowed && system ? "已授权" : "开启权限") {
+                    if !allowed { model.perform("settings", ["permissions": [key: true]]) }
+                    if !system && (key == "input" || key == "screen") { NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?" + (key == "input" ? "Privacy_Accessibility" : "Privacy_ScreenCapture"))!) }
+                }.disabled(allowed && system)
+            }
+        }
+        Text("若 macOS 要求重启应用，请完成授权后重新打开 LanLink。").font(.caption).foregroundStyle(.secondary)
+    }.padding(24).buttonStyle(FlatButtonStyle()).background(Palette.surface) }
+}
+struct SettingsView: View {
+    @ObservedObject var model: Model; let active: Bool
+    @State var name = ""; @State var master = false; @State var permissions: [String: Bool] = [:]
+    @State var dirty = false; @State var saving = false; @State var status = "修改后点击保存；切换页面会保留草稿"
+    @State var logs = false
+    func mark() { dirty = true; status = "有未保存的更改 · 切换页面会保留草稿" }
+    func load() { name = model.state["name"] as? String ?? ""; master = model.isMaster; permissions = model.permissions; dirty = false }
+    func save() {
+        saving = true
+        Task { do { _ = try await model.call("settings", ["name": name, "master": master]); await model.refresh(); load(); status = "本机设置已保存" } catch { status = error.localizedDescription }; saving = false }
+    }
+    var body: some View { VStack(alignment: .leading, spacing: 20) {
+        HStack(alignment: .top) { VStack(alignment: .leading, spacing: 8) { Text("设置").font(.system(size: 26, weight: .semibold)); Text("管理设备名称、主设备与启动选项").font(.caption).foregroundStyle(.secondary) }; Spacer(); Button("保存设置", action: save).disabled(saving || model.state["id"] == nil) }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("基本信息").font(.headline)
+                    TextField("设备名称", text: Binding(get: { name }, set: { name = $0; mark() })).textFieldStyle(.roundedBorder).frame(maxWidth: 420)
+                    Toggle("本机作为键鼠主设备", isOn: Binding(get: { master }, set: { master = $0; mark() }))
+                }.padding(22).background(.white, in: RoundedRectangle(cornerRadius: 18))
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("应用").font(.headline)
+                    Toggle("登录 Mac 后自动启动 LanLink", isOn: Binding(get: { model.startupEnabled }, set: { model.setStartup($0) }))
+                    HStack { Button("运行记录") { logs.toggle() }; Button("退出 LanLink") { NSApp.terminate(nil) } }
+                    if logs { ForEach(Array((model.state["logs"] as? [[String: Any]] ?? []).enumerated()), id: \.offset) { item in Text(item.element["message"] as? String ?? "").font(.caption).foregroundStyle(.secondary) } }
+                }.padding(22).background(.white, in: RoundedRectangle(cornerRadius: 18))
+            }.frame(maxWidth: 820).frame(maxWidth: .infinity)
+        }
+        Text(status).font(.caption).foregroundStyle(.secondary)
+    }.buttonStyle(FlatButtonStyle()).toggleStyle(.switch)
+        .onAppear { load() }.onChange(of: active) { _, shown in if shown && !dirty { load() } }
+        .onChange(of: model.state["groupId"] as? String) { _, _ in load() }
+    }
+}
+struct PairingView: View {
+    @ObservedObject var model: Model; @Environment(\.dismiss) var dismiss
+    @State private var code = ""; @State private var input = ""; @State private var qr: NSImage?
+    @State private var showing = false; @State private var joining = false; @State private var busy = false
+    @State private var loading = false; @State private var alive = true; @State private var error = ""
+    @State private var deadline = Date.distantPast; @State private var now = Date(); @State private var duration = 60.0
+    @State private var host = ""
+    @State private var groupEstablished = false
+    private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    private var remaining: Double { max(0, deadline.timeIntervalSince(now)) }
+    private var formatted: String { code.count == 8 && remaining > 0 ? String(code.prefix(4)) + " " + String(code.suffix(4)) : "···· ····" }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack { Text("让设备相遇").font(.system(size: 25, weight: .semibold)); Spacer(); Button("完成") { dismiss() }.disabled(busy) }
+            Text("在同一局域网中，扫码或输入配对码即可加入你的离线组。").font(.callout).foregroundStyle(.secondary)
+            HStack(alignment: .center, spacing: 28) {
+                VStack(spacing: 12) {
+                    ZStack {
+                        if showing, remaining > 0, let qr { Image(nsImage: qr).resizable().interpolation(.none).scaledToFit() }
+                        else { Image(systemName: "qrcode").resizable().scaledToFit().padding(16).foregroundStyle(Color.blue.opacity(0.16)).redacted(reason: .placeholder) }
+                    }.frame(width: 190, height: 190)
+                    Button(showing ? "隐藏二维码" : "点击查看二维码") { showing.toggle(); qr = nil; Task { await refresh() } }.disabled(loading)
+                    Text("二维码与数字码同步刷新").font(.caption).foregroundStyle(.secondary)
+                }.padding(18).background(Palette.canvas, in: RoundedRectangle(cornerRadius: 22))
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("其他设备加入本组")
+                    Text(formatted).font(.system(size: 34, weight: .semibold, design: .monospaced)).foregroundStyle(.indigo).textSelection(.enabled)
+                    ProgressView(value: min(remaining / duration, 1)).tint(.indigo)
+                    Text(remaining > 0 ? "\(Int(ceil(remaining))) 秒后刷新 · 每分钟自动更换" : "正在刷新配对码…").font(.caption).foregroundStyle(.secondary)
+                    Text("让新设备扫码，或在「加入其他组」中输入上方八位数字。").font(.caption).foregroundStyle(.secondary)
+                    Button(joining ? "收起输入 ↑" : groupEstablished ? "解散当前组并加入其他组 →" : "加入其他组 →") { joining.toggle() }.disabled(busy)
+                    if joining {
+                        TextField("其他设备的八位数字配对码", text: $input).textFieldStyle(.roundedBorder).disabled(busy)
+                            .onChange(of: input) { value in input = String(value.filter { $0 >= "0" && $0 <= "9" }.prefix(8)) }
+                        Button(busy ? "正在配对…" : groupEstablished ? "解散当前组并加入其他组" : "配对并加入") { Task { await join() } }.disabled(busy)
+                    }
+                }.frame(width: 340)
+            }
+            if !error.isEmpty { Text(error).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+            DisclosureGroup("已配对设备无法自动连接？") {
+                HStack { TextField("已配对设备的局域网 IP", text: $host).textFieldStyle(.roundedBorder); Button("手动连接") { model.perform("connect", ["host": host, "port": 45831], success: "正在连接设备") } }.padding(.top, 8)
+            }.font(.caption).foregroundStyle(.secondary)
+        }.buttonStyle(FlatButtonStyle()).padding(28).background(Palette.surface).interactiveDismissDisabled(busy)
+        .task { alive = true; await refresh() }
+        .onReceive(timer) { value in now = value; if remaining <= 0 { qr = nil }; Task { await refresh() } }
+        .onDisappear { alive = false; qr = nil; Task { _ = try? await model.call("pairing-stop") } }
+    }
+    private func refresh() async {
+        guard alive, !loading, !busy else { return }; loading = true; defer { loading = false }
+        do {
+            let result = try await model.call("pairing", ["reveal": showing]); guard alive else { return }
+            groupEstablished = result["groupEstablished"] as? Bool ?? false
+            code = result["code"] as? String ?? ""; now = Date(); deadline = now.addingTimeInterval((result["remainingMs"] as? Double ?? 0) / 1000)
+            duration = (result["durationMs"] as? Double ?? 60000) / 1000
+            if showing, let data = result["qr"] as? String, let suffix = data.split(separator: ",").last, let bytes = Data(base64Encoded: String(suffix)) { qr = NSImage(data: bytes) }
+        } catch { code = ""; qr = nil; deadline = .distantPast; self.error = error.localizedDescription }
+    }
+    private func join() async {
+        guard input.count == 8, input.allSatisfy({ $0 >= "0" && $0 <= "9" }) else { error = "请输入完整的八位数字配对码。"; return }
+        busy = true; defer { busy = false }
+        do {
+            let state = try await model.call("state")
+            groupEstablished = state["groupEstablished"] as? Bool ?? false
+            let alert = NSAlert(); alert.messageText = groupEstablished ? "解散当前组并加入其他组？" : "加入其他组？"
+            alert.informativeText = groupEstablished ? "原组所有设备都会退出，并断开控制。离线设备收到解散通知后退出。先验证新组配对码，成功后才解散原组。" : "本机将加入对方的组，在同一局域网内自动连接。"
+            alert.addButton(withTitle: "加入"); alert.addButton(withTitle: "取消")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            _ = try await model.call("join", ["code": input, "dissolveCurrentGroup": groupEstablished, "expectedGroup": state["groupId"] as? String ?? ""])
+            await model.refresh(); dismiss()
+        } catch { self.error = error.localizedDescription }
+    }
+}
+
+@MainActor final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+    let model = Model(); var mainWindow: NSWindow!
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        mainWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1250, height: 820), styleMask: [.titled, .closable, .resizable, .miniaturizable, .fullSizeContentView], backing: .buffered, defer: false)
+        mainWindow.title = "LanLink"; mainWindow.titlebarAppearsTransparent = true; mainWindow.isReleasedWhenClosed = false; mainWindow.delegate = self
+        mainWindow.contentViewController = NSHostingController(rootView: Home(model: model)); mainWindow.center(); mainWindow.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); model.launch()
+        let menu = NSMenu(); let root = NSMenuItem(); menu.addItem(root); let appMenu = NSMenu(); root.submenu = appMenu; appMenu.addItem(withTitle: "退出 LanLink", action: #selector(quitApp), keyEquivalent: "q")
+        let edit = NSMenuItem(); edit.title = "编辑"; menu.addItem(edit); let editMenu = NSMenu(title: "编辑"); edit.submenu = editMenu; editMenu.addItem(withTitle: "复制", action: #selector(NSText.copy(_:)), keyEquivalent: "c"); editMenu.addItem(withTitle: "粘贴", action: #selector(NSText.paste(_:)), keyEquivalent: "v"); editMenu.addItem(withTitle: "全选", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"); NSApp.mainMenu = menu
+    }
+    @objc func showMain() { mainWindow.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
+    @objc func releaseControl() { model.release() }
+    @objc func quitApp() { NSApp.terminate(nil) }
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showMain(); return true }
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply { model.quit(); return .terminateLater }
+    func windowShouldClose(_ sender: NSWindow) -> Bool { if sender === mainWindow { sender.orderOut(nil); model.release(); return false }; if sender === model.remoteWindow { model.closeRemote() }; if sender === model.permissionWindow { model.permissionWindow = nil; model.perform("permission-dismiss") }; return true }
+    func windowDidResignKey(_ notification: Notification) { if let w = notification.object as? NSWindow, w === model.remoteWindow, model.controlling, !model.showingInputModeDialog { model.release() } }
+}
+
+@main struct LanLinkApp: App { @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate; var body: some Scene { Settings { EmptyView() } } }

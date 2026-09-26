@@ -1,0 +1,22 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'com.lanlink.app'
+    compileSdk 35
+    defaultConfig { applicationId 'com.lanlink.app'; minSdk 29; targetSdk 35; versionCode 12; versionName '0.3.10'; testInstrumentationRunner 'com.lanlink.app.PermissionFlowTest' }
+    signingConfigs {
+        debug {
+            // Reuse this workspace's existing test signer so Studio can update the
+            // previously supplied debug APK without uninstalling its local account.
+            def localStore = rootProject.file('../.tools/android-debug.p12')
+            if (localStore.exists()) {
+                storeFile localStore
+                storeType 'PKCS12'
+                storePassword 'android'
+                keyAlias 'androiddebugkey'
+                keyPassword 'android'
+            }
+        }
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+}
+dependencies { implementation 'com.google.zxing:core:3.5.3' }
