@@ -2,35 +2,32 @@ import SwiftUI
 import AppKit
 
 struct RemoteView: View {
-    @ObservedObject var model: Model; @State var text = ""; @State var textPopover = false
-    var fallback: Bool { model.remotePhone && model.inputMode(model.remoteID ?? "") == "accessibility-limited" }
-    func start() { model.autoControl = true; model.freshControl = true; model.fallbackAccepted = false; model.controlConflict = false; Task { await model.beginRemoteControl() } }
-    func paste() { if let id = model.remoteID { model.perform("paste", ["id": id]) } }
-    func sendText() { if let id = model.remoteID { model.perform("text", ["id": id, "text": text]); text = ""; textPopover = false } }
-    var status: some View { HStack(spacing: 6) { Text(model.controlling ? "正在控制" : "查看模式"); if fallback { Text("无障碍备用 · 拖动受限").foregroundStyle(.orange) }; Spacer(minLength: 2); Text(model.notice.replacingOccurrences(of: "CONTROL_CONFLICT: ", with: "").replacingOccurrences(of: "CONSENT_PENDING: ", with: "").replacingOccurrences(of: "CONSENT_DENIED: ", with: "").replacingOccurrences(of: "PERMISSION_REQUIRED: ", with: "")).lineLimit(1) }.font(.system(size: model.remotePhone ? 10 : 12)).foregroundStyle(.secondary).help(model.notice) }
-    var body: some View { VStack(spacing: model.remotePhone ? 4 : 12) {
-        if model.remotePhone {
-            HStack(spacing: 4) {
-                RemoteSurface(model: model).frame(maxWidth: .infinity, maxHeight: .infinity).background(.black.opacity(0.90), in: RoundedRectangle(cornerRadius: 6)).clipped()
-                VStack(spacing: 4) {
-                    RemoteTool(symbol: "play", title: "开始控制", action: start)
-                    RemoteTool(symbol: "pause", title: "停止键鼠控制", action: model.release)
-                    Divider().padding(.vertical, 6)
-                    ForEach(["back", "home", "recents"], id: \.self) { action in RemoteTool(symbol: ["back": "chevron.left", "home": "circle", "recents": "square"][action]!, title: ["back": "返回", "home": "主页", "recents": "最近任务"][action]!) { model.sendInput(["kind": "navigation", "action": action]) }.disabled(!model.controlling) }
-                    Divider().padding(.vertical, 6)
-                    RemoteTool(symbol: "doc.on.clipboard", title: "粘贴", action: paste).disabled(!model.controlling)
-                    RemoteTool(symbol: "keyboard", title: "输入文字") { textPopover = true }.disabled(!model.controlling).popover(isPresented: $textPopover) { VStack(alignment: .leading, spacing: 12) { Text("发送到手机的文字").font(.headline); TextField("输入文本", text: $text).textFieldStyle(.roundedBorder); Button("发送", action: sendText).disabled(!model.controlling) }.padding(18).frame(width: 260) }
-                    RemoteTool(symbol: "cable.connector", title: "ADB 键鼠授权") { if let d = model.devices.first(where: { $0.id == model.remoteID }) { model.showAdb(d) } }
-                    Spacer(minLength: 0)
-                }.frame(width: 44)
-            }
-        } else {
-            HStack { Button(model.controlling ? "停止控制" : "开始控制") { if model.controlling { model.release() } else { start() } }; Spacer(); Button("粘贴", action: paste).disabled(!model.controlling) }
-            HStack { TextField("输入文本", text: $text); Button("发送", action: sendText).disabled(!model.controlling) }
-            RemoteSurface(model: model).frame(maxWidth: .infinity, maxHeight: .infinity).background(.black.opacity(0.90), in: RoundedRectangle(cornerRadius: 12))
+    @ObservedObject var model:Model;@State var text="";@State var textPopover=false
+    func start(){model.autoControl=true;model.freshControl=true;model.fallbackAccepted=false;model.controlConflict=false;Task{await model.beginRemoteControl()}}
+    func paste(){if let id=model.remoteID{model.perform("paste",["id":id])}}
+    func sendText(){if let id=model.remoteID{model.perform("text",["id":id,"text":text]);text="";textPopover=false}}
+    var metrics:some View{VStack(alignment:.trailing,spacing:4){Text(model.controlling ? "正在控制":"仅查看");Text(model.remoteCodec);Text(String(format:"%.0f fps",model.remoteFPS));Text(model.remoteBitrate>0 ? String(format:"%.1f Mbps",model.remoteBitrate/1_000_000):"-- Mbps")}.font(.system(size:10)).foregroundStyle(.gray).lineLimit(1).truncationMode(.tail).frame(width:58,alignment:.trailing).clipped().help(model.notice)}
+    var body:some View{HStack(spacing:0){
+        VStack(spacing:4){
+            RemoteSurface(model:model).frame(maxWidth:.infinity,maxHeight:.infinity).background(.black).clipped()
+            ZStack(alignment:.trailing){
+                if model.remotePhone{HStack(spacing:4){ForEach(["back","home","recents"],id:\.self){action in RemoteNavigationTool(symbol:["back":"chevron.left","home":"circle","recents":"square"][action]!,title:["back":"返回","home":"主页","recents":"最近任务"][action]!){model.sendInput(["kind":"navigation","action":action])}.disabled(!model.controlling)}}.frame(maxWidth:.infinity)}
+                Button(action:model.toggleRemoteSidebar){Image(systemName:model.remoteSidebarCollapsed ? "chevron.right":"chevron.left").frame(width:28,height:40)}.buttonStyle(.plain).foregroundStyle(.gray).help(model.remoteSidebarCollapsed ? "展开侧栏":"收起侧栏")
+            }.frame(maxWidth:.infinity).frame(height:model.remotePhone ? 48:40)
         }
-        status.padding(.horizontal, model.remotePhone ? 4 : 0)
-    }.buttonStyle(FlatButtonStyle()).padding(model.remotePhone ? 4 : 18).frame(minWidth: model.remotePhone ? 280 : 320, minHeight: 320).background(Palette.surface) }
+        VStack(spacing:4){
+            RemoteTool(symbol:"play",title:"开始控制",action:start)
+            RemoteTool(symbol:"pause",title:"停止键鼠控制",action:model.release)
+            RemoteTool(symbol:"doc.on.clipboard",title:"粘贴",action:paste).disabled(!model.controlling)
+            RemoteTool(symbol:"keyboard",title:"输入文字"){textPopover=true}.disabled(!model.controlling).popover(isPresented:$textPopover){VStack(alignment:.leading,spacing:12){Text("发送文字").font(.headline);TextField("输入文本",text:$text);Button("发送",action:sendText)}.padding(18).frame(width:260)}
+            if model.remotePhone{RemoteTool(symbol:"cable.connector",title:"ADB 授权"){if let id=model.remoteID{model.perform("adb-guide-open",["id":id])}}}
+            Spacer(minLength:8);metrics.padding(.bottom,6)
+        }.frame(width:64).padding(.bottom,model.remotePhone ? 52:44).frame(width:model.remoteSidebarExtent,alignment:.leading).clipped().disabled(model.remoteSidebarCollapsed).accessibilityHidden(model.remoteSidebarCollapsed)
+    }.padding(4).frame(minWidth:(model.remotePhone ? 270:320)+model.remoteSidebarExtent,minHeight:360).background(.black).preferredColorScheme(.dark)}
+}
+struct RemoteNavigationTool: View {
+    let symbol: String; let title: String; let action: () -> Void
+    var body: some View { Button(action: action) { Image(systemName: symbol).font(.system(size: 26)).frame(width: 64, height: 46).contentShape(RoundedRectangle(cornerRadius: 10)) }.buttonStyle(.plain).foregroundStyle(.secondary).help(title).accessibilityLabel(title) }
 }
 struct RemoteTool: View {
     let symbol: String; let title: String; let action: () -> Void
@@ -38,7 +35,7 @@ struct RemoteTool: View {
 }
 struct RemoteSurface: NSViewRepresentable {
     @ObservedObject var model: Model
-    func makeNSView(context: Context) -> InputSurface { let view = InputSurface(); view.model = model; return view }
+    func makeNSView(context: Context) -> InputSurface { let view = InputSurface(); view.model = model; model.remoteSurface=view; return view }
     func updateNSView(_ view: InputSurface, context: Context) { view.picture = model.screen; view.needsDisplay = true }
 }
 @MainActor final class InputSurface: NSView {
@@ -52,7 +49,8 @@ struct RemoteSurface: NSViewRepresentable {
         let size = NSSize(width: image.size.width * scale, height: image.size.height * scale)
         return NSRect(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2, width: size.width, height: size.height)
     }
-    override func draw(_ dirtyRect: NSRect) { picture?.draw(in: pictureRect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil) }
+    var countedPicture:NSImage?
+    override func draw(_ dirtyRect: NSRect) { picture?.draw(in: pictureRect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil);if picture !== countedPicture{countedPicture=picture;if picture != nil{model?.remotePresented()}} }
     override func updateTrackingAreas() { super.updateTrackingAreas(); if let tracking { removeTrackingArea(tracking) }; let area = NSTrackingArea(rect: .zero, options: [.activeInKeyWindow, .mouseMoved, .inVisibleRect], owner: self); addTrackingArea(area); tracking = area }
     func coordinates(_ event: NSEvent) -> [String: Any]? {
         let point = convert(event.locationInWindow, from: nil); let rect = pictureRect

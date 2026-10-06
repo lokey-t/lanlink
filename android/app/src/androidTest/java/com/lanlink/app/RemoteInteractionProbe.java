@@ -202,7 +202,9 @@ final class RemoteInteractionProbe {
                               "id",
                               message.getString("id"),
                               "result",
-                              Wire.obj()));
+                              "permission-status".equals(message.optString("method"))
+                                  ? Wire.obj("permissions",Wire.obj("input",Wire.obj("appEnabled",true,"systemGranted",true,"peerAllowed",true),"screen",Wire.obj("appEnabled",true,"systemGranted",true,"peerAllowed",true)))
+                                  : Wire.obj()));
                       if ("release".equals(message.optString("method"))) released.countDown();
                     }
                   } catch (Exception e) {

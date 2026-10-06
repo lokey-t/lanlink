@@ -5,7 +5,7 @@ import android.os.Bundle;
 import android.view.Surface;
 import java.nio.ByteBuffer;
 
-final class VideoEncoder implements AutoCloseable {
+final class VideoEncoder implements VideoSource {
   interface Output {
     void frame(VideoWire.Frame frame);
 
@@ -26,6 +26,8 @@ final class VideoEncoder implements AutoCloseable {
     format.setInteger(MediaFormat.KEY_FRAME_RATE, 30);
     format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1);
     format.setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0);
+    format.setFloat(MediaFormat.KEY_MAX_FPS_TO_ENCODER, 30);
+    format.setLong(MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER, 100_000L);
     MediaCodec created = MediaCodec.createEncoderByType("video/avc");
     Surface input = null;
     try {
@@ -74,7 +76,10 @@ final class VideoEncoder implements AutoCloseable {
                   }
                 }
               } catch (Exception error) {
-                if (!closed) output.failed();
+                if (!closed) {
+                  android.util.Log.w("LanLinkVideo", "Encoder interrupted", error);
+                  output.failed();
+                }
               } finally {
                 try {
                   codec.stop();
@@ -95,7 +100,7 @@ final class VideoEncoder implements AutoCloseable {
     return data;
   }
 
-  void setBitrate(int rate) {
+  public void setBitrate(int rate) {
     if (closed) return;
     try {
       Bundle b = new Bundle();
@@ -105,7 +110,7 @@ final class VideoEncoder implements AutoCloseable {
     }
   }
 
-  void requestKey() {
+  public void requestKey() {
     if (closed || System.currentTimeMillis() - syncAt < 500) return;
     syncAt = System.currentTimeMillis();
     try {

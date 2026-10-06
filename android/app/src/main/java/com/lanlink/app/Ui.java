@@ -157,6 +157,18 @@ final class Ui {
     return frame;
   }
 
+  View clipboardShortcuts(Runnable upload, Runnable download) {
+    LinearLayout group=row();group.setBackground(shape(LILAC,16));group.setClipToOutline(true);
+    group.setContentDescription("快捷同步剪贴板");
+    for(int i=0;i<2;i++) {
+      if(i==1){View divider=new View(context);divider.setBackgroundColor(0xffd8d1ed);group.addView(divider,new LinearLayout.LayoutParams(dp(1),dp(24)));}
+      FrameLayout button=new FrameLayout(context);button.setContentDescription(i==0?"上传剪贴板":"下载剪贴板");button.setBackground(touch(Color.TRANSPARENT,0));
+      button.addView(icon(i==0?"clipboard-upload":"clipboard-download",PURPLE),new FrameLayout.LayoutParams(dp(24),dp(24),Gravity.CENTER));
+      Runnable action=i==0?upload:download;button.setOnClickListener(v->action.run());group.addView(button,new LinearLayout.LayoutParams(dp(48),dp(48)));
+    }
+    return group;
+  }
+
   static final class Glyph extends View {
     final String name;
     final int color;
@@ -205,6 +217,19 @@ final class Ui {
           line(c, 12, 17, 12, 21);
           line(c, 7, 21, 17, 21);
           break;
+        case "center":
+          rect(c,2,3,22,10,2);rect(c,2,14,11,22,2);rect(c,15,14,22,22,2);line(c,6,6.5f,18,6.5f);break;
+        case "files":
+          Path folder=new Path();folder.moveTo(2,7);folder.lineTo(2,5);folder.quadTo(2,3,4,3);folder.lineTo(10,3);folder.lineTo(13,6);folder.lineTo(20,6);folder.quadTo(22,6,22,8);folder.lineTo(22,19);folder.quadTo(22,21,20,21);folder.lineTo(4,21);folder.quadTo(2,21,2,19);folder.close();c.drawPath(folder,p);line(c,7,12,17,12);line(c,7,16,14,16);break;
+        case "upload":
+          line(c,4,16,4,21);line(c,4,21,20,21);line(c,20,21,20,16);line(c,12,16,12,3);line(c,7,8,12,3);line(c,12,3,17,8);break;
+        case "download":
+          line(c,4,16,4,21);line(c,4,21,20,21);line(c,20,21,20,16);line(c,12,3,12,16);line(c,7,11,12,16);line(c,12,16,17,11);break;
+        case "clipboard-upload":
+        case "clipboard-download":
+          Path board=new Path();board.moveTo(8,5);board.lineTo(5,5);board.quadTo(3,5,3,7);board.lineTo(3,20);board.quadTo(3,22,5,22);board.lineTo(14,22);board.quadTo(16,22,16,20);board.lineTo(16,18);c.drawPath(board,p);
+          Path clip=new Path();clip.moveTo(7,2);clip.lineTo(12,2);clip.quadTo(13,2,13,3);clip.lineTo(13,6);clip.lineTo(6,6);clip.lineTo(6,3);clip.quadTo(6,2,7,2);c.drawPath(clip,p);
+          line(c,6,11,11,11);line(c,6,15,10,15);line(c,19,4,19,15);boolean up=name.equals("clipboard-upload");line(c,15,up?8:11,19,up?4:15);line(c,19,up?4:15,23,up?8:11);break;
         case "plus":
           line(c, 12, 5, 12, 19);
           line(c, 5, 12, 19, 12);

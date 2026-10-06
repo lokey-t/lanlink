@@ -32,7 +32,7 @@ final class ShellAuth {
     StringBuilder value = new StringBuilder();
     int c;
     while ((c = in.read()) != -1 && c != '\n') {
-      if (value.length() >= 65536) throw new IOException("消息过大");
+      if (value.length() >= 6000000) throw new IOException("消息过大");
       value.append((char) c);
     }
     if (c == -1) throw new EOFException();
@@ -59,7 +59,7 @@ final class ShellAuth {
     JSONObject hello = new JSONObject(line(in));
     String s = hello.getString("challenge"), c = nonce();
     if (hello.optInt("protocol") != 2 || s.length() != 32) throw new IOException("助手协议不兼容");
-    write(out, Wire.obj("nonce", c, "proof", proof(secret, "helper", s, c), "agentVersion", 3));
+    write(out, Wire.obj("nonce", c, "proof", proof(secret, "helper", s, c), "agentVersion", 10));
     check(proof(secret, "app", s, c), new JSONObject(line(in)).getString("proof"));
   }
 }

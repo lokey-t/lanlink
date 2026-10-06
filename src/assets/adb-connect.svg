@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 110" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="3">
+  <path stroke="#7185A3" d="M 64 15 L 98 15 Q 106 15 106 23 L 106 87 Q 106 95 98 95 L 64 95 Q 56 95 56 87 L 56 23 Q 56 15 64 15 M 74 24 L 88 24 M 76 86 L 86 86"/>
+  <path stroke="#CAD7EA" d="M 108 55 L 275 55"/>
+  <path id="signal" stroke="#648DF3" d="M 134 55 L 151 55 M 145 49 L 151 55 L 145 61"><animateTransform attributeName="transform" type="translate" values="0 0;80 0" dur="1.8s" repeatCount="indefinite"/><animate attributeName="opacity" values=".25;1;.25" dur="1.8s" repeatCount="indefinite"/></path>
+  <path stroke="#7185A3" d="M 286 22 L 344 22 Q 352 22 352 30 L 352 70 Q 352 78 344 78 L 286 78 Q 278 78 278 70 L 278 30 Q 278 22 286 22 M 304 78 L 304 93 M 326 78 L 326 93 M 295 93 L 335 93"/>
+</svg>

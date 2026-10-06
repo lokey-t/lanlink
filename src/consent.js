@@ -10,6 +10,13 @@ export class Consent {
     return [...this.pending.values()];
   }
   allowed(id, permission) { return this.grants[id]?.[permission] === true; }
+  request(id, name, now=Date.now()) {
+    this.list(now);
+    if(this.pending.has(id))return;
+    if(this.denied.has(id))throw Error('CONSENT_DENIED: 对方暂未同意，请稍后再试');
+    if(this.pending.size>=8)throw Error('待确认请求过多');
+    this.pending.set(id,{id,requestId:randomUUID(),name:String(name||'组内设备').replace(/[\x00-\x1f]/g,'').slice(0,80),expires:now+120000});
+  }
   require(id, name, permission, now = Date.now()) {
     this.list(now);
     if (Object.hasOwn(this.grants, id)) {

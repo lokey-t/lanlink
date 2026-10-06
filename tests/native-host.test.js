@@ -17,11 +17,11 @@ test('native inherited-pipe host persists settings, rejects unknown actions and 
   const exit = new Promise(resolve => child.on('exit', resolve));
   createInterface({ input: child.stdout }).on('line', line => {
     const m = JSON.parse(line); if (m.ready) startup();
-    const promise = pending.get(m.id); if (promise) { pending.delete(m.id); m.error ? promise.reject(new Error(m.error)) : promise.resolve(m.result); }
+    const promise = pending.get(m.id); if (promise) { pending.delete(m.id); m.error ? promise.reject(new Error(promise.method+': '+m.error)) : promise.resolve(m.result); }
   });
   t.after(async () => { child.stdin.end(); await exit; await rm(dir, { recursive: true, force: true }); });
   await ready;
-  const call = (method, args = {}) => new Promise((resolve, reject) => { const id = String(++seq); pending.set(id, { resolve, reject }); child.stdin.write(JSON.stringify({ id, method, args }) + '\n'); });
+  const call = (method, args = {}) => new Promise((resolve, reject) => { const id = String(++seq); pending.set(id, { resolve, reject, method }); child.stdin.write(JSON.stringify({ id, method, args }) + '\n'); });
   await Promise.all([call('settings', { name: 'Native UI' }), call('settings', { dwell: 600 })]);
   const state = await call('state'); assert.equal(state.name, 'Native UI'); assert.equal(state.dwell, 600); assert.equal(state.capabilities.simulated, true);
   assert.match((await call('pairing', { reveal: true })).qr, /^data:image\/gif;base64,/);

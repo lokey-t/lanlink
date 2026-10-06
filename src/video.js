@@ -4,6 +4,8 @@ import { spawn } from 'node:child_process';
 import { packFrame, serverHandshake, connectVideo } from './video-wire.js';
 import { ffmpegPath, chooseEncoder, encoderArgs, AnnexBParser, createDecoder } from './video-codec.js';
 import { AdaptiveVideo, VideoFeedback } from './adaptive-video.js';
+import {RtcVideo} from './rtc-video.js';
+import {FrameRate} from './frame-rate.js';
 const pause = ms => new Promise(r => setTimeout(r, ms));
 
 export function captureVideo(native, h264, emit, failure, options = {}) {
@@ -41,6 +43,12 @@ export class VideoHost {
     const id = randomUUID(), secret = randomBytes(32), session = { id, peer, expires: Date.now() + 10000, sockets: new Set(), adaptive: new AdaptiveVideo(), generation: 0 };
     this.sessions.set(id, session);
     const fail = () => this.close(id);
+    const startSource=(send,queued)=>{
+      let waitingKey=true,blockedAt=0;
+      const emit=frame=>{if(!this.sessions.has(id))return;try{s.authorize(peer,'screen');if(queued()>128*1024){waitingKey=true;blockedAt||=Date.now();if(Date.now()-blockedAt>2000)fail();return;}blockedAt=0;if(waitingKey&&frame.codec==='h264'&&!frame.key)return;if(frame.codec!=='ping')waitingKey=false;session.lastSent=Date.now();if(send(frame)===false)waitingKey=true;}catch{fail();}};
+      session.ping=()=>emit({codec:'ping',width:1,height:1,key:false,data:Buffer.alloc(0)});
+      session.restart=()=>{const generation=++session.generation;session.source?.close();waitingKey=true;session.source=(s.options.videoSource||captureVideo)(s.native,options.h264===true,frame=>{if(generation===session.generation)emit(frame);},()=>{if(generation===session.generation)fail();},{bitrate:session.adaptive.rate});};session.restart();
+    };
     session.timer = setInterval(() => { try { if (Date.now() > session.expires) throw Error(); s.authorize(peer, 'screen'); if (Date.now() - (session.lastSent || 0) > 1000) session.ping?.(); } catch { fail(); } }, 500);
     session.server = net.createServer(async socket => {
       if (session.sockets.size >= 2 || session.active) { socket.destroy(); return; }
@@ -49,57 +57,51 @@ export class VideoHost {
       try {
         const key = await serverHandshake(socket, secret); s.authorize(peer, 'screen');
         if (!this.sessions.has(id) || session.active) throw Error();
-        session.active = socket; socket.setTimeout(0); session.server.close(); let sequence = 0, waitingKey = true, blockedAt = 0;
-        const emit = frame => {
-          if (!this.sessions.has(id)) return;
-          try {
-            s.authorize(peer, 'screen');
-            // Never queue seconds of stale video. Recover H.264 only at a complete IDR.
-            if (socket.writableLength > 128 * 1024) { waitingKey = true; blockedAt ||= Date.now(); if (Date.now() - blockedAt > 2000) fail(); return; }
-            blockedAt = 0; if (waitingKey && frame.codec === 'h264' && !frame.key) return; if (frame.codec !== 'ping') waitingKey = false;
-            session.lastSent = Date.now();
-            socket.write(packFrame(key, sequence++, frame));
-          } catch { fail(); }
-        };
-        session.ping = () => emit({ codec: 'ping', width: 1, height: 1, key: false, data: Buffer.alloc(0) });
-        session.restart = () => { const generation = ++session.generation; session.source?.close(); waitingKey = true; session.source = (s.options.videoSource || captureVideo)(s.native, options.h264 === true, frame => { if (generation === session.generation) emit(frame); }, () => { if (generation === session.generation) fail(); }, { bitrate: session.adaptive.rate }); };
-        session.restart();
+        session.active = socket; socket.setTimeout(0); session.server.close();let sequence=0;
+        startSource(frame=>{socket.write(packFrame(key,sequence++,frame));return true;},()=>socket.writableLength);
       } catch { socket.destroy(); }
     });
     session.server.on('error', fail);
-    try { await new Promise((resolve, reject) => { session.server.once('error', reject); session.server.listen(0, s.options.host || '0.0.0.0', resolve); }); s.authorize(peer, 'screen'); if (!this.sessions.has(id)) throw Error('串流请求已结束'); return { protocol: 1, id, port: session.server.address().port, key: secret.toString('hex') }; }
+    try { await new Promise((resolve, reject) => { session.server.once('error', reject); session.server.listen(0, s.options.host || '0.0.0.0', resolve); }); s.authorize(peer, 'screen'); if (!this.sessions.has(id)) throw Error('串流请求已结束');
+      const info={protocol:1,id,port:session.server.address().port,key:secret.toString('hex')};
+      if(Number.isInteger(options.quic)&&options.quic>0&&peer.quicConn){session.rtc=s.quic.video(peer,options.quic);session.active=session.rtc;info.quic=options.quic;session.server.close();session.rtc.onSendDrop=()=>{if(Date.now()-(session.keyAt||0)>1000){session.keyAt=Date.now();session.restart?.();}};startSource(frame=>session.rtc.send(frame),()=>session.rtc.queued);}
+      else if(typeof options.rtc==='string' && options.rtc.length<200000){session.rtc=new RtcVideo();info.rtc=await session.rtc.answer(options.rtc);session.rtc.ready().then(()=>{s.authorize(peer,'screen');if(!this.sessions.has(id))return;session.active=session.rtc;session.server.close();startSource(frame=>session.rtc.send(frame),()=>session.rtc.queued);}).catch(fail);}
+      return info; }
     catch (e) { fail(); throw e; }
   }
-  keep(peer, id, feedback) { this.service.authorize(peer, 'screen'); const session = this.sessions.get(id); if (!session || session.peer !== peer) throw Error('串流已结束'); session.expires = Date.now() + 10000; if (feedback && session.adaptive.feedback(feedback, session.active?.writableLength || 0)) session.restart?.(); return { bitrate: session.adaptive.rate }; }
+  keep(peer, id, feedback) { this.service.authorize(peer, 'screen'); const session = this.sessions.get(id); if (!session || session.peer !== peer) throw Error('串流已结束'); session.expires = Date.now() + 10000;const changed=feedback&&session.adaptive.feedback(feedback,session.rtc?.queued||session.active?.writableLength||0);if(changed || feedback?.needKey && Date.now()-(session.keyAt||0)>1000){session.keyAt=Date.now();session.restart?.();} return { bitrate: session.adaptive.rate }; }
   stop(peer, id) { if (this.sessions.get(id)?.peer === peer) this.close(id); return {}; }
-  close(id) { const session = this.sessions.get(id); if (!session) return; this.sessions.delete(id); clearInterval(session.timer); session.source?.close(); for (const socket of session.sockets) socket.destroy(); session.server?.close(); }
+  close(id) { const session = this.sessions.get(id); if (!session) return; this.sessions.delete(id); clearInterval(session.timer); session.source?.close();session.rtc?.close(); session.tunnel?.close(); for (const socket of session.sockets) socket.destroy(); session.server?.close(); }
   closePeer(id) { for (const session of this.sessions.values()) if (session.peer.remote.id === id) this.close(session.id); }
   closeAll() { for (const id of this.sessions.keys()) this.close(id); }
 }
 
 // A single latest decoded frame per viewer. No frame history or unbounded UI queue.
 export class VideoViewer {
-  constructor(service) { this.service = service; this.sessions = new Map(); this.opening = new Map(); }
+  constructor(service) { this.service = service; this.sessions = new Map(); this.opening = new Map();this.rtcCooldown=new Map(); }
   async open(id, jpegOnly = false) {
     if (this.opening.has(id)) throw Error('CONTROL_CONFLICT: 正在连接该设备的画面');
     // Reserve the outgoing direction before awaiting close or negotiation. Otherwise
     // two peers can both accept each other's incoming request while opening a view.
     const intent = this.service.beginOutgoing?.(id) || { id, cancelled: false }; this.opening.set(id, intent);
     const check = () => { if (intent.cancelled) throw Error('CONTROL_ENDED: 画面请求已取消'); this.service.checkOutgoing?.(intent); };
-    let peer, info, session;
+    let peer, info, session,rtc;
     try {
     await this.close(id, false); check(); peer = this.service.getPeer(id); const exe = ffmpegPath();
-    info = await peer.request('videoOpen', { h264: !!exe && !jpegOnly }); check();
-    session = { peer, info, abort: new AbortController(), until: Date.now() + 10000, frame: null, waiter: null, closed: false, count: 0, started: Date.now(), feedback: new VideoFeedback() };
+    if(!peer.fastLink&&peer.quicConn&&(this.rtcCooldown.get(id)||0)<Date.now()){try{const channel=randomBytes(4).readUInt32BE()||1;rtc=this.service.quic.video(peer,channel);info=await peer.request('videoOpen',{h264:!!exe&&!jpegOnly,quic:channel});check();if(info.quic!==channel)throw Error('QUIC 串流未协商');}catch{rtc?.close();rtc=null;this.rtcCooldown.set(id,Date.now()+30000);if(info)await peer.request('videoStop',{id:info.id},1500).catch(()=>{});check();}}
+    const preferRtc=!rtc&&!this.service.options?.noRtc && !peer.fastLink && peer.info?.capabilities?.rtcVideo===1 && (this.rtcCooldown.get(id)||0)<Date.now();
+    if(preferRtc){try{rtc=new RtcVideo();info=await peer.request('videoOpen',{h264:!!exe&&!jpegOnly,rtc:await rtc.offer()});check();if(!info.rtc)throw Error('对方未提供 RTC');await rtc.accept(info.rtc);await rtc.ready();check();}catch(error){rtc?.close();rtc=null;this.rtcCooldown.set(id,Date.now()+30000);if(info)await peer.request('videoStop',{id:info.id},1500).catch(()=>{});check();}}
+    if(!rtc)info = await peer.request('videoOpen', { h264: !!exe && !jpegOnly }); check();
+    session = { targetId:id,peer, info, abort: new AbortController(), until: Date.now() + 10000, frame: null, waiter: null, closed: false, delivered: new FrameRate(), feedback: new VideoFeedback() };
     this.sessions.set(id, session);
-    session.connection = await connectVideo(peer.socket.remoteAddress, info, session.abort.signal); check();
+    if(rtc){session.rtc=rtc;session.connection=rtc;rtc.onNeedKey=()=>peer.request('videoKey',{id:info.id},1500).catch(()=>{});}else{session.route = await this.service.links?.videoEndpoint(peer, info);session.connection = await connectVideo(session.route?.host || peer.socket.remoteAddress, session.route?.info || info, session.abort.signal);} check();
     if (this.sessions.get(id) !== session || session.closed) throw Error('CONTROL_ENDED: 画面请求已取消');
-    session.timer = setInterval(async () => { if (this.sessions.get(id) !== session || session.closed || session.keeping) return; if (Date.now() > session.until) { await this.close(id); return; } session.keeping = true; const start = Date.now(); try { const result = await peer.request('videoKeep', { id: info.id, feedback: session.feedback.report() }, 3000); session.feedback.rtt = Date.now() - start; session.bitrate = result.bitrate; } catch (e) { this.fail(session, e); } finally { session.keeping = false; } }, 1000);
+    session.timer = setInterval(async () => { if (this.sessions.get(id) !== session || session.closed || session.keeping) return; if (Date.now() > session.until) { await this.close(id); return; } session.keeping = true; const start = Date.now(); try { const result = await peer.request('videoKeep', { id: info.id, feedback: {...session.feedback.report(),needKey:!!session.rtc?.assembler.needKey} }, 3000); session.feedback.rtt = Date.now() - start; session.bitrate = result.bitrate; } catch (e) { this.fail(session, e); } finally { session.keeping = false; } }, 1000);
     const publish = (data, frame) => {
-      if (session.closed) return; session.count++; const elapsed = Date.now() - session.started;
-      session.frame = { data: data.toString('base64'), width: frame.width, height: frame.height, codec: frame.codec, fps: Math.round(session.count * 1000 / Math.max(elapsed, 1)), bitrate: session.bitrate || 4000000 };
+      if (session.closed) return;
+      session.frame = { data: data.toString('base64'), width: frame.width, height: frame.height, codec: frame.codec,transport:rtc?.manager?'quic':rtc?'webrtc':'tcp', bitrate: session.bitrate || 4000000 };
       session.lastFrame = session.frame;
-      if (session.waiter) { const waiter = session.waiter; session.waiter = null; const value = session.frame; session.frame = null; waiter.resolve(value); }
+      if (session.waiter) { const waiter = session.waiter; session.waiter = null; const value = {...session.frame,fps:session.delivered.tick()}; session.frame = null; waiter.resolve(value); }
     };
     (async () => { try { while (!session.closed) {
       const frame = await session.connection.next();
@@ -108,21 +110,28 @@ export class VideoViewer {
       if (frame.codec === 'jpeg') publish(frame.data, frame);
       else {
         if (!exe) throw Error('本机缺少视频解码组件');
-        if (!session.decoder) session.decoder = createDecoder(exe, data => publish(data, session.meta), e => this.fail(session, e));
-        session.meta = frame; session.decoder.push(frame);
+        if (!session.decoder || session.meta.width !== frame.width || session.meta.height !== frame.height) {
+          // Recreate on rotation: a fixed FFmpeg output graph may retain the old
+          // size/aspect, letterbox the new picture or stop producing frames.
+          session.decoder?.close();
+          const generation = Symbol('decoder'), meta = { width: frame.width, height: frame.height, codec: frame.codec };
+          session.decoderGeneration = generation; session.meta = meta;
+          session.decoder = createDecoder(exe, data => { if(session.decoderGeneration===generation) publish(data, meta); }, e => { if(session.decoderGeneration===generation) this.fail(session, e); });
+        }
+        if(session.decoder.push(frame)===false&&Date.now()-(session.decodeKeyAt||0)>1000){session.decodeKeyAt=Date.now();peer.request('videoKey',{id:info.id},1500).catch(()=>{});}
       }
     } } catch (e) { this.fail(session, e); } })();
-    return { mode: 'stream' };
+    return { mode: 'stream', h264Only: !!info.h264Only || !!peer.info?.capabilities?.videoH264Only };
     } catch (e) {
-      if (session && this.sessions.get(id) === session) await this.close(id, false);
+      rtc?.close();if (session && this.sessions.get(id) === session) await this.close(id, false);
       else if (info && peer) await peer.request('videoStop', { id: info.id }, 1500).catch(() => {});
       throw e;
     } finally { if (this.opening.get(id) === intent) this.opening.delete(id); this.service.endOutgoing?.(intent); }
   }
-  fail(session, e) { if (session.closed) return; session.error = e; session.closed = true; session.abort.abort(); session.decoder?.close(); clearInterval(session.timer); session.waiter?.reject(e); session.waiter = null; }
+  fail(session, e) { if (session.closed) return; session.error = e; session.closed = true; if(e.message !== '串流已关闭'){session.route?.failed?.();if(session.rtc)this.rtcCooldown.set(session.targetId,Date.now()+30000);}session.rtc?.close(); session.abort.abort(); session.route?.close(); session.decoder?.close(); clearInterval(session.timer); session.waiter?.reject(e); session.waiter = null; }
   async next(id) {
     const session = this.sessions.get(id); if (!session) throw Error('串流未开始'); if (session.error) throw session.error; session.until = Date.now() + 10000;
-    if (session.frame) { const frame = session.frame; session.frame = null; return frame; }
+    if (session.frame) { const frame = {...session.frame,fps:session.delivered.tick()}; session.frame = null; return frame; }
     if (session.waiter) throw Error('重复的画面读取');
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { session.waiter = null; if (session.lastFrame && !session.closed) resolve({ ...session.lastFrame, fps: 0, unchanged: true }); else reject(Error('等待视频画面超时')); }, 5000);

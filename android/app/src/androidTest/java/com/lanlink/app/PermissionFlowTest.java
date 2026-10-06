@@ -71,7 +71,7 @@ public final class PermissionFlowTest extends Instrumentation {
     capture("devices");
     click(activity.getWindow().getDecorView(), "设置页面");
     capture("settings");
-    check(find(activity.getWindow().getDecorView(), "远程输入") != null, "settings content");
+    check(find(activity.getWindow().getDecorView(), "ADB 授权") != null, "settings content");
     click(activity.getWindow().getDecorView(), "设备页面");
     click(activity.getWindow().getDecorView(), "添加设备");
     Dialog pair = (Dialog) field(activity, "pairDialog");
@@ -138,7 +138,7 @@ public final class PermissionFlowTest extends Instrumentation {
       activity =
           startActivitySync(
               new Intent(getTargetContext(), MainActivity.class)
-                  .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                  .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_CLEAR_TASK));
       if (options != null && options.containsKey("videoPort")) {
         result.putString("stream", VideoCodecProbe.run(this, activity, options) + "\n");
         finish(Activity.RESULT_OK, result);
@@ -148,6 +148,49 @@ public final class PermissionFlowTest extends Instrumentation {
       while (LinkService.instance == null && System.currentTimeMillis() < end) Thread.sleep(50);
       LinkService service = LinkService.instance;
       check(service != null, "service started");
+      if(options!=null&&options.containsKey("adbPermissionProbe")){result.putString("stream",AdbPermissionProbe.run(this,activity,service)+"\n");finish(Activity.RESULT_OK,result);return;}
+      if(options!=null&&options.containsKey("edgeGlowProbe")){result.putString("stream",EdgeGlowProbe.run(this,service)+"\n");finish(Activity.RESULT_OK,result);return;}
+      if(options!=null&&options.containsKey("quicProbe")){result.putString("stream",QuicProbe.run(service)+"\n");finish(Activity.RESULT_OK,result);return;}
+      if(options!=null&&options.containsKey("rtcQueue")){
+        RtcVideo rtc=new RtcVideo(service);
+        try{
+          rtc.assembler.needKey=false;VideoWire.Frame key=new VideoWire.Frame(new byte[20],320,240,true,true);
+          rtc.enqueue(key);for(int i=0;i<3;i++)rtc.enqueue(new VideoWire.Frame(new byte[20],320,240,true,false));
+          check(rtc.frames.size()==4&&!rtc.assembler.needKey,"short stall retains H264 reference chain");
+          VideoWire.Frame ping=new VideoWire.Frame(new byte[0],1,1,false,false);ping.heartbeat=true;rtc.enqueue(ping);check(rtc.frames.size()==4,"heartbeat does not replace queued video");
+          for(int i=0;i<4;i++)rtc.next();rtc.enqueue(key);Thread.sleep(170);rtc.enqueue(new VideoWire.Frame(new byte[20],320,240,true,false));check(rtc.frames.isEmpty()&&rtc.assembler.needKey,"long backlog drops chain and requests IDR");
+          rtc.enqueue(key);check(rtc.next().key,"IDR resumes playback");result.putString("stream","PASS: short stalls, heartbeat, bounded backlog and IDR recovery\n");
+        }finally{rtc.close();}finish(Activity.RESULT_OK,result);return;
+      }
+      if(options!=null&&options.containsKey("stagingSmokePort")){result.putString("stream",StagingProbe.run(this,activity,service,options)+"\n");finish(Activity.RESULT_OK,result);return;}
+      if(options!=null && options.containsKey("clipboardSmokePort")){result.putString("stream",ClipboardProbe.run(this,activity,service,options)+"\n");finish(Activity.RESULT_OK,result);return;}
+      if (options != null && options.containsKey("pairFlowPort")) {
+        result.putString("stream", PairingFlowProbe.run(this, activity, service, options) + "\n");
+        finish(Activity.RESULT_OK, result);
+        return;
+      }
+      if (options != null && options.containsKey("rootDenied")) {
+        boolean denied = false;
+        try {
+          service.setRootMode(true);
+        } catch (Exception expected) {
+          denied = true;
+        }
+        check(
+            denied && !service.rootActive() && !service.rootEnabled(),
+            "rejected su must not claim root authorization");
+        click(activity.getWindow().getDecorView(), "设置页面");
+        check(
+            find(activity.getWindow().getDecorView(), "ADB 授权") != null,
+            "normal permissions remain available after root denial");
+        result.putString(
+            "stream",
+            "PASS: denied application su leaves Root disabled and normal permission settings"
+                + " visible.\n");
+        finish(Activity.RESULT_OK, result);
+        return;
+      }
+      RecoveryProbe.run(this, service);
       if (options != null && options.containsKey("touchpadPort")) {
         result.putString(
             "stream", TouchpadNetworkProbe.run(this, activity, service, options) + "\n");
@@ -159,13 +202,36 @@ public final class PermissionFlowTest extends Instrumentation {
         finish(Activity.RESULT_OK, result);
         return;
       }
+      // Missing-permission scenarios must stay deterministic after the real ADB smoke
+      service.enableAdbAuthorization();
+      // test: its persistent helper deliberately survives process restarts. Keep the
+      // bootstrap server, but use a disposable binding unknown to that helper.
+      service.shell.close();
+      android.content.SharedPreferences helperPrefs = service.getSharedPreferences("adb-helper", 0);
+      String savedSecret = helperPrefs.getString("secret", null);
+      int savedPort = helperPrefs.getInt("port", 0);
+      helperPrefs.edit().putString("secret", Wire.token()).putInt("port", 0).commit();
+      try {
+        service.shell = new ShellChannel(service);
+      } finally {
+        android.content.SharedPreferences.Editor restore = helperPrefs.edit();
+        if (savedSecret == null) restore.remove("secret");
+        else restore.putString("secret", savedSecret);
+        restore.putInt("port", savedPort).commit();
+      }
       RemoteInteractionProbe.run(this, activity, service);
+      HelperRecoveryProbe.run(service);
+      // Subsequent cases represent a never-authorized device rather than a short disconnect.
+      Field success = ShellChannel.class.getDeclaredField("lastSuccess");
+      success.setAccessible(true);
+      success.setLong(service.shell, 0);
       GroupControlProbe.run(this, activity);
       checkPages(activity);
       // This isolated service/UI test injects a peer without a TCP transport. Stop network
       // heartbeat tasks so they cannot close the fixture while screenshots are captured.
       // The entire service is stopped below; no production scheduling is changed.
       ((java.util.concurrent.ScheduledExecutorService) field(service, "clock")).shutdownNow();
+      SettingsProbe.run(this, activity, service);
       service.setAllowed("input", false);
       service.setAllowed("screen", false);
       service.setAllowed("clipboard", false);
@@ -173,6 +239,9 @@ public final class PermissionFlowTest extends Instrumentation {
       service.consent.reset();
       peer = new Wire(new Socket(), Wire.obj(), new byte[32], service);
       peer.id = "11111111-1111-4111-8111-111111111111";
+      // A previous run deliberately stops this same fixture peer. This case models
+      // a new requester, so remove only its persisted stop marker before first consent.
+      ((java.util.Set<?>) field(service,"pausedPeers")).remove(peer.id);
       peer.info = Wire.obj("name", "测试电脑", "platform", "windows");
       Method method =
           LinkService.class.getDeclaredMethod("handle", Wire.class, String.class, JSONObject.class);
@@ -200,7 +269,12 @@ public final class PermissionFlowTest extends Instrumentation {
       capture("first-control-consent");
       Dialog consent = (Dialog) field(activity, "consentDialog");
       check(consent != null && consent.isShowing(), "first control popup visible");
-      click(consent.getWindow().getDecorView(), "剪贴板与文件");
+      check(!find(consent.getWindow().getDecorView(), "剪贴板文件共享").isShown(), "advanced permissions initially collapsed");
+      check(find(consent.getWindow().getDecorView(), "远程关机") == null, "phone excludes shutdown");
+      click(consent.getWindow().getDecorView(), "高级选项");
+      check(find(consent.getWindow().getDecorView(), "剪贴板文件共享").isShown(), "advanced permissions expand");
+      capture("consent-advanced");
+      click(consent.getWindow().getDecorView(), "剪贴板文件共享");
       Intent projection =
           getTargetContext()
               .getSystemService(android.media.projection.MediaProjectionManager.class)
@@ -212,7 +286,8 @@ public final class PermissionFlowTest extends Instrumentation {
               true);
       click(consent.getWindow().getDecorView(), "同意并记住");
       check(
-          projectionMonitor.getHits() == 1, "approval requests OS screen permission automatically");
+          projectionMonitor.getHits() == 0,
+          "input-only approval does not request screen permission");
       removeMonitor(projectionMonitor);
       check(
           service.consent.peek() == null && service.consent.allowed(peer.id, "input"),
@@ -353,13 +428,45 @@ public final class PermissionFlowTest extends Instrumentation {
             }
           });
       check(service.controlledBy() != null, "controlled identity visible");
-      click(activity.getWindow().getDecorView(), "结束控制");
+      waitForIdleSync();
+      View banner=(View)field(activity,"noticeBox"),dock=(View)field(activity,"navigation");
+      int[] bannerAt=new int[2],dockAt=new int[2];banner.getLocationOnScreen(bannerAt);dock.getLocationOnScreen(dockAt);
+      check(banner.getHeight()>0 && bannerAt[1]<dockAt[1] && bannerAt[1]+banner.getHeight()>dockAt[1],"controlled banner protrudes above and behind Dock");
+      View stop=find(activity.getWindow().getDecorView(), "中止任务");
+      int[] stopAt=new int[2];stop.getLocationOnScreen(stopAt);
+      check(stopAt[1]+stop.getHeight()<=dockAt[1],"stop action stays above Dock and remains accessible");
+      capture("controlled-dock");
+      click(activity.getWindow().getDecorView(), "中止任务");
       check(owner.get(service) == null, "local stop releases owner");
       denied(method, service, peer, "acquire", Wire.obj());
-      denied(method, service, peer, "adbBootstrap", Wire.obj());
+      method.invoke(service, peer, "adbBootstrap", Wire.obj());
+      check(owner.get(service)==null,"preparing helper never resumes stopped control");
+      boolean providerDenied=false;
+      try{getTargetContext().getContentResolver().call(android.net.Uri.parse("content://com.lanlink.app.adbsetup"),"bootstrap",null,null);}catch(SecurityException expected){providerDenied=true;}
+      check(providerDenied,"ordinary application UID cannot access physical ADB setup secret");
       check(
           ((java.util.Set<?>) field(service, "pausedPeers")).contains(peer.id),
           "automatic reconnect blocked after local stop");
+      JSONObject stoppedReport=(JSONObject)method.invoke(service,peer,"permission-status",Wire.obj());
+      check(stoppedReport.getJSONObject("permissions").getJSONObject("input").getBoolean("peerAllowed"),"stopping keeps the input grant visible");
+      check(!stoppedReport.getJSONObject("permissions").getJSONObject("clipboard").getBoolean("peerAllowed"),"stopping preserves partial denials");
+      // The fixture has no system input helper, so prepare still fails at OS readiness,
+      // but a new explicit session must not ask for the remembered device grant again.
+      denied(method,service,peer,"prepare",Wire.obj("newSession",true));
+      check(!((java.util.Set<?>)field(service,"pausedPeers")).contains(peer.id),"new session clears only the stop marker");
+      check(service.consent.peek()==null && service.consent.allowed(peer.id,"input") && !service.consent.allowed(peer.id,"clipboard"),"new session retains grants without another approval");
+      DeviceConsent afterStop=new DeviceConsent(getTargetContext().getSharedPreferences("identity",0).getString("device_grants","{}"));
+      check(afterStop.allowed(peer.id,"input") && !afterStop.allowed(peer.id,"clipboard"),"remembered grants survive stop and restart");
+      service.permissionNotice.reset();
+      service.revokeAdbAuthorization();
+      method.invoke(service,peer,"adb-permission-request",Wire.obj());
+      runOnMainSync(()->{try{refresh.invoke(currentActivity);}catch(Exception e){throw new RuntimeException(e);}});
+      Dialog adbDialog=(Dialog)field(activity,"permissionDialog");
+      check(adbDialog!=null && adbDialog.isShowing(),"revoked ADB request opens phone confirmation");
+      check(service.adbRevoked(),"request must not restore permission automatically");
+      capture("adb-allow-request");
+      click(adbDialog.getWindow().getDecorView(),"允许 ADB 授权");
+      check(!service.adbRevoked() && owner.get(service)==null,"phone confirmation permits setup without granting control");
       service.closed(peer);
       check(
           service.permissionNotice.peek(System.currentTimeMillis()) == null,
@@ -372,7 +479,8 @@ public final class PermissionFlowTest extends Instrumentation {
               + " permission card, guide, automatic app permissions, system permission entry,"
               + " target stop, touchpad, system keyboard text, viewport pan/pinch,"
               + " reciprocal-control races, ADB bootstrap consent, ADB-only input gating and"
-              + " Node/Android group crypto\n");
+              + " Node/Android group crypto; settings rename, authorization revoke, per-device"
+              + " grants, persistence and immediate ownership release\n");
       finish(Activity.RESULT_OK, result);
     } catch (Throwable failure) {
       result.putString("stream", "\nFAIL: " + android.util.Log.getStackTraceString(failure) + "\n");

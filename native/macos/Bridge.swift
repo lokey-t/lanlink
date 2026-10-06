@@ -17,10 +17,12 @@ func emit(_ value: [String: Any]) {
  outLock.lock(); print(line); fflush(stdout); outLock.unlock()
 }
 var remote = false
+var syntheticCursor = false
 var lease = Date.distantPast
 var inputLease = Date.distantPast
 var held = Set<CGKeyCode>()
 var physicalModifiers = Set<CGKeyCode>()
+var localModifierUps = Set<CGKeyCode>()
 var buttons = Set<Int>()
 var tap: CFMachPort?
 var clipboardCount = NSPasteboard.general.changeCount
@@ -48,13 +50,21 @@ func releaseAll() { for k in Array(held) { key(k, false) }; for b in Array(butto
 let callback: CGEventTapCallBack = { _, type, event, _ in
  if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput { remote = false; releaseAll(); if let t = tap { CGEvent.tapEnable(tap: t, enable: true) }; emit(["type":"emergency"]); return Unmanaged.passUnretained(event) }
  if event.getIntegerValueField(.eventSourceUserData) == marker { return Unmanaged.passUnretained(event) }
+ if [.mouseMoved,.leftMouseDragged,.rightMouseDragged,.otherMouseDragged].contains(type) { syntheticCursor = false }
  let code = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
  if type == .keyDown && code == 111 && event.flags.contains([.maskControl, .maskAlternate]) { remote = false; releaseAll(); emit(["type":"emergency"]); return nil }
+ if type == .flagsChanged {
+  let f=event.flags;let mask=(f.contains(.maskControl) ? 1:0)|(f.contains(.maskAlternate) ? 2:0)|(f.contains(.maskShift) ? 4:0)|(f.contains(.maskCommand) ? 8:0)
+  emit(["type":"modifiers","mask":mask])
+  let flag:CGEventFlags = code==57 ? .maskAlphaShift:[54,55].contains(code) ? .maskCommand:[56,60].contains(code) ? .maskShift:[58,61].contains(code) ? .maskAlternate:.maskControl
+  if f.contains(flag){physicalModifiers.insert(code)}else{physicalModifiers.remove(code)}
+ }
  guard remote else { return Unmanaged.passUnretained(event) }
  if type == .keyDown || type == .keyUp || type == .flagsChanged {
   var down = type == .keyDown
-  if type == .flagsChanged { down = !physicalModifiers.contains(code); if down { physicalModifiers.insert(code) } else { physicalModifiers.remove(code) } }
+  if type == .flagsChanged { down = physicalModifiers.contains(code) }
   if let name = reverseCodes[code] { emit(["type":"input","kind":"key","code":name,"down":down]) }
+  if !down && localModifierUps.remove(code) != nil{return Unmanaged.passUnretained(event)}
  } else if [.mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged].contains(type) {
   emit(["type":"input","kind":"move","dx":event.getIntegerValueField(.mouseEventDeltaX),"dy":event.getIntegerValueField(.mouseEventDeltaY)])
  } else if type == .scrollWheel { emit(["type":"input","kind":"wheel","delta":max(-2400,min(2400,event.getIntegerValueField(.scrollWheelEventDeltaAxis1)*120))]) }
@@ -73,7 +83,8 @@ func command(_ message: [String: Any]) {
  let display = CGMainDisplayID(), bounds = CGDisplayBounds(display)
  switch method {
  case "capabilities": reply(id,["relativeInput":true,"host":tap != nil,"input":AXIsProcessTrusted(),"screen":CGPreflightScreenCaptureAccess(),"clipboard":true,"shutdown":true,"width":bounds.width,"height":bounds.height])
- case "mode": remote = a["remote"] as? Bool ?? false; lease = Date().addingTimeInterval(3); physicalModifiers.removeAll(); if !remote { releaseAll() }; reply(id)
+ case "mode": if a["remote"] as? Bool == true && !remote{localModifierUps=physicalModifiers};remote = a["remote"] as? Bool ?? false; lease = Date().addingTimeInterval(3); if !remote { releaseAll() }; reply(id)
+ case "file-drag-cancel": if remote { key(53,true);key(53,false);mouseButton(0,false) }; reply(id)
  case "heartbeat": lease = Date().addingTimeInterval(3); inputLease = lease; reply(id)
  case "release": releaseAll(); reply(id)
  case "warp": CGWarpMouseCursorPosition(CGPoint(x: bounds.minX + (a["x"] as? Double ?? 0.5) * bounds.width, y: bounds.minY + (a["y"] as? Double ?? 0.5) * bounds.height)); reply(id)
@@ -82,11 +93,13 @@ func command(_ message: [String: Any]) {
   inputLease = Date().addingTimeInterval(3)
   switch a["kind"] as? String {
   case "relative":
+   syntheticCursor = true
    let cursor = CGEvent(source: nil)?.location ?? CGPoint(x: bounds.midX, y: bounds.midY)
    let p = CGPoint(x: max(bounds.minX,min(bounds.maxX-1,cursor.x+(a["dx"] as? Double ?? 0))), y: max(bounds.minY,min(bounds.maxY-1,cursor.y+(a["dy"] as? Double ?? 0))))
    let type: CGEventType = buttons.contains(0) ? .leftMouseDragged : buttons.contains(2) ? .rightMouseDragged : .mouseMoved
    post(CGEvent(mouseEventSource:nil,mouseType:type,mouseCursorPosition:p,mouseButton:buttons.contains(2) ? .right : .left))
   case "move":
+   syntheticCursor = true
    let p = CGPoint(x:bounds.minX + (a["x"] as? Double ?? 0.5)*(bounds.width-1),y:bounds.minY + (a["y"] as? Double ?? 0.5)*(bounds.height-1))
    let type: CGEventType = buttons.contains(0) ? .leftMouseDragged : buttons.contains(2) ? .rightMouseDragged : .mouseMoved
    post(CGEvent(mouseEventSource:nil,mouseType:type,mouseCursorPosition:p,mouseButton:buttons.contains(2) ? .right : .left))
@@ -135,7 +148,7 @@ var ticks = 0
 Timer.scheduledTimer(withTimeInterval:0.02,repeats:true) { _ in
  if remote && Date()>lease { remote=false;releaseAll();emit(["type":"emergency"]) }
  if (!held.isEmpty || !buttons.isEmpty) && Date()>inputLease { releaseAll() }
- if !remote { let p=CGEvent(source:nil)?.location ?? .zero;let b=CGDisplayBounds(CGMainDisplayID());emit(["type":"cursor","x":p.x-b.minX,"y":p.y-b.minY,"width":b.width,"height":b.height]) }
+ if !remote { let p=CGEvent(source:nil)?.location ?? .zero;let b=CGDisplayBounds(CGMainDisplayID());emit(["type":"cursor","x":p.x-b.minX,"y":p.y-b.minY,"width":b.width,"height":b.height,"synthetic":syntheticCursor]) }
  ticks += 1
  if ticks%25==0 && NSPasteboard.general.changeCount != clipboardCount { clipboardCount=NSPasteboard.general.changeCount;emit(["type":"clipboardChanged"]) }
 }

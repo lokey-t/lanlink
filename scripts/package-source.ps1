@@ -2,9 +2,12 @@ $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $stage = Join-Path $root ('.tools/source-package/' + [guid]::NewGuid().ToString())
 New-Item -ItemType Directory -Force $stage | Out-Null
-foreach ($name in @('src','web','desktop','native','vendor','docs','tests','scripts')) {
+foreach ($name in @('src','web','desktop','vendor','docs','tests','scripts')) {
     Copy-Item -LiteralPath (Join-Path $root $name) -Destination $stage -Recurse -Force
 }
+New-Item -ItemType Directory -Force (Join-Path $stage 'native/quic') | Out-Null
+foreach($name in @('windows','macos')){Copy-Item -LiteralPath (Join-Path $root "native/$name") -Destination (Join-Path $stage 'native') -Recurse}
+foreach($name in @('src','Cargo.toml','Cargo.lock')){Copy-Item -LiteralPath (Join-Path $root "native/quic/$name") -Destination (Join-Path $stage 'native/quic') -Recurse}
 # Include Android sources and the wrapper, without machine-specific Studio settings,
 # SDK paths, Gradle caches, or generated APKs.
 $androidStage = Join-Path $stage 'android'
@@ -16,7 +19,7 @@ foreach ($name in @('build.gradle','settings.gradle','gradle.properties','gradle
 foreach ($name in @('src','build.gradle')) {
     Copy-Item -LiteralPath (Join-Path $root "android/app/$name") -Destination $appStage -Recurse -Force
 }
-foreach ($name in @('package.json','README.md','THIRD_PARTY_NOTICES.md','start-windows.cmd','start-macos.command','.gitignore')) {
+foreach ($name in @('package.json','package-lock.json','README.md','THIRD_PARTY_NOTICES.md','start-windows.cmd','start-macos.command','.gitignore')) {
     Copy-Item -LiteralPath (Join-Path $root $name) -Destination $stage -Force
 }
 $version = (Get-Content (Join-Path $root 'package.json') -Raw | ConvertFrom-Json).version

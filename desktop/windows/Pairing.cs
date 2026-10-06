@@ -1,4 +1,6 @@
 using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows;
@@ -9,7 +11,7 @@ using System.Windows.Shapes;
 using System.Windows.Threading;
 
 namespace LanLink.Desktop {
-  public sealed class PairingDialog : Window {
+  public sealed class PairingPanel : Border {
     readonly Client client;
     readonly Func<bool, bool> confirm;
     readonly Func<Task> joined;
@@ -24,19 +26,18 @@ namespace LanLink.Desktop {
     readonly StackPanel joinPanel = new StackPanel { Visibility = Visibility.Collapsed, Margin = new Thickness(0, 14, 0, 0) };
     readonly TextBox input = new TextBox { MaxLength = 8, FontSize = 20, FontFamily = new FontFamily("Consolas"), Margin = new Thickness(0, 8, 0, 10) };
     readonly Button reveal, joinButton, joinOption;
-    bool showing, loading, closed, joining, groupEstablished;
+    bool showing, loading, closed, joining, groupEstablished, waitingConnection, completed;
+    HashSet<string> initialPeers;
     double remaining, duration = 60000;
     DateTime nextFetch;
     public string CurrentCode { get; private set; }
     public bool QRVisible { get { return qr.Visibility == Visibility.Visible; } }
     public bool JoiningVisible { get { return joinPanel.Visibility == Visibility.Visible; } }
     public Task InitialLoad { get; private set; }
-    public PairingDialog(Window owner, Client client, Func<bool, bool> confirm, Func<Task> joined) {
+    public PairingPanel(Window owner, Client client, Func<bool, bool> confirm, Func<Task> joined) {
       this.client = client; this.confirm = confirm; this.joined = joined;
       Resources = owner.Resources;
-      FontFamily = owner.FontFamily;
-      Title = "添加设备"; Owner = owner; Width = 770; SizeToContent = SizeToContent.Height; ResizeMode = ResizeMode.NoResize; WindowStartupLocation = WindowStartupLocation.CenterOwner; ShowInTaskbar = false;
-      MaxHeight = Math.Max(480, SystemParameters.WorkArea.Height - 60);
+      Padding = new Thickness(24); Background = Brushes.White; CornerRadius = new CornerRadius(20);
       var panel = MainWindow.Column(); panel.Children.Add(MainWindow.Text("让设备相遇", 25));
       var hint = MainWindow.Text("在同一局域网中，扫码或输入配对码即可加入你的离线组。", 13, "#7B879D"); hint.Margin = new Thickness(0, 9, 0, 24); panel.Children.Add(hint);
       var columns = new Grid(); columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(246) }); columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) }); columns.ColumnDefinitions.Add(new ColumnDefinition()); panel.Children.Add(columns);
@@ -70,11 +71,15 @@ namespace LanLink.Desktop {
       manual.Children.Add(MainWindow.Text("输入已配对设备的局域网 IP", 12, "#7B879D")); manual.Children.Add(address);
       var connect = MainWindow.Button("手动连接", delegate { }); connect.Click += async delegate { try { await client.Call("connect", new { host = address.Text.Trim(), port = 45831 }); status.Text = "正在连接，请在设备页查看连接状态。"; } catch (Exception e) { status.Text = e.Message; } }; manual.Children.Add(connect);
       panel.Children.Add(new Expander { Header = "已配对设备无法自动连接？", Content = manual, FontSize = 12, Foreground = MainWindow.Brush("#8390A5"), Margin = new Thickness(0, 12, 0, 0) });
-      WindowShell.Wrap(this, new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled }, false);
-      Loaded += delegate { InitialLoad = RefreshCode(); timer.Start(); };
+      Child = panel;
+      InitialLoad = Task.FromResult(0);
+      IsVisibleChanged += async delegate {
+        closed = !IsVisible;
+        if (!closed) { initialPeers=null;completed=false;waitingConnection=false;InitialLoad = RefreshCode(); timer.Start(); }
+        else { timer.Stop(); showing = false; qr.Source = null; qr.Visibility=Visibility.Collapsed; placeholder.Visibility=Visibility.Visible; reveal.Content="点击查看二维码"; CurrentCode=null; code.Text="···· ····"; remaining=0; try { await client.Call("pairing-stop"); } catch {} }
+      };
       timer.Tick += async delegate { UpdateCountdown(); if (DateTime.UtcNow >= nextFetch) await RefreshCode(); };
-      Closed += async delegate { closed = true; timer.Stop(); showing = false; qr.Source = null; try { await client.Call("pairing-stop"); } catch {} };
-      Closing += delegate(object sender, System.ComponentModel.CancelEventArgs e) { if (joining) { e.Cancel = true; status.Text = "正在配对，请稍候…"; } };
+
     }
     void UpdateJoinLabel() { joinOption.Content = JoiningVisible ? "收起输入 ↑" : groupEstablished ? "解散当前组并加入其他组 →" : "加入其他组 →"; joinButton.Content = groupEstablished ? "解散当前组并加入其他组" : "配对并加入"; }
     public void ToggleJoin() { joinPanel.Visibility = JoiningVisible ? Visibility.Collapsed : Visibility.Visible; UpdateJoinLabel(); if (JoiningVisible) input.Focus(); }
@@ -85,9 +90,17 @@ namespace LanLink.Desktop {
       countdown.Text = left > 0 ? Math.Ceiling(left / 1000) + " 秒后刷新 · 每分钟自动更换" : "正在刷新配对码…";
       if (left <= 0) { code.Text = "···· ····"; CurrentCode = null; qr.Source = null; qr.Visibility = Visibility.Collapsed; placeholder.Visibility = Visibility.Visible; }
     }
+    internal async Task<bool> ObserveConnections(object state) {
+      var online=new HashSet<string>();foreach(var peer in Json.Get(state,"peers") as IEnumerable ?? new object[0])online.Add(Json.Text(peer,"id"));
+      if(initialPeers==null)initialPeers=online;
+      else if(!completed && (waitingConnection ? online.Count>0 : !online.IsSubsetOf(initialPeers))) {completed=true;await joined();return true;}
+      return false;
+    }
     public async Task RefreshCode() {
       if (loading || closed || joining) return; loading = true; reveal.IsEnabled = false;
       try {
+        var state = await client.Call("state"); if(closed)return;
+        if(await ObserveConnections(state))return;
         var result = await client.Call("pairing", new { reveal = showing }); if (closed) return;
         groupEstablished = Json.Flag(result, "groupEstablished"); UpdateJoinLabel();
         CurrentCode = Json.Text(result, "code"); if (!Regex.IsMatch(CurrentCode, "^[0-9]{8}$")) throw new Exception("配对码暂不可用");
@@ -100,7 +113,7 @@ namespace LanLink.Desktop {
     public async Task Join() {
       if (joining) return; if (!Regex.IsMatch(input.Text, "^[0-9]{8}$")) { status.Text = "请输入完整的八位数字配对码。"; return; }
       joining = true; joinButton.IsEnabled = false; input.IsEnabled = false;
-      try { var state = await client.Call("state"); groupEstablished = Json.Flag(state, "groupEstablished"); UpdateJoinLabel(); if (!confirm(groupEstablished)) return; status.Text = "正在查找设备并配对…"; await client.Call("join", new { code = input.Text, dissolveCurrentGroup = groupEstablished, expectedGroup = Json.Text(state, "groupId") }); joining = false; await joined(); Close(); }
+      try { var state = await client.Call("state"); groupEstablished = Json.Flag(state, "groupEstablished"); UpdateJoinLabel(); if (!confirm(groupEstablished)) return; status.Text = "正在查找设备并配对…"; await client.Call("join", new { code = input.Text, dissolveCurrentGroup = groupEstablished, expectedGroup = Json.Text(state, "groupId") }); waitingConnection=true; initialPeers=new HashSet<string>(); status.Text="已配对，正在建立加密连接…"; input.Text = ""; joinPanel.Visibility = Visibility.Collapsed; showing = false; }
       catch (Exception e) { status.Text = e.Message; }
       finally { joining = false; joinButton.IsEnabled = true; input.IsEnabled = true; }
     }

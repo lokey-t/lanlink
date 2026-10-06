@@ -12,6 +12,46 @@ const secret = 'lanlink1:' + 'A'.repeat(43);
 const bootstrap = { apkPath, port: 41234, secret };
 const listing = 'List of devices attached\nemulator-5580 device product:sdk model:Android_SDK transport_id:1\nphone-2 unauthorized transport_id:2\nphone-3 offline\n';
 
+test('group authorization retains offline member bindings and excludes changed or removed identities', async () => {
+  const config = { knownDevices: { phone: { name: 'Phone', platform: 'android' } }, adbBindings: { phone: { serial: 'emulator-5580', key: 'public-key' } } };
+  const service = { config, peers: new Map(), group: { excluded: () => false, data: { members: { phone: { key: 'public-key' } } } } };
+  const manager = new AdbManager(service, { locate: async () => '/adb', run: async () => ({ stdout: listing }) });
+  assert.equal((await manager.devices()).devices[0].authorized, true);
+  assert.equal((await manager.groupDevices()).devices[0].authorized, true);
+  service.group.data.members.phone.key = 'changed-key';
+  assert.equal((await manager.devices()).devices[0].authorized, false);
+  assert.equal((await manager.groupDevices()).devices[0].authorized, false);
+  service.group.excluded = () => true;
+  assert.deepEqual((await manager.groupDevices()).devices, []);
+});
+
+test('background recovery does not restart a recovering or Root-managed input helper', async () => {
+  for (const engine of [{ recovering: true }, { root: true }, { revoked: true }]) {
+    const peer = { info: { platform: 'android', capabilities: { memberKey: 'key' } }, request: async method => {
+      assert.equal(method, 'permission-status'); return { engine, permissions: { input: { appEnabled: true, peerAllowed: true, systemGranted: false } } };
+    } };
+    const manager = new AdbManager({ config: { adbBindings: { phone: { key: 'key', serial: 'emulator-5580' } } }, peers: new Map([['phone', peer]]), group: { excluded: () => false } });
+    let attempted = false; manager.authorize = async () => { attempted = true; };
+    await manager.tick(); assert.equal(attempted, false);
+  }
+});
+
+test('phone-side revocation overrides stored authorization in both desktop device lists', async () => {
+  const info = { name: 'Phone', platform: 'android', capabilities: { memberKey: 'key' } };
+  const peer = { info, request: async () => ({ engine: { revoked: true, ready: false } }) };
+  const service = { config: { adbBindings: { phone: { key: 'key', serial: 'emulator-5580' } } }, peers: new Map([['phone', peer]]), group: { excluded: () => false } };
+  const manager = new AdbManager(service, { locate: async () => '/adb', run: async () => ({ stdout: listing }) });
+  assert.equal((await manager.devices()).devices[0].authorized, false);
+  const row = (await manager.groupDevices()).devices[0];
+  assert.equal(row.authorized, false); assert.equal(row.status, '未就绪');
+  assert.match(row.message,/手机已解除 ADB 授权/);
+  peer.request = async () => ({ engine: { revoked: false, authorized: false, ready: false } });
+  assert.match((await manager.groupDevices()).devices[0].message,/ADB 未授权/);
+  assert.equal((await manager.groupDevices()).devices[0].authorized,false);
+  peer.request = async () => ({ engine: { revoked: false, authorized: true, ready: false } });
+  assert.equal((await manager.groupDevices()).devices[0].authorized, true);
+});
+
 test('helper upgrade selects only app_process with matching private binding, never another process or phone',()=>{
   const commands=[`21 app_process /system/bin com.lanlink.app.ShellAgent 41234 ${secret}`,`22 app_process /system/bin com.lanlink.app.ShellAgent 41235 ${secret}`,`23 app_process /system/bin com.lanlink.app.ShellAgent 41234 lanlink1:other`,`24 sh -c com.lanlink.app.ShellAgent 41234 ${secret}`].join('\n');
   assert.deepEqual(boundHelperPids(commands,bootstrap),['21']);

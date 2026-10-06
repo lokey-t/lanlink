@@ -223,6 +223,19 @@ final class GroupKeys implements AutoCloseable, Pairing.Members {
     return revoked.contains(id);
   }
 
+  synchronized JSONObject deviceLabels() {
+    JSONObject result = new JSONObject(), members = data.optJSONObject("members");
+    if (members == null || isDissolved()) return result;
+    for (Iterator<String> it = members.keys(); it.hasNext();) {
+      String id = it.next();
+      JSONObject member = members.optJSONObject(id);
+      if (member == null || id.equals(service.deviceId) || excluded(id)) continue;
+      try { result.put(id, obj("name", member.optString("name", "组内设备"), "platform", member.optString("platform"))); }
+      catch (JSONException ignored) {}
+    }
+    return result;
+  }
+
   void cacheRemoved() {
     Set<String> ids = new HashSet<>();
     JSONArray list = data.optJSONArray("removed");

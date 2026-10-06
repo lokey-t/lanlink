@@ -7,15 +7,22 @@ case "$(uname -m)" in arm64) ARCH=arm64;; x86_64) ARCH=x64;; *) echo 'Unsupporte
 if [ -z "$LANLINK_NODE_DIST" ]; then echo 'Set LANLINK_NODE_DIST to an extracted official Node.js distribution'; exit 1; fi
 test -x "$LANLINK_NODE_DIST/bin/node"
 test -f "$LANLINK_NODE_DIST/LICENSE"
+test -f node_modules/werift/package.json || { echo 'Run npm ci --ignore-scripts before packaging'; exit 1; }
 "$LANLINK_NODE_DIST/bin/node" -e 'if(Number(process.versions.node.split(".")[0])<22)process.exit(1)'
 DEST="$(pwd)/dist/LanLink-$VERSION-macos-$ARCH"
 BUNDLE="$DEST/LanLink.app"
 if [ -e "$DEST" ]; then echo 'Build already exists'; exit 1; fi
 sh native/macos/build.sh
+sh scripts/build-quic-macos.sh
 mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Resources/runtime"
-xcrun swiftc -O -swift-version 5 -target "$(uname -m)-apple-macos14.0" -framework AppKit -framework SwiftUI -framework ServiceManagement desktop/macos/LanLink.swift desktop/macos/Remote.swift -o "$BUNDLE/Contents/MacOS/LanLink"
-for name in src native vendor; do cp -R "$name" "$BUNDLE/Contents/Resources/"; done
-cp package.json "$BUNDLE/Contents/Resources/"
+xcrun swiftc -O -swift-version 5 -target "$(uname -m)-apple-macos14.0" -framework AppKit -framework SwiftUI -framework ServiceManagement desktop/macos/LanLink.swift desktop/macos/Remote.swift desktop/macos/AdbGuide.swift desktop/macos/Staging.swift -o "$BUNDLE/Contents/MacOS/LanLink"
+for name in src vendor node_modules; do cp -R "$name" "$BUNDLE/Contents/Resources/"; done
+mkdir -p "$BUNDLE/Contents/Resources/native/quic"
+cp -R native/macos native/windows "$BUNDLE/Contents/Resources/native/"
+cp -R native/quic/src native/quic/Cargo.toml native/quic/Cargo.lock "$BUNDLE/Contents/Resources/native/quic/"
+cp runtime/liblanlink_quic.dylib "$BUNDLE/Contents/Resources/runtime/"
+codesign --force --sign - "$BUNDLE/Contents/Resources/runtime/liblanlink_quic.dylib"
+cp package.json package-lock.json "$BUNDLE/Contents/Resources/"
 cp "$LANLINK_NODE_DIST/bin/node" "$BUNDLE/Contents/Resources/runtime/node"
 cp "$LANLINK_NODE_DIST/LICENSE" "$BUNDLE/Contents/Resources/runtime/NODE-LICENSE"
 # Optional standalone FFmpeg distribution: preserve its executable, libraries and notices.
@@ -38,6 +45,11 @@ cat > "$BUNDLE/Contents/Info.plist" <<EOF
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>$VERSION</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
+<key>NSServices</key><array><dict>
+<key>NSMenuItem</key><dict><key>default</key><string>分享文件 · LanLink</string></dict>
+<key>NSMessage</key><string>shareFiles</string><key>NSPortName</key><string>LanLink</string>
+<key>NSSendTypes</key><array><string>NSFilenamesPboardType</string><string>public.file-url</string></array>
+</dict></array>
 <key>NSHighResolutionCapable</key><true/>
 <key>NSAppleEventsUsageDescription</key><string>在用户启用关机权限后执行设备关机。</string>
 </dict></plist>

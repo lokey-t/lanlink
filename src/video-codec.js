@@ -43,8 +43,8 @@ export async function chooseEncoder(exe) {
   const pending = (async () => { for (const encoder of process.platform === 'darwin' ? ['h264_videotoolbox', 'libopenh264'] : ['h264_nvenc', 'h264_qsv', 'h264_amf', 'h264_mf', 'libopenh264']) if (await probe(exe, encoder)) return encoder; return null; })(); probeCache.set(exe, pending); return pending;
 }
 export function createDecoder(exe, onFrame, onError) {
-  const p = spawn(exe, ['-hide_banner', '-loglevel', 'error', '-flags', 'low_delay', '-probesize', '32', '-analyzeduration', '0', '-f', 'h264', '-i', 'pipe:0', '-an', '-threads', '2', '-c:v', 'mjpeg', '-q:v', '3', '-f', 'image2pipe', '-flush_packets', '1', 'pipe:1'], { windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] });
+  const p = spawn(exe, ['-hide_banner', '-loglevel', 'error', '-flags', 'low_delay', '-probesize', '32', '-analyzeduration', '0', '-f', 'h264', '-i', 'pipe:0', '-an', '-threads', '2', '-c:v', 'mjpeg', '-q:v', '3', '-fps_mode', 'passthrough', '-f', 'image2pipe', '-flush_packets', '1', 'pipe:1'], { windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] });
   let stopped = false, needKey = true; const parser = new JpegParser(onFrame);
   p.stdout.on('data', d => { try { parser.push(d); } catch (e) { onError(e); } }); p.stdin.on('error', () => {}); p.on('error', onError); p.on('exit', () => { if (!stopped) onError(Error('视频解码器已退出')); });
-  return { push(frame) { if (p.stdin.writableLength > 256 * 1024) { needKey = true; return; } if (needKey && !frame.key) return; needKey = false; p.stdin.write(frame.data); }, close() { stopped = true; p.kill(); } };
+  return { push(frame) { if (p.stdin.writableLength > 256 * 1024) { needKey = true; return false; } if (needKey && !frame.key) return false; needKey = false; p.stdin.write(frame.data); return true; }, close() { stopped = true; p.kill(); } };
 }

@@ -21,6 +21,7 @@ namespace LanLink.Desktop {
     readonly TaskCompletionSource<object> ready = new TaskCompletionSource<object>();
     Process process; int sequence; bool stopping;
     public Action<string> Failed;
+    public Action<object> EdgeFeedback;
     public async Task Start(string root, string options) {
       string node = Path.Combine(root, "runtime", "node.exe");
       if (!File.Exists(node)) throw new Exception("缺少随软件附带的运行组件，请完整解压软件包。");
@@ -34,6 +35,7 @@ namespace LanLink.Desktop {
         if (e.Data == null) return;
         try {
           var message = Json.Map(json.DeserializeObject(e.Data));
+          if(Json.Text(message,"event")=="edge-feedback"){if(EdgeFeedback!=null)EdgeFeedback(Json.Get(message,"feedback"));return;}
           if (Json.Flag(message, "ready")) { ready.TrySetResult(null); return; }
           if (message.ContainsKey("fatal")) { Fail(Json.Text(message, "fatal")); return; }
           TaskCompletionSource<object> promise;
@@ -60,7 +62,7 @@ namespace LanLink.Desktop {
         try { byte[] bytes = Encoding.UTF8.GetBytes(json.Serialize(new { id = id, method = method, args = args ?? new { } }) + "\n"); process.StandardInput.BaseStream.Write(bytes, 0, bytes.Length); process.StandardInput.BaseStream.Flush(); }
         catch { pending.Remove(id); throw new Exception("设备服务连接已断开"); }
       }
-      int timeout = method == "send-files" || method == "device-paste" || method == "paste" || method == "adb-authorize" ? 130000 : 30000;
+      int timeout = method.StartsWith("stage-") || method == "send-files" || method == "device-paste" || method == "paste" || method == "adb-authorize" || method == "adb-connect" || method == "adb-match" || method == "adb-local-authorize" || method == "adb-local-devices" ? 130000 : 30000;
       if (await Task.WhenAny(promise.Task, Task.Delay(timeout)) != promise.Task) { lock (gate) pending.Remove(id); throw new Exception("操作超时，请检查目标设备"); }
       return await promise.Task;
     }

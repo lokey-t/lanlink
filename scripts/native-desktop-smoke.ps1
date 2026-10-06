@@ -17,7 +17,7 @@ Get-Content -LiteralPath (Join-Path $testData 'passed.txt')
 foreach ($view in @('preview','menu','settings','settings-compact','pairing','pairing-qr','pairing-join','compact','remote-phone','consent')) {
     Copy-Item -LiteralPath (Join-Path $testData ("native-$view.png")) -Destination (Join-Path $root ("dist/native-$version-$view.png")) -Force
 }
-foreach ($view in @('controlled','adb','adb-compact','permissions','permissions-local','information','adb-hub')) {
+foreach ($view in @('controlled','adb','adb-compact','permissions','permissions-local','information','adb-hub','staging','file-share')) {
     $preview = Join-Path $testData ("native-$view.png")
     if (Test-Path -LiteralPath $preview) { Copy-Item -LiteralPath $preview -Destination (Join-Path $root ("dist/native-$version-$view.png")) -Force }
 }

@@ -37,9 +37,9 @@ final class AdaptiveVideo {
   }
 
   static final class Feedback {
-    long base = Long.MAX_VALUE, delay, rtt, sampleAt;
+    long base = Long.MAX_VALUE, delay, sampleAt;volatile long rtt;
 
-    void receive(VideoWire.Frame frame) {
+    synchronized void receive(VideoWire.Frame frame) {
       long now = System.currentTimeMillis(), transit = now - frame.time;
       if (base != Long.MAX_VALUE && Math.abs(transit - base) > 10000) base = transit;
       base = Math.min(base, transit);
@@ -47,7 +47,7 @@ final class AdaptiveVideo {
       sampleAt = now;
     }
 
-    JSONObject report() {
+    synchronized JSONObject report() {
       return Wire.obj(
           "delayMs", System.currentTimeMillis() - sampleAt < 4000 ? delay : 0, "rttMs", rtt);
     }

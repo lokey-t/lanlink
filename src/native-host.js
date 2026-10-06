@@ -22,6 +22,7 @@ process.stdin.on('end', close); process.on('SIGTERM', close); process.on('SIGINT
 process.stdout.on('error', close); service.once('stop', close);
 try { await service.start(); } catch (e) { write({ fatal: e.message }); await close(); }
 const invoke = createActions(service);
+service.on('edge-feedback', feedback => write({event:'edge-feedback',feedback}));
 write({ ready: true });
 createInterface({ input: process.stdin }).on('line', line => {
   if (closing) return;
@@ -43,7 +44,7 @@ createInterface({ input: process.stdin }).on('line', line => {
         }
         const temporary = !service.active;
         try { if (temporary) await service.switchTo(request.args.id, 'right', false); result = await service.pasteTo(request.args.id); }
-        finally { if (temporary) await service.returnLocal(); }
+        finally { if (temporary && service.active === request.args.id) await service.returnLocal(); }
       } else result = await invoke(request.method, request.args);
       write({ id: request.id, result: result ?? {} });
     } catch (e) { write({ id: request.id, error: e.message }); }

@@ -1,6 +1,6 @@
 {
   "name": "lanlink",
-  "version": "0.3.10",
+  "version": "0.3.44",
   "private": true,
   "type": "module",
   "description": "Offline LAN keyboard, clipboard and remote desktop sharing",
@@ -13,5 +13,9 @@
     "test": "node --test tests/*.test.js",
     "check": "node scripts/check.js",
     "package:mac": "sh scripts/package-macos.sh"
+  },
+  "dependencies": {
+    "koffi": "2.15.1",
+    "werift": "0.24.4"
   }
 }

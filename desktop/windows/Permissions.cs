@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Threading.Tasks;
 using System.Windows;
@@ -55,7 +55,7 @@ namespace LanLink.Desktop {
         var engine = Json.Get(device,"engine");
         if(engine != null) { var hint = MainWindow.Text(Json.Text(engine,"message"),12,"#7B879D");hint.Margin=new Thickness(0,16,0,0); hint.TextWrapping=TextWrapping.Wrap;card.Children.Add(hint); }
         if(Json.Text(device,"platform")=="android" && Json.Flag(device,"online")) {
-          string id=Json.Text(device,"id");var button=MainWindow.Button("ADB 键鼠授权 / 自动恢复",()=>main.ShowAdb(new Device { Id=id,Name=name,Platform="android",Online=true }));button.Margin=new Thickness(0,14,0,0);button.HorizontalAlignment=HorizontalAlignment.Left;card.Children.Add(button);
+          string id=Json.Text(device,"id");var button=MainWindow.Button("安卓设备连接授权",()=>main.Run(async()=>{await main.Client.Call("adb-guide-open",new {id=id});}));button.Margin=new Thickness(0,14,0,0);button.HorizontalAlignment=HorizontalAlignment.Left;card.Children.Add(button);
         }
         content.Children.Add(new Border { Child=card,Padding=new Thickness(22),CornerRadius=new CornerRadius(20),Background=MainWindow.Brush("#FFFFFF"),Margin=new Thickness(0,0,0,16) });
       }

@@ -1,5 +1,31 @@
 # Third-party components
 
+## Native QUIC transport (0.3.40)
+
+The shared Rust core uses Cloudflare quiche 0.30.0 (BSD-2-Clause),
+https://github.com/cloudflare/quiche, and its BoringSSL TLS backend through boring 5.2.0.
+Desktop FFI uses Koffi 2.15.1 (MIT), https://koffi.dev/.
+Android bundles NDK r27d libc++ for ARM64 and x86_64.
+The locked dependency inventory and redistributed license/copyright notices are in
+`vendor/quic-notices/`; Android carries the same notices in its assets.
+Original notices remain applicable to each dependency, including BoringSSL's component licenses.
+
+## WebRTC transport (0.3.38)
+
+Desktop uses werift 0.24.4 (MIT), https://github.com/shinyoshiaki/werift-webrtc.
+The upstream license is retained in `vendor/webrtc-notices/WERIFT-LICENSE`.
+Exact runtime dependency versions and integrity checks are in `package-lock.json`;
+desktop packages retain the installed dependency directories and their license files.
+
+Android uses io.github.webrtc-sdk:android:150.7871.01 from Maven Central,
+https://github.com/webrtc-sdk/android. The SDK distribution is MIT licensed;
+WebRTC is BSD licensed by the WebRTC project authors. Upstream SDK / WebRTC
+licenses and the WebRTC patent grant are retained in `vendor/webrtc-notices/`
+and included in Android APK assets under `webrtc-notices/`.
+
+Used as a native, LAN-only DTLS/SCTP transport; there is no configured public
+STUN/TURN service. The existing native H.264 encoders and decoders are retained.
+
 ## qrcode-generator 2.0.4
 
 `vendor/qrcode.mjs` is an unmodified distribution file from

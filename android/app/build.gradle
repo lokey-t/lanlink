@@ -2,7 +2,7 @@ plugins { id 'com.android.application' }
 android {
     namespace 'com.lanlink.app'
     compileSdk 35
-    defaultConfig { applicationId 'com.lanlink.app'; minSdk 29; targetSdk 35; versionCode 12; versionName '0.3.10'; testInstrumentationRunner 'com.lanlink.app.PermissionFlowTest' }
+    defaultConfig { applicationId 'com.lanlink.app'; minSdk 29; targetSdk 35; versionCode 35; versionName '0.3.44'; testInstrumentationRunner 'com.lanlink.app.PermissionFlowTest' }
     signingConfigs {
         debug {
             // Reuse this workspace's existing test signer so Studio can update the
@@ -19,4 +19,7 @@ android {
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }
-dependencies { implementation 'com.google.zxing:core:3.5.3' }
+dependencies {
+    implementation 'com.google.zxing:core:3.5.3'
+    implementation 'io.github.webrtc-sdk:android:150.7871.01'
+}

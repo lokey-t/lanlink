@@ -11,13 +11,37 @@ export function createActions(service) {
   const adb = service.adb || new AdbManager(service);
   const actions = {
     state: () => service.state(),
+    'stage-list':()=>({files:service.staging.list()}),
+    'stage-share':a=>service.staging.share(a.id,a.files,a.start!==false,a.session),
+    'stage-drag-end':a=>{service.staging.end(a.session);return {};},
+    'stage-edge':async a=>{if(!service.config.master||service.config.edges?.[a.edge]!==a.id)throw Error('设备已不在此边缘');if(service.config.switchMode==='hotkey'&&!service.edgeHotkeyHeld())throw Error('请按住设置的切换快捷键');const deadline=Date.now()+8000;while(service.switching&&Date.now()<deadline)await new Promise(r=>setTimeout(r,30));if(service.active!==a.id)await service.switchTo(a.id,a.edge,true,false,false,false,true);await service.native.call('file-drag-cancel');return service.staging.share(a.id,a.files,false);},
+    'stage-start':a=>{if(!service.staging.rows.has(a.id))throw Error('暂存文件不存在');service.staging.start(a.id).catch(e=>service.log(e.message));return {message:'正在接收文件…'};},
+    'stage-ready':a=>service.staging.ready(a.id),
+    'stage-remove':a=>service.staging.remove(a.id),
+    'clipboard-upload':()=>service.clipboardSync.uploadNow(),
+    'clipboard-download':()=>service.clipboardSync.downloadNow(),
+    'clipboard-copy':a=>service.clipboardSync.copy(a.id),
     'group-permissions': () => groupPermissions(service),
     'adb-forget': a => adb.forget(a.id),
     settings: a => service.settings(a),
     'device-remove': a => service.group.remove(a.id),
     'stop-inbound': () => service.stopInbound(),
     'adb-devices': () => adb.devices(),
+    'adb-group': () => adb.groupDevices(),
     'adb-authorize': a => adb.authorize(a),
+    'adb-match': a => adb.match(a.id),
+    'adb-guide-open': a => service.adbGuide.open(a.id),
+    'adb-local-devices': () => adb.localDevices(),
+    'adb-local-authorize': a => adb.authorizeLocal(a.serial),
+    'adb-connect': async a => { const match=await adb.match(a.id);if(!match.connected)throw Error(match.message);return adb.authorize({id:a.id,serial:match.serial}); },
+    'feature-prepare': a => service.access.prepare(a.id,a.permissions),
+    'access-request': a => service.access.request(a.id,a.permissions),
+    'access-status': a => service.access.status(a.requestId),
+    'access-complete': a => service.access.complete(a.requestId),
+    'access-cancel': a => (a.requestId || service.access.notice?.id===a.id || service.controlIntent?.id===a.id) ? service.access.cancel(a.requestId) : {},
+    'adb-guide-status': a => service.adbGuide.status(a.requestId),
+    'adb-guide-complete': a => service.adbGuide.complete(a.requestId),
+    'adb-guide-cancel': a => (a.requestId || service.adbGuide.notice?.id === a.id || service.controlIntent?.id === a.id) ? service.adbGuide.cancel(a.requestId) : {},
     'fallback-dismiss': () => { service.fallbackNotice = null; service.edge.reset(); },
     'consent-decide': a => service.decideConsent(a),
     'consent-revoke': a => service.revokeConsent(a.id),
@@ -50,14 +74,14 @@ export function createActions(service) {
       }
       await service.returnLocal(); service.stopDiscovery?.(); service.pairing.hide();
       for (const p of service.sockets) p.close();
-      service.config.knownDevices = {}; service.config.edges = {}; service.config.deviceGrants = {}; service.consent.reset(service.config.deviceGrants); service.permissionNotice = null; service.secret = secret; service.config.token = result.token.trim(); service.config.pausedPeers = {}; if (result.group) service.group.adopt(result.group, result.token); else { service.config.group = { id: (await import('./identity.js')).accountId(result.token), revision: 0, members: {}, removed: [], history: [], anchors: {} }; service.group.data = service.config.group; service.group.data.members[service.config.id] = service.group.own; service.group.refreshBoxes(); } service.offers.clear(); service.clipboard = null;
+      service.config.knownDevices = {}; service.config.edges = {}; service.config.deviceGrants = {}; service.consent.reset(service.config.deviceGrants); service.permissionNotice = null; service.secret = secret; service.config.token = result.token.trim(); service.config.pausedPeers = {}; if (result.group) service.group.adopt(result.group, result.token); else { service.config.group = { id: (await import('./identity.js')).accountId(result.token), revision: 0, members: {}, removed: [], history: [], anchors: {} }; service.group.data = service.config.group; service.group.data.members[service.config.id] = service.group.own; service.group.refreshBoxes(); } service.offers.clear(); service.clipboard = null;service.clipboardSync.clear();
       delete service.config.pendingGroupJoin; await saveConfig(service.dir, service.config);
       if (!service.options.noDiscovery) service.stopDiscovery = startDiscovery(service.identity(), secret, service.port,
         (b, host) => { if (service.config.id < b.id && !service.peers.has(b.id)) service.connect(host, b.port); }, e => service.log(e.message));
       if (result.host) service.connect(result.host, result.port);
     },
     connect: a => service.connect(a.host, Number(a.port || 45831)),
-    control: a => service.switchTo(a.id, a.edge || 'right', !!a.capture, a.newSession === true, a.fallbackAccepted === true),
+    control: a => service.switchTo(a.id, a.edge || 'right', !!a.capture, a.newSession === true, a.fallbackAccepted === true, a.screen === true),
     release: () => service.returnLocal(),
     stop: () => { setTimeout(() => service.emit('stop'), 50); },
     input: a => { if (service.active !== a.id) throw new Error('请先开始控制'); return service.getPeer(a.id).request('input', a.input); },
@@ -69,7 +93,7 @@ export function createActions(service) {
     paste: a => service.pasteTo(a.id),
     clipboard: async a => {
       await service.native.call('clipboardSet', { text: String(a.text || '').slice(0, 1000000) });
-      return service.snapshotClipboard();
+      return service.snapshotClipboard(true,true);
     },
     receive: () => { if (!service.clipboard) throw new Error('没有共享内容'); return service.materialize(service.clipboard); },
     shutdown: a => service.getPeer(a.id).request('shutdown'),

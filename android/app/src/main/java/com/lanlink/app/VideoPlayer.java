@@ -14,8 +14,10 @@ import org.json.JSONObject;
 /** Native MediaCodec Surface decoder, with JPEG and legacy-peer compatibility. */
 final class VideoPlayer implements AutoCloseable {
   final AdaptiveVideo.Feedback feedback = new AdaptiveVideo.Feedback();
-  int bitrate = 4000000;
-  final Wire peer;
+  volatile int bitrate = 4000000;
+  Wire peer;
+  final String peerId;
+  boolean requireControl;
   final TextureView texture;
   final ImageView image;
   final TextView status;
@@ -24,17 +26,22 @@ final class VideoPlayer implements AutoCloseable {
   volatile boolean closed;
   volatile Surface surface;
   volatile VideoWire connection;
+  volatile VideoTransport rtc;long rtcCooldown;
   volatile int width, height;
   volatile long renderedFrames;
   MediaCodec decoder;
   int decoderWidth, decoderHeight;
-  boolean needKey = true;
-  String session;
+  volatile boolean needKey = true;
+  volatile String session;
+  volatile String codecLabel="";
+  long fpsAt,fpsFrames;
+  final Runnable metrics=new Runnable(){public void run(){if(closed)return;long now=SystemClock.elapsedRealtime();if(fpsAt!=0&&!codecLabel.isEmpty())status.setText(codecLabel+" · "+Math.round((renderedFrames-fpsFrames)*1000f/Math.max(1,now-fpsAt))+" fps · "+String.format(java.util.Locale.ROOT,"%.1f Mbps",bitrate/1000000.0));fpsAt=now;fpsFrames=renderedFrames;main.postDelayed(this,1000);}};
   VideoViewport viewport;
   boolean legacyViewing;
 
   VideoPlayer(Wire peer, TextureView texture, ImageView image, TextView status) {
     this.peer = peer;
+    peerId = peer.id;
     this.texture = texture;
     this.image = image;
     this.status = status;
@@ -60,6 +67,7 @@ final class VideoPlayer implements AutoCloseable {
   }
 
   void start() {
+    main.post(metrics);
     new Thread(this::run, "lanlink-video-player").start();
   }
 
@@ -160,19 +168,51 @@ final class VideoPlayer implements AutoCloseable {
   }
 
   void run() {
-    boolean jpegOnly = false, legacy = false;
+    boolean jpegOnly = false, legacy = false, h264Only = false;
     try {
       while (!closed) {
         try {
-          if (!legacy && connection == null) {
-            JSONObject info = peer.request("videoOpen", Wire.obj("h264", !jpegOnly));
-            session = info.getString("id");
-            if (closed) break;
-            connection = VideoWire.connect(peer.socket.getInetAddress().getHostAddress(), info);
+          LinkService service = LinkService.instance;
+          if (requireControl) {
+            if (service == null || !peerId.equals(service.active)) {
+              Thread.sleep(500);
+              continue;
+            }
+            peer = service.peer(peerId);
+            service.beginViewing(peerId);
           }
-          long keepAt = System.currentTimeMillis(), measuredAt = keepAt;
-          long shownAt = renderedFrames;
-          int count = 0;
+          if (!legacy && connection == null && rtc==null) {
+            JSONObject info=null;
+            if(peer.fastPath==null&&peer.quicConn!=0&&System.currentTimeMillis()>rtcCooldown){
+              try{long channel=new java.security.SecureRandom().nextInt()&0xffffffffL;if(channel==0)channel=1;rtc=LinkService.instance.quic.video(peer,channel);info=peer.request("videoOpen",Wire.obj("h264",!jpegOnly,"quic",channel));session=info.getString("id");if(info.optLong("quic")!=channel)throw new IOException("QUIC 串流协商失败");rtc.ready();}
+              catch(Exception unavailable){if(rtc!=null)rtc.close();rtc=null;rtcCooldown=System.currentTimeMillis()+30000;if(session!=null){try{peer.request("videoStop",Wire.obj("id",session));}catch(Exception ignored){}session=null;}}
+            }
+            if(rtc==null && peer.fastPath==null && peer.info.optJSONObject("capabilities")!=null && peer.info.optJSONObject("capabilities").optInt("rtcVideo")==1 && System.currentTimeMillis()>rtcCooldown){
+              try{RtcVideo stream=new RtcVideo(LinkService.instance);rtc=stream;info=peer.request("videoOpen",Wire.obj("h264",!jpegOnly,"rtc",stream.offer()));session=info.getString("id");stream.accept(info.getString("rtc"));rtc.ready();if(closed)throw new IOException("CONTROL_ENDED: 画面请求已取消");}
+              catch(Exception unavailable){if(rtc!=null)rtc.close();rtc=null;rtcCooldown=System.currentTimeMillis()+30000;if(session!=null){try{peer.request("videoStop",Wire.obj("id",session));}catch(Exception ignored){}session=null;}if(closed)throw unavailable;}
+            }
+            if(rtc==null)info = peer.request("videoOpen", Wire.obj("h264", !jpegOnly));
+            h264Only = info.optBoolean("h264Only");
+            session = info.getString("id");
+            if(rtc!=null)rtc.keyCallback(()->{LinkService currentService=LinkService.instance;if(currentService!=null)currentService.jobs.execute(()->{try{peer.request("videoKey",Wire.obj("id",session));}catch(Exception ignored){}});});
+            if (closed) break;
+            int usbPort = info.optInt("usbPort");
+            if(rtc!=null){}else if (usbPort > 0 && usbPort <= 65535) {
+              JSONObject route = new JSONObject(info.toString()).put("port", usbPort);
+              try { connection = VideoWire.connect("127.0.0.1", route); }
+              catch (Exception unavailable) {
+                connection = VideoWire.connect(peer.socket.getInetAddress().getHostAddress(), info);
+              }
+            } else connection = VideoWire.connect(peer.socket.getInetAddress().getHostAddress(), info);
+          }
+          final java.util.concurrent.ScheduledExecutorService keeper=java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
+          final String keepSession=session;final Wire keepPeer=peer;final VideoWire keepConnection=connection;final VideoTransport keepRtc=rtc;
+          keeper.scheduleWithFixedDelay(()->{
+            if(closed||keepSession==null||!keepSession.equals(session))return;
+            try{long sent=SystemClock.elapsedRealtime();JSONObject result=keepPeer.request("videoKeep",Wire.obj("id",keepSession,"feedback",feedback.report().put("needKey",needKey||keepRtc!=null&&keepRtc.needsKey())));if(keepSession.equals(session)){feedback.rtt=SystemClock.elapsedRealtime()-sent;bitrate=result.optInt("bitrate",4000000);}}
+            catch(Exception error){if(keepConnection!=null)keepConnection.close();if(keepRtc!=null)keepRtc.close();}
+          },1,1,java.util.concurrent.TimeUnit.SECONDS);
+          try {
           while (!closed) {
             VideoWire.Frame frame;
             if (legacy) {
@@ -186,40 +226,17 @@ final class VideoPlayer implements AutoCloseable {
                       false,
                       true);
             } else {
-              frame = connection.next();
+              frame =rtc!=null?rtc.next():connection.next();
               feedback.receive(frame);
-              if (System.currentTimeMillis() - keepAt >= 1000) {
-                long sent = System.currentTimeMillis();
-                JSONObject result =
-                    peer.request(
-                        "videoKeep", Wire.obj("id", session, "feedback", feedback.report()));
-                feedback.rtt = System.currentTimeMillis() - sent;
-                bitrate = result.optInt("bitrate", 4000000);
-                keepAt = System.currentTimeMillis();
-              }
             }
             if (frame.heartbeat) continue;
+            codecLabel=frame.h264?(rtc instanceof QuicVideo?"H.264 · QUIC":rtc!=null?"H.264 · WebRTC":"H.264 · TCP"):legacy?"截图兼容模式":"兼容串流";
             render(frame);
-            count++;
-            long now = System.currentTimeMillis();
-            if (now - measuredAt > 1000) {
-              final String label =
-                  (frame.h264 ? "H.264 串流" : legacy ? "截图兼容模式" : "兼容串流")
-                      + " · "
-                      + Math.round((renderedFrames - shownAt) * 1000f / (now - measuredAt))
-                      + " fps · "
-                      + String.format(java.util.Locale.ROOT, "%.1f Mbps", bitrate / 1000000.0);
-              main.post(
-                  () -> {
-                    if (!closed) status.setText(label);
-                  });
-              count = 0;
-              shownAt = renderedFrames;
-              measuredAt = now;
-            }
             if (legacy) Thread.sleep(50);
           }
+          } finally {keeper.shutdownNow();}
         } catch (Exception error) {
+          if(rtc!=null)rtcCooldown=System.currentTimeMillis()+30000;
           String reason = error.getMessage() == null ? "串流连接暂不可用" : error.getMessage();
           main.post(
               () -> {
@@ -231,15 +248,20 @@ final class VideoPlayer implements AutoCloseable {
                           .replace("PERMISSION_REQUIRED: ", "")
                           .replace("CONTROL_CONFLICT: ", ""));
               });
-          if (reason.startsWith("CONTROL_ENDED:") || reason.startsWith("CONTROL_CONFLICT:")) {
+          if (reason.startsWith("CONTROL_ENDED:")
+              || reason.startsWith("CONTROL_CONFLICT:")
+              || reason.startsWith("CONSENT_DENIED:")) {
             closed = true;
             break;
           }
-          if (reason.contains("不支持")) legacy = true;
-          else if (!reason.startsWith("CONSENT_") && !reason.startsWith("PERMISSION_")) {
-            if (jpegOnly) legacy = true;
+          if (reason.startsWith("VIDEO_H264_REQUIRED:") || reason.contains("Root 投屏需要 H.264")) {
+            h264Only = true;
+            jpegOnly = false;
+            legacy = false;
+          } else if (!h264Only && reason.contains("不支持")) legacy = true;
+          else if (!h264Only
+              && (error instanceof MediaCodec.CodecException || reason.contains("解码")))
             jpegOnly = true;
-          }
         } finally {
           disconnect();
         }
@@ -253,6 +275,8 @@ final class VideoPlayer implements AutoCloseable {
   }
 
   void disconnect() {
+    codecLabel="";
+    VideoTransport rtcOld=rtc;rtc=null;if(rtcOld!=null)rtcOld.close();
     VideoWire old = connection;
     connection = null;
     if (old != null) old.close();
@@ -275,6 +299,8 @@ final class VideoPlayer implements AutoCloseable {
 
   public void close() {
     closed = true;
+    main.removeCallbacks(metrics);
+    if(rtc!=null)rtc.close();
     VideoWire old = connection;
     if (old != null) old.close();
   }

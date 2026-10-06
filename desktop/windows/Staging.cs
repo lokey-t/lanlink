@@ -1,0 +1,40 @@
+﻿﻿﻿using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Diagnostics;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;
+using Microsoft.Win32;
+
+namespace LanLink.Desktop {
+  public sealed class StagingPage : Grid {
+    readonly MainWindow main;readonly StackPanel list=new StackPanel();string signature="";bool loading,preview;public int RowCount{get{return list.Children.Count;}}public void SetPreview(object data){preview=true;Display(data);}
+    public StagingPage(MainWindow owner){main=owner;RowDefinitions.Add(new RowDefinition{Height=GridLength.Auto});RowDefinitions.Add(new RowDefinition());var top=new DockPanel{Margin=new Thickness(0,0,0,22)};var refresh=MainWindow.Button("刷新",()=>main.Run(Refresh));DockPanel.SetDock(refresh,Dock.Right);top.Children.Add(refresh);top.Children.Add(MainWindow.Text("暂存文件",26));Children.Add(top);var scroll=new ScrollViewer{Content=list,VerticalScrollBarVisibility=ScrollBarVisibility.Auto};SetRow(scroll,1);Children.Add(scroll);}
+    public static string Size(double size){return size<1024?size+" B":size<1048576?(size/1024).ToString("0.0")+" KB":size<1073741824?(size/1048576).ToString("0.0")+" MB":(size/1073741824).ToString("0.00")+" GB";}
+    public async Task Refresh(){if(loading||preview)return;loading=true;try{var data=await main.Client.Call("stage-list");var json=new System.Web.Script.Serialization.JavaScriptSerializer();string next=json.Serialize(data);if(!preview&&next!=signature){signature=next;Display(data);}}finally{loading=false;}}
+    public void Display(object data){list.Children.Clear();foreach(var row in Json.Get(data,"files") as IEnumerable??new object[0]){
+      string id=Json.Text(row,"id"),state=Json.Text(row,"state");var content=new StackPanel();var head=new DockPanel();var label=MainWindow.Text(state=="ready"?"已接收":state=="receiving"?"传输中 "+(100*Json.Number(row,"received",0)/Math.Max(1,Json.Number(row,"size",0))).ToString("0")+"%":state=="pending"?"待传输":state=="queued"?"等待传输":"传输失败",12,"#7163C8");DockPanel.SetDock(label,Dock.Right);head.Children.Add(label);head.Children.Add(MainWindow.Text(Json.Text(row,"name"),17));content.Children.Add(head);
+      var info=MainWindow.Text(Json.Text(row,"sourceName")+" · "+Size(Json.Number(row,"size",0))+" · "+(Json.Text(row,"type")=="folder"?"文件夹 · "+Json.Number(row,"count",0)+" 个文件":"文件")+" · "+DateTimeOffset.FromUnixTimeMilliseconds((long)Json.Number(row,"created",0)).LocalDateTime.ToString("MM-dd HH:mm"),12,"#788195");info.Margin=new Thickness(0,8,0,12);info.TextWrapping=TextWrapping.Wrap;content.Children.Add(info);
+      var actions=new StackPanel{Orientation=Orientation.Horizontal};if(state=="ready"){
+        actions.Children.Add(MainWindow.Button("查看文件",()=>main.Run(async()=>{var ready=await main.Client.Call("stage-ready",new{id=id});Process.Start(new ProcessStartInfo(Json.Text(ready,"path")){UseShellExecute=true});})));
+        var drag=MainWindow.Text("拖到文件夹以保存",12,"#7163C8");drag.Margin=new Thickness(16,0,14,0);drag.Cursor=Cursors.Hand;Point down=new Point();bool pressed=false;drag.MouseLeftButtonDown+=(s,e)=>{down=e.GetPosition(drag);pressed=true;};drag.MouseLeftButtonUp+=(s,e)=>pressed=false;
+        drag.MouseMove+=async(s,e)=>{if(!pressed||e.LeftButton!=MouseButtonState.Pressed||(e.GetPosition(drag)-down).Length<6)return;pressed=false;try{var ready=await main.Client.Call("stage-ready",new{id=id});var dataObject=new DataObject(DataFormats.FileDrop,new[]{Json.Text(ready,"path")});var effect=DragDrop.DoDragDrop(drag,dataObject,DragDropEffects.Copy);if(effect==DragDropEffects.Copy){await main.Client.Call("stage-remove",new{id=id});main.Notify("已保存到目标位置并移出暂存区");await Refresh();}}catch(Exception ex){main.Notify(ex.Message);}};actions.Children.Add(drag);
+      }else if(state!="receiving"&&state!="queued")actions.Children.Add(MainWindow.Button(state=="pending"?"开始传输":"重新传输",()=>main.Run(async()=>{await main.Client.Call("stage-start",new{id=id});await Refresh();})));
+      if(state!="receiving"){var remove=MainWindow.Button("移除",()=>main.Run(async()=>{await main.Client.Call("stage-remove",new{id=id});await Refresh();}));remove.Margin=new Thickness(10,0,0,0);actions.Children.Add(remove);}content.Children.Add(actions);if(Json.Text(row,"error")!=""){var error=MainWindow.Text(Json.Text(row,"error"),12,"#B76370");error.TextWrapping=TextWrapping.Wrap;error.Margin=new Thickness(0,12,0,0);content.Children.Add(error);}list.Children.Add(new Border{Child=content,Background=Brushes.White,CornerRadius=new CornerRadius(20),Padding=new Thickness(22),Margin=new Thickness(0,0,0,14),BorderBrush=MainWindow.Brush("#E5EAF4"),BorderThickness=new Thickness(1)});
+    }if(list.Children.Count==0){list.Children.Add(MainWindow.Text("暂存区是空的",18));var hint=MainWindow.Text("其他设备发送的文件会出现在这里。保存到文件夹后，文件会移出暂存区。",14,"#788195");hint.TextWrapping=TextWrapping.Wrap;hint.Margin=new Thickness(0,12,0,0);list.Children.Add(hint);}}
+  }
+  public sealed class FileShareWindow : Window {
+    public FileShareWindow(MainWindow main,string[] files,IEnumerable<Device> devices){Title="分享文件 · LanLink";Owner=main;Width=420;Height=440;MinWidth=360;MinHeight=300;WindowStartupLocation=WindowStartupLocation.CenterOwner;Background=MainWindow.Brush("#F7F8FB");Resources=main.Resources;var body=new StackPanel{Margin=new Thickness(24)};body.Children.Add(MainWindow.Text("发送到设备",24));var summary=MainWindow.Text(files.Length==1?Path.GetFileName(files[0]):files.Length+" 个文件或文件夹",13,"#788195");summary.Margin=new Thickness(0,12,0,20);body.Children.Add(summary);bool any=false;foreach(var device in devices.Where(d=>d.Online&&!d.Local)){any=true;var d=device;var send=MainWindow.Button(d.Name+"   →",()=>main.Run(async()=>{await main.PrepareFileShare(d,files);Close();}));send.HorizontalContentAlignment=HorizontalAlignment.Left;send.Margin=new Thickness(0,0,0,12);body.Children.Add(send);}if(!any)body.Children.Add(MainWindow.Text("暂无在线设备，请打开对方 LanLink。",14,"#788195"));var tip=MainWindow.Text("文件将传输到接收设备的暂存区。无需连接键鼠。",12,"#788195");tip.TextWrapping=TextWrapping.Wrap;tip.Margin=new Thickness(0,14,0,16);body.Children.Add(tip);body.Children.Add(MainWindow.Button("取消",Close));WindowShell.Wrap(this,new Border{Background=MainWindow.Brush("#F7F8FB"),Child=new ScrollViewer{Content=body,VerticalScrollBarVisibility=ScrollBarVisibility.Auto}},true,true);}
+  }
+  public static class FileShareShell {
+    static string Quote(string value){return "\""+value.Replace("\"","\\\"")+"\"";}
+    public static void Register(){string exe=Process.GetCurrentProcess().MainModule.FileName;foreach(string kind in new[]{"*","Directory"})using(var key=Registry.CurrentUser.CreateSubKey("Software\\Classes\\"+kind+"\\shell\\LanLink.Share")){key.SetValue("","分享文件 · LanLink");key.SetValue("Icon",exe);key.SetValue("MultiSelectModel","Single");using(var command=key.CreateSubKey("command"))command.SetValue("",Quote(exe)+" --data "+Quote(MainWindow.DataDir)+" --root "+Quote(MainWindow.Root)+" --share \"%1\"");}}
+    public static void Enqueue(string[] files){if(files.Length==0||files.Length>100||files.Any(f=>!Path.IsPathRooted(f)))throw new IOException("文件路径无效");string folder=Path.Combine(MainWindow.DataDir,"share-inbox");Directory.CreateDirectory(folder);string dest=Path.Combine(folder,Guid.NewGuid()+".json"),part=dest+".part";File.WriteAllText(part,new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(files));File.Move(part,dest);}
+    public static IEnumerable<string[]> Drain(){string folder=Path.Combine(MainWindow.DataDir,"share-inbox");if(!Directory.Exists(folder))yield break;foreach(string file in Directory.GetFiles(folder,"*.json").Take(100)){string[] paths=null;try{paths=new System.Web.Script.Serialization.JavaScriptSerializer().Deserialize<string[]>(File.ReadAllText(file));if(paths.Length==0||paths.Length>100||paths.Any(p=>!Path.IsPathRooted(p)))paths=null;}catch{}try{File.Delete(file);}catch{}if(paths!=null)yield return paths;}}
+  }
+}

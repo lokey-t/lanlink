@@ -26,6 +26,6 @@ export function saveConfig(dir, config) {
 export async function loadConfig(dir) {
   try { const config = JSON.parse(await readFile(path.join(dir, 'config.json'), 'utf8')); parseToken(config.token); return config; }
   catch (e) { if (e.code !== 'ENOENT') throw e; }
-  const config = { id: randomUUID(), name: os.hostname(), token: newToken(), dwell: 450, edges: {}, deviceGrants: {}, permissions: { input: true, screen: true, clipboard: true, shutdown: true } };
+  const config = { id: randomUUID(), name: os.hostname(), token: newToken(), dwell: 100, edges: {}, deviceGrants: {}, permissions: { input: true, screen: true, clipboard: true, shutdown: true } };
   await saveConfig(dir, config); return config;
 }

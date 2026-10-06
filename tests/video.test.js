@@ -31,6 +31,20 @@ test('media channel authenticates both ends and handles fragmented binary frames
   assert.deepEqual(await client.next(), fixture);
 });
 
+test('viewer preserves an H.264-only negotiation across reconnects', async t => {
+  const f = fakeHost(); f.allow();
+  const control = { socket: { remoteAddress: '127.0.0.1' }, request: async (method, a) => {
+    if(method==='videoOpen') return { ...await f.host.open(f.peer,a), h264Only:true };
+    return method==='videoKeep' ? f.host.keep(f.peer,a.id) : f.host.stop(f.peer,a.id);
+  }};
+  const viewer = new VideoViewer({ getPeer:()=>control });
+  t.after(async()=>{ await viewer.closeAll();f.host.closeAll(); });
+  for(let i=0;i<2;i++) {
+    assert.equal((await viewer.open('root-phone')).h264Only,true);
+    await viewer.close('root-phone');
+  }
+});
+
 test('wrong media session key cannot obtain a video frame', async t => {
   const server = net.createServer(async socket => { socket.on('error', () => {}); try { await serverHandshake(socket, randomBytes(32)); assert.fail('must not authenticate'); } catch { socket.destroy(); } });
   await new Promise(r => server.listen(0, '127.0.0.1', r)); t.after(() => server.close());

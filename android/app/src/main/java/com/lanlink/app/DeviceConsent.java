@@ -40,6 +40,15 @@ final class DeviceConsent {
   synchronized boolean hasGrant(String id) {
     return grants.has(id);
   }
+  synchronized boolean rejected(String id) {peek();return denied.containsKey(id);}
+  synchronized boolean pending(String id) {peek();return pending.containsKey(id);}
+  synchronized void request(String id, String name) throws IOException {
+    peek();
+    if (pending.containsKey(id)) return;
+    if (denied.containsKey(id)) throw new IOException("CONSENT_DENIED: 手机暂未同意，请稍后再试");
+    if (pending.size() >= 8) throw new IOException("待确认请求过多");
+    pending.put(id, new Request(id, name, System.currentTimeMillis()));
+  }
 
   synchronized Request peek() {
     long now = System.currentTimeMillis();
@@ -91,6 +100,24 @@ final class DeviceConsent {
 
   synchronized void disconnect(String id) {
     pending.remove(id);
+  }
+
+  synchronized String setPermission(String id, String key, boolean enabled) throws IOException {
+    if (!Arrays.asList(KEYS).contains(key)) throw new IOException("未知权限");
+    try {
+      JSONObject grant = grants.optJSONObject(id);
+      if (grant == null) {
+        grant = new JSONObject();
+        for (String entry : KEYS) grant.put(entry, false);
+      }
+      grant.put(key, enabled);
+      grants.put(id, grant);
+      pending.remove(id);
+      denied.remove(id);
+      return grants.toString();
+    } catch (JSONException error) {
+      throw new IOException(error);
+    }
   }
 
   synchronized String revoke(String id) {

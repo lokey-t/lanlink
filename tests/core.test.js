@@ -11,6 +11,7 @@ import { seal, unseal, sessionKeys, Peer } from '../src/wire.js';
 import { discoveryRecord, verifyRecord } from '../src/discovery.js';
 import { EdgeSwitch } from '../src/edge.js';
 import { Service, safeName, validateInput } from '../src/service.js';
+import { MotionSender, MotionReceiver } from '../src/quic-motion.js';
 import { startUI } from '../src/http.js';
 
 const pause = ms => new Promise(r => setTimeout(r, ms));
@@ -38,10 +39,10 @@ test('first control is blocked until local decision and only selected permission
   const baseline = b.native.calls.length;
   await assert.rejects(p.request('acquire'), /CONSENT_PENDING/);
   await assert.rejects(p.request('screen'), /CONSENT_PENDING/);
-  await assert.rejects(p.request('clipboardGet'), /CONSENT_PENDING/);
+  assert.equal((await p.request('clipboardGet')).text,'');
   await assert.rejects(p.request('shutdown'), /CONSENT_PENDING/);
   assert.equal(b.state().consentRequests.length, 1); assert.equal(b.owner, null); assert.equal(b.shutdownAt, undefined);
-  assert.equal(b.native.calls.length, baseline);
+  assert.equal(b.native.calls.length, baseline+1);
   const request = b.state().consentRequests[0];
   await assert.rejects(b.decideConsent({ ...request, requestId: 'stale', accepted: true }), /请求已结束/);
   await b.decideConsent({ ...request, accepted: true, permissions: { input: true, screen: false, clipboard: false, shutdown: false } });
@@ -58,12 +59,12 @@ test('first control is blocked until local decision and only selected permission
 
 test('offline identity persists and rejects malformed / noncanonical tokens', async t => {
   const folder = await mkdtemp(path.join(os.tmpdir(), 'lanlink-identity-')); t.after(() => rm(folder, { recursive: true, force: true }));
-  const a = await loadConfig(folder), b = await loadConfig(folder); assert.deepEqual(a, b); assert.equal(parseToken(a.token).length, 32); assert.equal(accountId(a.token), accountId(b.token));
+  const a = await loadConfig(folder), b = await loadConfig(folder); assert.deepEqual(a, b); assert.equal(a.dwell,100); assert.equal(parseToken(a.token).length, 32); assert.equal(accountId(a.token), accountId(b.token));
   assert.deepEqual(a.permissions, { input: true, screen: true, clipboard: true, shutdown: true });
   for (const bad of ['', '123456', 'lanlink1:password', 'lanlink1:' + 'A'.repeat(42) + 'B']) assert.throws(() => parseToken(bad));
 });
 
-test('approval enables selected app features; target termination blocks automatic reacquire until a new local approval', async t => {
+test('target termination blocks retries while retaining grants for a new explicit session', async t => {
   const {a,b}=await pair(t,{input:false,screen:false,clipboard:false,shutdown:false},false);
   const p=a.getPeer(b.config.id);
   await assert.rejects(p.request('acquire'),/CONSENT_PENDING/);
@@ -73,9 +74,13 @@ test('approval enables selected app features; target termination blocks automati
   await b.stopInbound(); await until(()=>a.controlEnded?.id===b.config.id&&!a.active);
   assert.equal(b.owner,null); assert.ok(b.native.calls.some(c=>c.method==='release'));
   for(const method of ['acquire','screen','videoOpen']) await assert.rejects(p.request(method),/CONTROL_ENDED/);
+  const report=await p.request('permission-status');assert.equal(report.permissions.input.peerAllowed,true);assert.equal(report.permissions.clipboard.peerAllowed,false);
+  await p.request('acquire',{newSession:true}); assert.equal(b.owner.id,a.config.id);
+  assert.equal(b.state().consentRequests.length,0);
+  assert.equal((await loadConfig(b.dir)).deviceGrants[a.config.id].input,true);
+  await assert.rejects(p.request('clipboardGet'),/CONSENT_DENIED/);
+  await b.revokeConsent(a.config.id);
   await assert.rejects(p.request('acquire',{newSession:true}),/CONSENT_PENDING/);
-  await b.decideConsent({...b.state().consentRequests[0],accepted:true,permissions:{input:true}});
-  await p.request('acquire'); assert.equal(b.owner.id,a.config.id);
 });
 
 test('online removal disconnects the real encrypted peer, resets its group and invalidates the old credential', async t => {
@@ -103,7 +108,7 @@ test('locally initiated control supports clipboard return without granting rever
   assert.equal(a.consent.allowed(b.config.id, 'input'), false);
   await assert.rejects(b.getPeer(a.config.id).request('acquire'), /CONTROL_CONFLICT/);
   await a.returnLocal(); assert.equal(a.native.clip.text, '返回');
-  assert.equal(a.canShareClipboard(b.config.id), false);
+  assert.equal(a.canShareClipboard(b.config.id), true);
   await assert.rejects(b.getPeer(a.config.id).request('acquire'), /CONSENT_PENDING/);
 });
 
@@ -139,6 +144,15 @@ test('edge dwell resets on leaving, changing target and cooldown', () => {
   e.update(1000, 50, 1920, 1080, edges, 450); time = 500; e.update(1919, 50, 1920, 1080, edges, 450); time = 950;
   assert.deepEqual(e.update(1919, 50, 1920, 1080, edges, 450), { edge: 'right', target: 'B' }); time = 1000; assert.equal(e.update(1919, 50, 1920, 1080, edges, 450), null);
 });
+test('returning to an unchanged edge requires leaving before a new capture', () => {
+  let now=1000;const e=new EdgeSwitch(()=>now),edges={right:'phone'};
+  e.waitForLeave();now+=1000;
+  assert.equal(e.update(1919,500,1920,1080,edges,100),null);now+=1000;
+  assert.equal(e.update(1919,500,1920,1080,edges,100),null);
+  e.update(1500,500,1920,1080,edges,100);e.update(1919,500,1920,1080,edges,100);now+=101;
+  assert.deepEqual(e.update(1919,500,1920,1080,edges,100),{edge:'right',target:'phone'});
+});
+
 test('unsafe paths, invalid inputs and non-finite coordinates rejected', () => {
   for (const name of ['../escape', '..', 'C:\\boot.ini', 'CON', 'LPT1.txt', 'x/y', 'bad\0name', 'trailing.']) assert.throws(() => safeName(name));
   assert.equal(safeName('测试 report.txt'), '测试 report.txt');
@@ -172,6 +186,55 @@ test('stationary remote cursor returns after dwell without additional movement e
   const { a, b } = await pair(t); a.config.dwell = 100; await a.switchTo(b.config.id, 'right'); a.position.x = 0; a.position.y = .5;
   await until(() => a.active === null, 1800); assert(a.native.calls.some(c => c.method === 'mode' && c.args.remote === false));
 });
+
+test('Datagram recovery at a boundary cannot become a local edge switch after release', async t => {
+  const {a,b}=await pair(t);await a.switchTo(b.config.id,'right',false);
+  const sender=new MotionSender(),receiver=new MotionReceiver();sender.move({kind:'relative',dx:700,dy:0});const recovered=receiver.accept(sender.move({kind:'relative',dx:600,dy:0}));
+  assert.equal(recovered.reduce((n,m)=>n+m.dx,0),1300);
+  for(const input of recovered)await b.handle(b.getPeer(a.config.id),'input',input);
+  assert.equal(b.edge.waitingForLeave,true);await a.returnLocal();
+  b.config.master=true;b.config.edges={right:a.config.id};b.config.dwell=0;b.edge.cooldown=0;
+  const boundary={type:'cursor',x:1919,y:540,width:1920,height:1080};
+  await b.nativeEvent({...boundary,synthetic:true});await b.nativeEvent(boundary);
+  assert.equal(b.active,null);assert.equal(b.edge.progress,null);
+  await b.nativeEvent({...boundary,x:960});await b.nativeEvent(boundary);
+  assert.equal(b.active,a.config.id,'a new physical approach after leaving must still switch');
+});
+
+test('injected pointer samples do not advance the captured return edge',async t=>{
+  const {a,b}=await pair(t);await a.switchTo(b.config.id,'right');const before={...a.position};
+  await a.nativeEvent({type:'input',kind:'move',dx:-1000,dy:0,synthetic:true});
+  assert.deepEqual(a.position,before);assert.ok(!a.pendingMove);
+  await a.nativeEvent({type:'input',kind:'move',dx:20,dy:0});assert.ok(a.position.x>before.x);
+});
+
+test('controlled device receives only its outgoing edge countdown and a hidden-away departure',async t=>{
+  const {a,b}=await pair(t);clearInterval(a.edgeTimer);a.config.dwell=100;
+  let clock=0;a.edge.now=()=>clock;const feedback=[];b.on('edge-feedback',m=>feedback.push(m));
+  await a.switchTo(b.config.id,'right');a.edge.cooldown=0;feedback.length=0;a.position={x:0,y:.5};
+  a.checkReturnEdge();await until(()=>feedback.some(m=>m.phase==='countdown'&&m.progress===0));
+  clock=50;a.activeSession.glowAt=0;a.checkReturnEdge();await until(()=>feedback.some(m=>m.phase==='countdown'&&m.progress===.5));
+  a.position.x=.5;a.checkReturnEdge();await until(()=>feedback.some(m=>m.phase==='cancel'));assert.equal(a.active,b.config.id);
+  a.position.x=0;clock=100;a.activeSession.glowAt=0;a.checkReturnEdge();await until(()=>feedback.filter(m=>m.phase==='countdown'&&m.progress===0).length===2);
+  clock=200;a.checkReturnEdge();await until(()=>a.active===null&&feedback.some(m=>m.phase==='depart'));
+  assert(feedback.filter(m=>m.edge).every(m=>m.edge==='left'));assert.equal(feedback.at(-1).phase,'depart');assert.equal(feedback.at(-1).hideAway,true);assert.equal(b.owner,null);
+  const count=feedback.length;await b.message(b.getPeer(a.config.id),{type:'edge-glow',phase:'countdown',edge:'left',session:'old-session',seq:999,progress:1});assert.equal(feedback.length,count);
+});
+
+test('remote glow rejects wrong sessions, reordering, view-only control and revoked permission',async t=>{
+  const {a,b}=await pair(t);await a.switchTo(b.config.id,'right');const peer=b.getPeer(a.config.id),session=a.activeSession.edgeSession;
+  const feedback={phase:'countdown',edge:'left',progress:.4,seq:2,session};
+  assert.equal(b.inboundEdge(peer,{...feedback,session:'wrong'}),false);assert.equal(b.inboundEdge(peer,feedback),true);assert.equal(b.inboundEdge(peer,{...feedback,seq:1}),false);
+  assert.equal(b.inboundEdge(peer,{...feedback,seq:3,progress:NaN}),false);b.config.permissions.input=false;assert.equal(b.inboundEdge(peer,{...feedback,seq:3}),false);b.config.permissions.input=true;
+  await a.returnLocal();await a.switchTo(b.config.id,'right',false);assert.equal(b.inboundEdge(peer,{...feedback,session:a.activeSession.edgeSession}),false);
+});
+
+test('return with an earlier permission guide completes before immediately controlling again',async t=>{
+  const {a,b}=await pair(t);await a.switchTo(b.config.id,'right',false);
+  a.access.notice={id:b.config.id,requestId:'earlier-guide'};
+  await a.returnLocal();assert.equal(a.returning,0);assert.equal(a.active,null);
+  await a.switchTo(b.config.id,'right',false);assert.equal(a.active,b.config.id);assert.equal(a.access.notice,null);
+});
 test('simultaneous duplicate connections converge without losing the peer', async t => {
   const { a, b } = await pair(t); b.connect('127.0.0.1', a.port); await pause(150); assert.equal(a.peers.size, 1); assert.equal(b.peers.size, 1);
   assert.deepEqual(await a.getPeer(b.config.id).request('screen'), { mime: 'image/jpeg', data: 'fixture', width: 10, height: 10 });
@@ -187,4 +250,13 @@ test('local console rejects missing bearer and cross-origin requests', async t =
   assert.equal((await fetch(base + '/api/state', { headers: { 'X-LanLink-Token': ui.token, Origin: 'http://evil.invalid' } })).status, 403);
   const r = await fetch(base + '/api/state', { headers: { 'X-LanLink-Token': ui.token } }); assert.equal(r.status, 200); assert.equal((await r.json()).name, 'A');
   const page = await fetch(base); assert.match(await page.text(), /LanLink/); assert.match(page.headers.get('content-security-policy'), /frame-ancestors 'none'/);
+});
+
+test('zero dwell switches on the first eligible edge sample; leaving cancels progress', () => {
+  let t=0;const e=new EdgeSwitch(()=>t),edges={right:'B'};
+  assert.deepEqual(e.update(99,50,100,100,edges,0),{edge:'right',target:'B'});
+  t=1000;e.update(99,50,100,100,edges,1000);t=1500;e.update(99,50,100,100,edges,1000);assert.equal(e.progress.progress,.5);
+  e.update(50,50,100,100,edges,1000);assert.equal(e.progress,null);
+  t=1600;e.update(99,50,100,100,edges,1000);assert.equal(e.progress.progress,0);
+  e.update(99,50,100,100,edges,1000,false);assert.equal(e.progress,null);
 });

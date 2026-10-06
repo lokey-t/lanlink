@@ -1,11 +1,11 @@
-const labels = { input: '键鼠操作', screen: '屏幕查看', clipboard: '剪贴板与文件', shutdown: '远程关机' };
+const labels = { input: '键鼠标操作', screen: '屏幕共享', clipboard: '剪贴板文件共享', shutdown: '远程关机' };
 
 export function permissionReport(service, requester = service.config.id) {
   const caps = service.native.capabilities, local = requester === service.config.id;
-  return { version: 1, permissions: Object.fromEntries(Object.keys(labels).map(key => [key, {
+  return { version: 1, requestPending: service.consent.pending?.has(requester) === true, requestRejected: service.consent.denied?.has(requester) === true, permissions: Object.fromEntries(Object.keys(labels).map(key => [key, {
     supported: true, appEnabled: service.config.permissions[key] === true,
     systemGranted: caps.simulated ? null : typeof caps[key] === 'boolean' ? caps[key] : null,
-    peerAllowed: local ? true : Object.hasOwn(service.config.deviceGrants, requester) ? service.consent.allowed(requester, key) : null,
+    peerAllowed: local ? true : key === 'clipboard' ? service.canShareClipboard(requester) : Object.hasOwn(service.config.deviceGrants, requester) ? service.consent.allowed(requester, key) : null,
   }])) };
 }
 

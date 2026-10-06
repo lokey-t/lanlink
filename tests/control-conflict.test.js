@@ -32,6 +32,38 @@ async function pair(t) {
   return { a, b };
 }
 
+test('preparation checks screen and input without acquiring; missing screen cannot start control', async t => {
+  const { a,b }=await pair(t), p=a.getPeer(b.config.id);
+  await b.settings({permissions:{screen:false}});
+  await assert.rejects(p.request('prepare',{screen:true}),/PERMISSION_REQUIRED/);
+  await assert.rejects(a.switchTo(b.config.id,'right',false,false,false,true),/PERMISSION_REQUIRED/);
+  assert.equal(b.owner,null); assert.equal(a.active,null); assert.equal(b.videoHost.sessions.size,0);
+  await b.settings({permissions:{screen:true}});
+  assert.equal((await p.request('prepare',{screen:true})).ready,true);
+  assert.equal(b.owner,null);
+  await a.switchTo(b.config.id,'right',false,false,false,true);
+  assert.equal(b.owner.id,a.config.id);
+});
+
+test('broken encrypted transport can reacquire saved consent and create a fresh video session', async t => {
+  const {a,b}=await pair(t), id=b.config.id;
+  b.options.videoSource=(_native,_h264,emit) => {
+    const timer=setInterval(() => emit({codec:'jpeg',width:20,height:10,data:Buffer.from('fixture'),key:true}),20);
+    return {close(){clearInterval(timer);}};
+  };
+  await a.switchTo(id,'right',false,false,false,true); await a.openStream(id,true);
+  assert.equal((await a.videoViewer.next(id)).width,20);
+  a.getPeer(id).close();
+  await until(() => !a.peers.size && !b.peers.size && !a.active && !a.returning);
+  a.connect('127.0.0.1',b.port);
+  await until(() => a.peers.get(id)?.info && b.peers.get(a.config.id)?.info);
+  await a.switchTo(id,'right',false,false,false,true); await a.openStream(id,true);
+  assert.equal((await a.videoViewer.next(id)).height,10);
+  assert.equal(b.consent.list().length,0);
+  await b.stopInbound();
+  await assert.rejects(a.getPeer(id).request('prepare',{screen:true}),/CONTROL_ENDED/);
+});
+
 test('simultaneous encrypted acquisition never creates a reciprocal control loop and can retry', async t => {
   const { a, b } = await pair(t);
   const results = await Promise.allSettled([a.switchTo(b.config.id, 'right', false), b.switchTo(a.config.id, 'right', false)]);
@@ -162,4 +194,151 @@ test('cursor feedback is normalized and sent only while the authorized input lea
   await b.revokeConsent(a.config.id);b.cursorSentAt=0;
   await b.nativeEvent({type:'cursor',x:0,y:0,width:1001,height:501});
   await pause(40);assert.equal(received.length,1);
+});
+
+test('configured edge dwell enters shared control, moves into target, and returns at opposite edge', async t => {
+  const {a,b}=await pair(t);a.config.master=true;a.config.dwell=100;a.config.edges={right:b.config.id};
+  let now=1000;a.edge.now=()=>now;a.edge.cooldown=0;
+  await a.nativeEvent({type:'cursor',x:1919,y:540,width:1920,height:1080});
+  assert.equal(a.active,null);now+=110;
+  await a.nativeEvent({type:'cursor',x:1919,y:540,width:1920,height:1080});
+  assert.equal(a.active,b.config.id);assert.equal(a.capture,true);
+  assert(a.native.calls.some(c=>c.method==='mode'&&c.args.remote));
+  const x=a.position.x;await a.nativeEvent({type:'input',kind:'move',dx:240,dy:20});
+  await until(()=>!a.moving);assert(a.position.x>x);
+  await a.nativeEvent({type:'input',kind:'button',button:0,down:true});
+  await a.nativeEvent({type:'input',kind:'button',button:0,down:false});
+  assert(b.native.calls.some(c=>c.method==='input'&&c.args.kind==='button'&&c.args.down));
+  a.position.x=0;now+=999;a.checkReturnEdge();assert.equal(a.active,b.config.id);now+=1;a.checkReturnEdge();now+=110;a.checkReturnEdge();
+  await until(()=>!a.active&&!a.returning);assert.equal(b.owner,null);
+  assert(!a.native.calls.some(c=>c.method==='warp'),'capture and return must preserve the desktop cursor');
+  now+=1500;await a.nativeEvent({type:'cursor',x:1919,y:540,width:1920,height:1080});now+=1000;await a.nativeEvent({type:'cursor',x:1919,y:540,width:1920,height:1080});
+  assert.equal(a.active,null,'stationary cursor must not immediately reenter the phone');
+});
+
+test('legacy layouts enable host mode only if it was never explicitly configured', () => {
+  for(const configured of [undefined,false,true]) {
+    const config={id:randomUUID(),token:newToken(),permissions:{},edges:{right:'phone'},...(configured===undefined?{}:{master:configured})};
+    const service=new Service(config,'unused',new Native(),{noDiscovery:true});
+    assert.equal(service.config.master,configured===undefined?true:configured);
+  }
+});
+
+test('system input interruption ends the session, keeps grants and waits for a deliberate return', async t => {
+  const {a,b}=await pair(t);const id=b.config.id;
+  await a.switchTo(id,'right',true,true);
+  await a.nativeEvent({type:'input',kind:'key',code:'ControlLeft',down:true});
+  await a.nativeEvent({type:'input-interrupted',blocked:true});
+  assert.equal(a.active,null);assert.equal(a.capture,false);assert.equal(b.owner,null);
+  assert.equal(a.keys.size,0);assert.equal(a.controlEnded.id,id);
+  assert.equal(b.consent.allowed(a.config.id,'input'),true);
+  assert.ok(a.native.calls.some(c=>c.method==='mode'&&c.args.remote===false));
+  await assert.rejects(a.switchTo(id,'right',true,true),/CONTROL_ENDED/);
+  await a.nativeEvent({type:'input-restored'});
+  assert.equal(a.active,null);assert.equal(a.edge.waitingForLeave,true);
+  await a.switchTo(id,'right',true,true);assert.equal(b.owner.id,a.config.id);
+  await a.nativeEvent({type:'input-interrupted',blocked:false});
+  assert.equal(a.active,null);assert.equal(b.owner,null);assert.equal(b.consent.list().length,0);
+});
+
+test('edge glow defaults enabled and records only successful shared-input switches', async t => {
+  const {a,b}=await pair(t);assert.equal(a.state().edgeGlowEnabled,true);
+  await a.switchTo(b.config.id,'left',false,true);assert.equal(a.state().edgeTransition,undefined);
+  await a.returnLocal();await a.settings({edgeGlow:false});assert.equal(a.state().edgeGlowEnabled,false);
+  await a.switchTo(b.config.id,'bottom',true,true);assert.equal(a.state().edgeTransition.edge,'bottom');assert.ok(a.state().edgeTransition.id);
+  await a.returnLocal();const previous=a.state().edgeTransition.id;
+  a.inputDesktopBlocked=true;await assert.rejects(a.switchTo(b.config.id,'left',true,true));assert.equal(a.state().edgeTransition.id,previous);
+});
+
+test('switch mode and delay stay local; modifier-gated edges switch without dwell', async t => {
+  const {a,b}=await pair(t);a.config.master=true;a.config.edges={right:b.config.id};
+  await a.settings({switchMode:'hotkey',edgeHotkey:'ctrl-alt',dwell:0});
+  assert.equal(a.state().dwell,0);assert.equal(a.state().switchMode,'hotkey');assert.equal(b.state().switchMode,'dwell');
+  const cursor={type:'cursor',x:1919,y:500,width:1920,height:1080};
+  a.edge.cooldown=0;await a.nativeEvent(cursor);assert.equal(a.active,null);
+  await a.nativeEvent({type:'modifiers',mask:1});await a.nativeEvent(cursor);assert.equal(a.active,null);
+  await a.nativeEvent({type:'modifiers',mask:3});await a.nativeEvent(cursor);assert.equal(a.active,b.config.id);
+  await a.nativeEvent({type:'modifiers',mask:0});a.position.x=0;a.edge.cooldown=0;a.checkReturnEdge();assert.equal(a.active,b.config.id);
+  await a.nativeEvent({type:'modifiers',mask:3});a.checkReturnEdge();await until(()=>!a.active && !a.returning);
+  assert.equal(b.owner,null);
+  await assert.rejects(a.settings({dwell:-1}));await assert.rejects(a.settings({switchMode:'invalid'}));
+  await assert.rejects(a.settings({edgeHotkey:'invalid'}));
+});
+
+test('dwell feedback starts only at eligible online edges and cancels on leaving', async t => {
+  const {a,b}=await pair(t);a.config.master=true;a.config.edges={right:b.config.id};await a.settings({dwell:1000,switchMode:'dwell'});a.edge.cooldown=0;
+  const events=[];a.on('edge-feedback',f=>events.push(f));await a.nativeEvent({type:'cursor',x:1919,y:500,width:1920,height:1080});assert.equal(events.at(-1).phase,'countdown');assert.equal(events.at(-1).progress,0);
+  await a.nativeEvent({type:'cursor',x:100,y:500,width:1920,height:1080});assert.equal(events.at(-1).phase,'cancel');assert.equal(a.active,null);
+  await a.settings({edgeGlow:false});a.edge.cooldown=0;events.length=0;await a.nativeEvent({type:'cursor',x:1919,y:500,width:1920,height:1080});assert.equal(events.length,0);
+});
+
+test('away glow uses only the departure edge and preserves local hide preference', async t => {
+  const {a,b}=await pair(t);await a.settings({dwell:0,edgeGlowHideAway:true});
+  assert.equal(a.state().edgeGlowHideAway,true);assert.equal(b.state().edgeGlowHideAway,false);
+  let now=1000;a.edge.now=()=>now;const events=[];a.on('edge-feedback',f=>events.push(f));
+  await a.switchTo(b.config.id,'right',true,true);
+  assert.deepEqual(events.at(-1),{phase:'depart',edge:'right',hideAway:true});
+  a.position.x=0;now+=999;a.checkReturnEdge();assert.equal(a.active,b.config.id);
+  assert.equal(events.some(f=>f.edge==='left'),false);
+  now+=1;a.checkReturnEdge();await until(()=>!a.active&&!a.returning);
+  assert.deepEqual(events.at(-1),{phase:'return',edge:'right',hideAway:true});
+});
+
+test('completed dwell keeps half-bright feedback throughout delayed connection without cancel', async t => {
+  const {a,b}=await pair(t);a.config.master=true;a.config.dwell=100;a.config.edges={right:b.config.id};
+  let now=1000;a.edge.now=()=>now;a.edge.cooldown=0;
+  const events=[];a.on('edge-feedback',f=>events.push(f));
+  let proceed;const gate=new Promise(resolve=>{proceed=resolve});a.adbGuide.check=()=>gate;
+  const cursor={type:'cursor',x:1919,y:500,width:1920,height:1080};
+  await a.nativeEvent(cursor);now+=100;const pending=a.nativeEvent(cursor);
+  await until(()=>a.switching);assert.deepEqual(events.at(-1),{phase:'countdown',edge:'right',progress:1});
+  assert.equal(events.some(f=>f.phase==='cancel'),false);
+  proceed();await pending;assert.equal(events.at(-1).phase,'depart');
+  assert.equal(events.some(f=>f.phase==='cancel'),false);
+});
+
+test('failed connection clears completed countdown instead of leaving a stuck glow', async t => {
+  const {a,b}=await pair(t);a.config.master=true;a.config.dwell=0;a.config.edges={right:b.config.id};a.edge.cooldown=0;
+  const events=[];a.on('edge-feedback',f=>events.push(f));a.adbGuide.check=async()=>{throw Error('test unavailable')};
+  await assert.rejects(a.nativeEvent({type:'cursor',x:1919,y:500,width:1920,height:1080}),/test unavailable/);
+  assert.equal(events.at(-1).phase,'cancel');assert.equal(a.edgeFeedback,null);
+});
+
+for (const stage of ['guide','acquire','input']) test('leaving the source edge cancels pending switch during '+stage, async t => {
+  const {a,b}=await pair(t);a.config.master=true;a.config.dwell=0;a.config.edges={right:b.config.id};a.edge.cooldown=0;
+  let resume,waiting=false;const gate=new Promise(resolve=>{resume=resolve});
+  const events=[];a.on('edge-feedback',f=>events.push(f));
+  if(stage==='guide')a.adbGuide.check=async()=>{waiting=true;await gate};
+  else {const peer=a.getPeer(b.config.id),request=peer.request.bind(peer);peer.request=async(method,args,...rest)=>{const result=await request(method,args,...rest);if(method===stage){waiting=true;await gate}return result};}
+  const pending=a.nativeEvent({type:'cursor',x:1919,y:500,width:1920,height:1080});
+  const rejected=assert.rejects(pending,/CONTROL_ENDED/);
+  await until(()=>waiting);
+  await a.nativeEvent({type:'cursor',x:1200,y:500,width:1920,height:1080});
+  assert.equal(a.controlIntent.cancelled,true);assert.equal(events.at(-1).phase,'cancel');
+  // Coming back before the old reply arrives must not revive the old request.
+  await a.nativeEvent({type:'cursor',x:1919,y:500,width:1920,height:1080});
+  resume();await rejected;await until(()=>!b.owner);
+  assert.equal(a.active,null);assert.equal(a.switching,false);
+  assert.equal(events.some(f=>f.phase==='depart'||f.phase==='return'),false);
+  assert.equal(a.native.calls.some(c=>c.method==='mode'&&c.args.remote),false);
+});
+
+test('group computer master selection enables selected peer and keeps switch preferences local', async t => {
+  const {a,b}=await pair(t);await a.settings({masterId:b.config.id,dwell:100});
+  await until(()=>b.state().masterId===b.config.id);
+  assert.equal(a.state().master,false);assert.equal(b.state().master,true);
+  await a.settings({master:true});assert.equal(a.state().master,false,'layout edits must not override chosen master');
+  b.config.dwell=700;await b.settings({masterId:a.config.id});await until(()=>a.state().master);
+  assert.equal(b.state().master,false);assert.equal(a.state().dwell,100);assert.equal(b.state().dwell,700);
+  await assert.rejects(a.settings({masterId:randomUUID()}),/请选择/);
+  const phone=randomUUID();a.config.knownDevices[phone]={platform:'android',name:'phone'};
+  assert.equal(a.state().masterDevices.some(d=>d.id===phone),false);
+  await assert.rejects(a.settings({masterId:phone}),/请选择/);
+});
+
+test('master selection reaches an offline computer after reconnect', async t => {
+  const {a,b}=await pair(t);a.getPeer(b.config.id).close();await until(()=>!a.peers.size&&!b.peers.size);
+  await a.settings({masterId:b.config.id});assert.equal(a.state().master,false);
+  a.connect('127.0.0.1',b.port);await until(()=>a.peers.size&&b.peers.size);
+  await a.tick();await until(()=>b.state().masterId===b.config.id);assert.equal(b.state().master,true);
 });

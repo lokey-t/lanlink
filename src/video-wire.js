@@ -28,11 +28,11 @@ export function unpackFrame(key, seq, body) {
   if (!frame.codec || frame.width < 1 || frame.height < 1 || frame.width > 4096 || frame.height > 4096 || frame.width * frame.height > 8388608) throw Error('视频尺寸无效');
   return frame;
 }
-export async function serverHandshake(socket, secret) {
+export async function serverHandshake(socket, secret, retainReader=false) {
   const reader = new BinaryReader(socket), sn = randomBytes(32); socket.write(sn);
   const reply = await reader.read(64), cn = reply.subarray(0, 32);
   if (!timingSafeEqual(reply.subarray(32), hmac(secret, 'auth', sn, cn))) throw Error('串流身份验证失败');
-  socket.write(hmac(secret, 'ack', sn, cn)); return hmac(secret, 'media', sn, cn);
+  socket.write(hmac(secret, 'ack', sn, cn));const key=hmac(secret, 'media', sn, cn);return retainReader?{key,reader}:key;
 }
 export async function connectVideo(host, info, signal) {
   if (info.protocol !== 1 || !Number.isInteger(info.port) || info.port < 1 || info.port > 65535 || typeof info.key !== 'string' || !/^[a-f0-9]{64}$/.test(info.key)) throw Error('串流协商无效');

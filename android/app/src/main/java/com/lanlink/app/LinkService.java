@@ -24,25 +24,156 @@ import org.json.*;
 
 public class LinkService extends Service implements Wire.Listener {
   public static volatile LinkService instance;
+  StagingFiles staging;
   public volatile JSONObject remoteCursor;
   public volatile String cursorPeer;
   public final ConcurrentHashMap<String, Wire> peers = new ConcurrentHashMap<>();
+  final Set<AuxLink> auxLinks = ConcurrentHashMap.newKeySet();
   private final Set<Wire> sockets = ConcurrentHashMap.newKeySet();
   private final Set<String> connecting = ConcurrentHashMap.newKeySet();
   public final ExecutorService jobs = Executors.newFixedThreadPool(6);
+  final ThreadPoolExecutor inputJobs =
+      new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(128));
   private final ScheduledExecutorService clock = Executors.newScheduledThreadPool(2);
   private final Handler main = new Handler(Looper.getMainLooper());
   private SharedPreferences prefs;
   GroupKeys group;
+  private EdgeGlow edgeGlow;
   private final Set<String> pausedPeers = ConcurrentHashMap.newKeySet();
   public volatile String endedPeer;
   public volatile long endedAt;
   public String deviceId, name;
+  final QuicManager quic=new QuicManager(this);
   public volatile String token;
   public volatile Pairing pairing;
   public volatile String status = "正在启动", active;
   private volatile String owner;
   private boolean ownerFallbackAccepted;
+  private volatile boolean ownerPointer;
+  private String ownerEdgeSession;
+  private long ownerGlowSeq;
+  private volatile long glowGeneration;
+  private volatile boolean ownerNativePointer;
+  private volatile RootCapture rootCapture;
+  private long rootCaptureRetry;
+
+  public boolean rootEnabled() {
+    return prefs.getBoolean("root_mode", false);
+  }
+
+  public boolean adbRevoked() {
+    return prefs.getBoolean("adb_revoked", false);
+  }
+
+  public boolean adbAuthorized() {
+    return !adbRevoked()
+        && getSharedPreferences("adb-helper", 0).getBoolean("adb_authorized", false);
+  }
+
+  public void enableAdbAuthorization() {
+    prefs.edit().putBoolean("adb_revoked", false).putBoolean("allow_input", true).apply();
+    status = "已允许电脑授权，请在电脑安卓授权页选择本机";
+  }
+
+  public synchronized void revokeAdbAuthorization() {
+    prefs.edit().putBoolean("adb_revoked", true).apply();
+    String previous = owner;
+    owner = null;
+    releaseInput();
+    if (previous != null) {
+      Wire peer = peers.get(previous);
+      if (peer != null)
+        try {
+          peer.send(obj("type", "control-ended"));
+        } catch (Exception ignored) {
+        }
+    }
+    if (!rootEnabled()) stopProjection();
+    shell.revokeAdb();
+    dismissPermissionNotice();
+    status = "已解除本应用的 ADB 授权";
+  }
+
+  public void rename(String value) throws IOException {
+    value = value.trim();
+    if (value.isEmpty() || value.length() > 40 || value.matches("(?s).*[\\p{Cntrl}].*"))
+      throw new IOException("请输入 1–40 字的设备名称");
+    if (!prefs.edit().putString("name", value).commit()) throw new IOException("设备名称保存失败");
+    name = value;
+    lastCapabilities = null;
+  }
+
+  public synchronized void setDevicePermission(String id, String key, boolean enabled)
+      throws IOException {
+    if (!authorizationDevices().has(id))
+      throw new IOException("设备不在当前组中");
+    String previous = prefs.getString("device_grants", "{}");
+    String saved = consent.setPermission(id, key, enabled);
+    if (!prefs.edit().putString("device_grants", saved).commit()) {
+      consent = new DeviceConsent(previous);
+      throw new IOException("权限保存失败");
+    }
+    if (enabled && !rootEnabled()) prefs.edit().putBoolean("allow_" + key, true).apply();
+    if (!enabled && key.equals("input") && id.equals(owner)) {
+      owner = null;
+      releaseInput();
+      Wire peer = peers.get(id);
+      if (peer != null)
+        try {
+          peer.send(obj("type", "control-ended"));
+        } catch (Exception ignored) {
+        }
+    }
+    if (!enabled && key.equals("screen")) {
+      screenViewers.remove(id);
+      if (videoHost != null && videoHost.peer.id.equals(id)) videoHost.close();
+    }
+    if (!enabled && key.equals("clipboard") && clip != null && id.equals(clip.optString("source")))
+      {clip=null;groupClipboard.prune();}
+    permissionNotice.removePeer(id);
+  }
+
+  public boolean rootActive() {
+    return rootEnabled() && shell != null && shell.rootReady();
+  }
+
+  private final java.util.concurrent.atomic.AtomicBoolean rootChanging =
+      new java.util.concurrent.atomic.AtomicBoolean();
+
+  public boolean rootModeChanging() {
+    return rootChanging.get();
+  }
+
+  public void setRootMode(boolean enabled) throws Exception {
+    if (!rootChanging.compareAndSet(false, true)) throw new IOException("权限模式正在切换，请稍候");
+    try {
+      if (enabled) {
+        try {
+          shell.root();
+          if (projection != null || rootCapture != null) stopProjection();
+          prefs.edit().putBoolean("root_mode", true).commit();
+          RootPermissions.enable(this);
+          status = "已 Root 授权";
+          dismissPermissionNotice();
+        } catch (Exception error) {
+          shell.disableRoot();
+          prefs.edit().putBoolean("root_mode", false).commit();
+          throw error;
+        }
+      } else {
+        owner = null;
+        releaseInput();
+        stopProjection();
+        RootPermissions.restore(this);
+        prefs.edit().putBoolean("root_mode", false).commit();
+        shell.disableRoot();
+        status = "Root 模式已关闭";
+      }
+    } finally {
+      rootChanging.set(false);
+    }
+  }
+
   private String notifiedController, lastCapabilities;
   private volatile long ownerUntil;
   private String outgoingPending, outgoingViewer;
@@ -53,6 +184,9 @@ public class LinkService extends Service implements Wire.Listener {
   private DatagramSocket discovery;
   private WifiManager.MulticastLock multicast;
   private volatile MediaProjection projection;
+  private final ProjectionIdle projectionIdle = new ProjectionIdle();
+  private final Map<String, Long> discoveryReplies = new HashMap<>();
+  private android.net.ConnectivityManager.NetworkCallback networkCallback;
   private VirtualDisplay display;
   private ImageReader reader;
   private final HandlerThread captureThread = new HandlerThread("lanlink-jpeg-capture");
@@ -62,19 +196,20 @@ public class LinkService extends Service implements Wire.Listener {
   private volatile byte[] jpeg;
   private int screenWidth, screenHeight;
   private volatile long lastFrame;
-  private volatile JSONObject clip;
+  volatile JSONObject clip;
   private final Map<String, Map<String, Uri>> offers = new ConcurrentHashMap<>();
+  final BulkTransfer bulk=new BulkTransfer(this);
   private final Map<String, Long> offerExpiry = new ConcurrentHashMap<>();
-  private volatile boolean settingClipboard;
+  private volatile boolean settingClipboard;final GroupClipboard groupClipboard=new GroupClipboard(this);
   private final java.util.concurrent.atomic.AtomicBoolean receiving =
       new java.util.concurrent.atomic.AtomicBoolean();
   private final ClipboardManager.OnPrimaryClipChangedListener clipListener =
       () -> {
-        if (!settingClipboard && allowed("clipboard"))
+        if (allowed("clipboard") && groupClipboard.upload())
           jobs.execute(
               () -> {
                 try {
-                  publishClipboard();
+                  publishClipboard(false);
                 } catch (Exception e) {
                   status = e.getMessage();
                 }
@@ -84,15 +219,37 @@ public class LinkService extends Service implements Wire.Listener {
   public ShellChannel shell;
   final PermissionNotice permissionNotice = new PermissionNotice();
   DeviceConsent consent;
+  final Map<String,JSONObject> peerAccess = new ConcurrentHashMap<>();
+  final Set<String> accessPolling = ConcurrentHashMap.newKeySet();
+  final Map<String,Long> accessRequested = new ConcurrentHashMap<>();
+  private long lastAccessPoll;
   public volatile boolean uiVisible;
 
+  public boolean privilegedScreenReady() {
+    RootCapture capture = rootCapture;
+    return shell != null && shell.ready() || capture != null && capture.running();
+  }
+
   public boolean screenReady() {
-    return projection != null;
+    return projection != null || privilegedScreenReady();
   }
 
   public void dismissPermissionNotice() {
     permissionNotice.dismiss();
     getSystemService(NotificationManager.class).cancel(2);
+  }
+
+  public void clearResolvedPermissionNotice() {
+    PermissionNotice.Request request = permissionNotice.peek(System.currentTimeMillis());
+    if (request == null || request.needs.contains("consent")) return;
+    for (String need : request.needs) {
+      if (need.equals("adb") && !rootEnabled() && (adbRevoked() || !adbAuthorized())) return;
+      if (need.equals("input")
+          && (!allowed("input") || !shell.ready() || shell.lastInputError != null)) return;
+      if (need.equals("screen") && (!allowed("screen") || !screenReady())) return;
+      if (need.equals("clipboard") && !allowed("clipboard")) return;
+    }
+    dismissPermissionNotice();
   }
 
   private void needPermission(Wire peer, String need) {
@@ -144,10 +301,64 @@ public class LinkService extends Service implements Wire.Listener {
 
   private void requireInputPermission(Wire p) throws IOException {
     requireConsent(p, "input");
-    if (!allowed("input") || !capabilities().optBoolean("input")) {
+    if (rootModeChanging()) throw new IOException("INPUT_RECOVERING: 权限模式正在切换，请稍候");
+    if (adbRevoked() && !rootEnabled())
+      throw new IOException("CONSENT_DENIED: 手机已解除 ADB 授权，请在手机重新开启");
+    if (!allowed("input") || !shell.ready() || shell.lastInputError != null) {
+      if (allowed("input") && shell.recovering())
+        throw new IOException("INPUT_RECOVERING: 输入助手正在重连，请稍候");
       needPermission(p, "input");
-      throw new IOException("PERMISSION_REQUIRED: 手机输入助手尚未就绪，请在电脑端恢复 ADB 连接或在手机启动 Root 助手");
+      throw new IOException(
+          "PERMISSION_REQUIRED: "
+              + (shell.lastInputError != null
+                  ? shell.lastInputError
+                  : "手机输入助手尚未就绪，请恢复 ADB 连接或开启 Root 模式"));
     }
+  }
+
+  private void prepareControl(Wire p, boolean screen, boolean showPointer) throws Exception {
+    requireConsent(p, "input");
+    if (!allowed("input")) requireInputPermission(p);
+    if (shell.ready() && (!shell.inputVerified || shell.lastInputError != null)) {
+      try {
+        shell.request(obj("method", "probe"));
+      } catch (Exception error) {
+        if (!String.valueOf(error.getMessage()).startsWith("PERMISSION_REQUIRED:")) throw error;
+      }
+    }
+    requireInputPermission(p);
+    if (screen) requireScreen(p);
+    if (showPointer && !shell.request(obj("method", "activatePointer")).optBoolean("nativePointer"))
+      throw new IOException("系统虚拟键鼠暂不可用，请恢复 ADB / Root 助手后重试");
+  }
+
+  public long screenIdleDelay() {
+    return prefs.getLong("screen_idle_delay", 60_000);
+  }
+
+  public void setScreenIdleDelay(long delay) {
+    boolean valid = false;
+    for (long option : ProjectionIdle.OPTIONS) if (option == delay) valid = true;
+    if (!valid) return;
+    prefs.edit().putLong("screen_idle_delay", delay).apply();
+    main.post(this::updateProjectionIdle);
+  }
+
+  void updateProjectionIdle() {
+    if (!running || (projection == null && rootCapture == null)) return;
+    if (projectionIdle.expired(
+        controlledBy() != null, SystemClock.elapsedRealtime(), screenIdleDelay())) {
+      stopProjection();
+      status = "桌面控制已结束，屏幕共享已按设置关闭";
+    }
+  }
+
+  void screenSessionStarted() {
+    main.post(() -> projectionIdle.expired(true, SystemClock.elapsedRealtime(), screenIdleDelay()));
+  }
+
+  void screenSessionEnded() {
+    main.post(this::updateProjectionIdle);
   }
 
   private void requireConsent(Wire p, String key) throws IOException {
@@ -166,8 +377,8 @@ public class LinkService extends Service implements Wire.Listener {
     }
   }
 
-  private boolean canShareClipboard(String id) {
-    return consent.allowed(id, "clipboard") || id.equals(active) && !consent.hasGrant(id);
+  boolean canShareClipboard(String id) {
+    return !consent.hasGrant(id) || consent.allowed(id,"clipboard");
   }
 
   public void decideConsent(DeviceConsent.Request request, boolean accepted, JSONObject permissions)
@@ -175,7 +386,8 @@ public class LinkService extends Service implements Wire.Listener {
     if (!peers.containsKey(request.id)) throw new IOException("设备已断开");
     String saved = consent.decide(request.id, request.requestId, accepted, permissions);
     SharedPreferences.Editor decision = prefs.edit().putString("device_grants", saved);
-    if (accepted)
+    if(accepted){pausedPeers.remove(request.id);decision.putStringSet("paused_peers",new HashSet<>(pausedPeers));}
+    if (accepted && !rootEnabled())
       for (String k : new String[] {"input", "screen", "clipboard"})
         if (permissions.optBoolean(k)) decision.putBoolean("allow_" + k, true);
     if (!decision.commit()) {
@@ -205,7 +417,7 @@ public class LinkService extends Service implements Wire.Listener {
   }
 
   public boolean allowed(String key) {
-    return prefs.getBoolean("allow_" + key, false);
+    return (rootActive() && !key.equals("shutdown")) || prefs.getBoolean("allow_" + key, key.equals("clipboard"));
   }
 
   public void setAllowed(String key, boolean value) {
@@ -244,9 +456,27 @@ public class LinkService extends Service implements Wire.Listener {
     clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
     clipboard.addPrimaryClipChangedListener(clipListener);
     shell = new ShellChannel(this);
+    staging=new StagingFiles(this);
+    if (rootEnabled())
+      jobs.execute(
+          () -> {
+            try {
+              setRootMode(true);
+            } catch (Exception e) {
+              status = e.getMessage();
+            }
+          });
     running = true;
     jobs.execute(this::network);
     clock.scheduleAtFixedRate(this::tick, 1, 1, TimeUnit.SECONDS);
+    networkCallback =
+        new android.net.ConnectivityManager.NetworkCallback() {
+          public void onAvailable(android.net.Network network) {
+            clock.execute(LinkService.this::announce);
+          }
+        };
+    getSystemService(android.net.ConnectivityManager.class)
+        .registerDefaultNetworkCallback(networkCallback);
   }
 
   private Notification notification() {
@@ -284,14 +514,20 @@ public class LinkService extends Service implements Wire.Listener {
   }
 
   public JSONObject capabilities() {
-    android.util.DisplayMetrics m = getResources().getDisplayMetrics();
+    android.util.DisplayMetrics m = displayMetrics();
     return obj(
+        "staging",1,"quic",quic.enabled?1:0,"bulk",1,"rtcVideo",1,"dualLink",
+        true,
+        "controlPrepare",
+        true,
         "input",
         shell != null && shell.ready(),
         "host",
         false,
         "screen",
-        projection != null,
+        projection != null || privilegedScreenReady(),
+        "videoH264Only",
+        rootEnabled() || privilegedScreenReady(),
         "clipboard",
         true,
         "shutdown",
@@ -304,6 +540,12 @@ public class LinkService extends Service implements Wire.Listener {
         shell != null && shell.ready() ? "adb/root" : "unavailable",
         "inputWarning",
         shell != null && shell.ready() ? "" : "请在电脑端启用 ADB 键鼠授权，或启动 Root 助手");
+  }
+
+  android.util.DisplayMetrics displayMetrics() {
+    android.util.DisplayMetrics metrics = new android.util.DisplayMetrics();
+    getSystemService(android.view.WindowManager.class).getDefaultDisplay().getRealMetrics(metrics);
+    return metrics;
   }
 
   private JSONObject identity() {
@@ -322,6 +564,23 @@ public class LinkService extends Service implements Wire.Listener {
     } catch (JSONException e) {
       return new JSONObject();
     }
+  }
+
+  public JSONObject authorizationDevices() {
+    JSONObject result = new JSONObject();
+    if (group == null || group.isDissolved()) return result;
+    // Membership is enough: a device need not have connected to this phone yet.
+    JSONObject[] sources = {group.deviceLabels(), knownDevices()};
+    for (JSONObject source : sources) for (Iterator<String> it = source.keys(); it.hasNext();) {
+      String id = it.next();
+      if (id.equals(deviceId) || group.excluded(id)) continue;
+      try { result.put(id, source.getJSONObject(id)); } catch (JSONException ignored) {}
+    }
+    for (Wire peer : peers.values()) {
+      if (peer.id.equals(deviceId) || group.excluded(peer.id)) continue;
+      try { result.put(peer.id, peer.info); } catch (JSONException ignored) {}
+    }
+    return result;
   }
 
   private synchronized void rememberDevice(Wire p) {
@@ -396,7 +655,7 @@ public class LinkService extends Service implements Wire.Listener {
     }
     offers.clear();
     offerExpiry.clear();
-    clip = null;
+    clip = null;groupClipboard.clear();
     status = "已更新组，等待自动连接";
   }
 
@@ -413,6 +672,7 @@ public class LinkService extends Service implements Wire.Listener {
       }
       prefs.edit().remove("pending_group_join").commit();
       group.start();
+      quic.start();
       pairing = new Pairing(() -> token, 45831);
       pairing.members = group;
       try {
@@ -439,7 +699,8 @@ public class LinkService extends Service implements Wire.Listener {
       discovery.setReuseAddress(true);
       discovery.bind(new InetSocketAddress(45832));
       discovery.setBroadcast(true);
-      clock.scheduleAtFixedRate(this::announce, 0, 3, TimeUnit.SECONDS);
+      clock.scheduleAtFixedRate(this::announce, 0, 1, TimeUnit.SECONDS);
+      clock.schedule(this::announce, 300, TimeUnit.MILLISECONDS);
       status = "已启动，可在设置中开启所需功能";
       byte[] buffer = new byte[2048];
       while (running) {
@@ -461,6 +722,15 @@ public class LinkService extends Service implements Wire.Listener {
           String id = b.getString("id");
           long time = b.getLong("time");
           int port = b.getInt("port");
+          if (!id.equals(deviceId)
+              && b.optInt("v") == 1
+              && id.matches("[a-f0-9-]{36}")
+              && Math.abs(System.currentTimeMillis() - time) < 30000
+              && System.currentTimeMillis() - discoveryReplies.getOrDefault(id, 0L) > 5000) {
+            if (discoveryReplies.size() > 128) discoveryReplies.clear();
+            discoveryReplies.put(id, System.currentTimeMillis());
+            announce();
+          }
           if (b.optInt("v") == 1
               && id.matches("[a-f0-9-]{36}")
               && Math.abs(System.currentTimeMillis() - time) < 30000
@@ -548,17 +818,22 @@ public class LinkService extends Service implements Wire.Listener {
       }
     } else peers.put(p.id, p);
     status = "已连接同组设备";
-    if (allowed("clipboard")
-        && consent.allowed(p.id, "clipboard")
-        && clip != null
-        && deviceId.equals(clip.optString("source")))
-      try {
-        p.send(obj("type", "clipboard", "offer", clip));
-      } catch (Exception ignored) {
-      }
+    try{groupClipboard.inventory(p);JSONObject current=groupClipboard.latest();if(current!=null && canShareClipboard(p.id) && deviceId.equals(current.optString("source")))p.send(obj("type","clipboard","offer",current));}catch(Exception ignored){}
+
+  }
+
+  void offerInitialConsent(Wire peer) {
+    if (peers.get(peer.id) != peer || consent.hasGrant(peer.id) || pausedPeers.contains(peer.id))
+      return;
+    try {
+      consent.require(peer.id, peer.info.optString("name", "同组设备"), "input");
+    } catch (IOException error) {
+      if (error.getMessage().startsWith("CONSENT_PENDING:")) needPermission(peer, "consent");
+    }
   }
 
   public void closed(Wire p) {
+    for (AuxLink link : auxLinks) if (link.primary == p) link.close();
     if (videoHost != null && videoHost.peer == p) videoHost.close();
     sockets.remove(p);
     if (p.id != null && peers.remove(p.id, p)) {
@@ -579,9 +854,24 @@ public class LinkService extends Service implements Wire.Listener {
     }
   }
 
-  public void message(Wire p, JSONObject m) {
+  void auxInputLost(Wire p) {
+    try {
+      inputJobs.execute(() -> {
+        try {
+          synchronized (LinkService.this) {
+            if (p.id.equals(owner)) shell.request(obj("method", "release"));
+          }
+        } catch (Exception ignored) {}
+      });
+    } catch (RejectedExecutionException ignored) {}
+  }
+
+  public void message(Wire p, JSONObject m) { message(p, m, p); }
+
+  void message(Wire p, JSONObject m, Wire reply) {
     String type = m.optString("type");
     try {
+      if(type.equals("edge-glow")){inboundEdge(p,m,false);return;}
       if (type.equals("cursor")) {
         if (peers.get(p.id) != p || !p.id.equals(active)) return;
         double x = m.optDouble("x", -1), y = m.optDouble("y", -1);
@@ -620,8 +910,10 @@ public class LinkService extends Service implements Wire.Listener {
         return;
       }
       if (type.equals("identity")) {
+        boolean firstIdentity = !p.info.has("name");
         p.info = m;
         rememberDevice(p);
+        jobs.execute(()->quic.connect(p));
         JSONObject caps = m.optJSONObject("capabilities");
         if (group != null
             && caps != null
@@ -640,6 +932,7 @@ public class LinkService extends Service implements Wire.Listener {
           group.save();
           group.publish();
         }
+        // Consent is requested for an operation, never simply for joining the group.
         return;
       }
       if (type.equals("ping")) {
@@ -647,25 +940,25 @@ public class LinkService extends Service implements Wire.Listener {
         return;
       }
       if (type.equals("pong")) return;
-      if (type.equals("clipboard")) {
-        if (allowed("clipboard") && canShareClipboard(p.id)) {
-          JSONObject offer = m.getJSONObject("offer");
-          validateOffer(offer);
-          offer.put("source", p.id);
-          clip = offer;
-        }
-        return;
-      }
+      if(type.equals("clipboard")){groupClipboard.receive(p,m.getJSONObject("offer"));return;}
+      if(type.equals("clipboard-inventory")){groupClipboard.mergeInventory(p,m.optJSONArray("ids"));return;}
+      if(type.equals("clipboard-record")){groupClipboard.record(p,m.getJSONObject("record"));return;}
       if (type.equals("request")) {
-        if (jobs instanceof ThreadPoolExecutor
-            && ((ThreadPoolExecutor) jobs).getQueue().size() > 100) {
+        String operation = m.optString("method");
+        ExecutorService executor =
+            AuxLink.CONTROL.contains(operation)
+                ? inputJobs
+                : jobs;
+        if (executor instanceof ThreadPoolExecutor
+            && ((ThreadPoolExecutor) executor).getQueue().size() > 100) {
           p.close();
           return;
         }
-        jobs.execute(
+        executor.execute(
             () -> {
               try {
-                p.send(
+                if (!reply.connected || peers.get(p.id) != p) return;
+                reply.send(
                     obj(
                         "type",
                         "response",
@@ -675,7 +968,7 @@ public class LinkService extends Service implements Wire.Listener {
                         handle(p, m.optString("method"), m.optJSONObject("args"))));
               } catch (Exception e) {
                 try {
-                  p.send(
+                  reply.send(
                       obj(
                           "type",
                           "response",
@@ -693,7 +986,7 @@ public class LinkService extends Service implements Wire.Listener {
     }
   }
 
-  private void allow(String k) throws Exception {
+  void allow(String k) throws Exception {
     if (!allowed(k)) throw new IOException("安卓端未允许此功能：" + k);
   }
 
@@ -704,12 +997,37 @@ public class LinkService extends Service implements Wire.Listener {
     ownerUntil = System.currentTimeMillis() + 4000;
   }
 
-  private JSONObject handle(Wire p, String method, JSONObject a) throws Exception {
+  JSONObject handle(Wire p, String method, JSONObject a) throws Exception {
     if (group != null && group.excluded(p.id)) throw new IOException("设备已移出组");
+    if(method.equals("quicOpen"))return quic.offer(p);
+    if(method.equals("stage-complete"))return staging.complete(p,a.optString("id"));
+    if(method.equals("stage-offer"))return staging.accept(p,a);
+    if(method.equals("stage-retract"))return staging.retract(p,a.optString("session"));
+    if(method.equals("stage-status")){requireClipboardPermission(p);return staging.available(p,a.optString("id"));}
+    if(method.equals("stage-begin")){requireClipboardPermission(p);return staging.begin(p,a.optString("id"));}
+    if (method.equals("adb-permission-request")) {
+      if (peers.get(p.id) != p) throw new IOException("设备连接已结束");
+      if (!rootEnabled() && (adbRevoked() || !adbAuthorized())) needPermission(p, "adb");
+      return obj();
+    }
+    if (method.equals("permission-request")) {
+      if (peers.get(p.id) != p) throw new IOException("设备连接已结束");
+      consent.request(p.id, p.info.optString("name", "组内设备"));
+      needPermission(p, "consent"); return obj();
+    }
+    if(method.equals("permission-cancel")){consent.disconnect(p.id);permissionNotice.removePeer(p.id);return obj();}
+    if (method.equals("permission-prepare")) {
+      JSONArray keys=a.optJSONArray("permissions");
+      if(keys!=null)for(int i=0;i<keys.length();i++) {
+        String key=keys.optString(i);
+        if(Arrays.asList(DeviceConsent.KEYS).contains(key) && (!allowed(key) || key.equals("input") && !shell.ready() || key.equals("screen") && !screenReady())) needPermission(p,key);
+      }
+      return obj();
+    }
     if (method.equals("permission-status")) {
       if (peers.get(p.id) != p) throw new IOException("设备连接已结束");
       JSONObject entries = obj();
-      boolean inputReady = shell != null && shell.healthy() && shell.lastInputError == null;
+      boolean inputReady = shell != null && shell.ready() && shell.lastInputError == null && (rootEnabled() || adbAuthorized());
       for (String key : new String[] {"input", "screen", "clipboard", "shutdown"})
         entries.put(
             key,
@@ -723,10 +1041,12 @@ public class LinkService extends Service implements Wire.Listener {
                     ? inputReady
                     : key.equals("screen") ? screenReady() : !key.equals("shutdown"),
                 "peerAllowed",
-                consent.hasGrant(p.id) ? consent.allowed(p.id, key) : JSONObject.NULL));
+                key.equals("clipboard") ? canShareClipboard(p.id) : consent.hasGrant(p.id) ? consent.allowed(p.id, key) : JSONObject.NULL));
       return obj(
           "version",
           1,
+          "requestRejected", consent.rejected(p.id),
+          "requestPending", consent.pending(p.id),
           "permissions",
           entries,
           "engine",
@@ -735,6 +1055,14 @@ public class LinkService extends Service implements Wire.Listener {
               inputReady,
               "persistent",
               true,
+              "root",
+              rootEnabled(),
+              "revoked",
+              adbRevoked(),
+              "authorized",
+              adbAuthorized(),
+              "recovering",
+              shell != null && shell.recovering(),
               "message",
               shell != null && shell.lastInputError != null
                   ? shell.lastInputError
@@ -748,21 +1076,35 @@ public class LinkService extends Service implements Wire.Listener {
       group.accept(a.getJSONObject("box"));
       return obj();
     }
+    if (method.equals("linkOpen")) {
+      if (peers.get(p.id) != p || !p.connected || auxLinks.size() >= 8)
+        throw new IOException("辅助通道暂不可用");
+      AuxLink link = new AuxLink(this, p, identity());
+      auxLinks.add(link);
+      return link.info();
+    }
+    if (method.equals("linkPing")) return obj();
+    if (method.equals("inputReset")) {
+      requireOwner(p);
+      shell.request(obj("method", "release"));
+      return obj();
+    }
     if (method.equals("videoOpen")) {
       synchronized (this) {
         requireScreen(p);
         if (videoHost != null && !videoHost.closed && videoHost.peer != p)
           throw new IOException("手机已有屏幕串流会话");
         if (videoHost != null) videoHost.close();
-        videoHost = new VideoHost(this, p, a != null && a.optBoolean("h264"));
+        videoHost = new VideoHost(this, p, a != null && a.optBoolean("h264"),a==null?null:a.optString("rtc",null),a==null?0:a.optLong("quic"));
         return videoHost.info();
       }
     }
-    if (method.equals("videoKeep") || method.equals("videoStop")) {
+    if (method.equals("videoKeep") || method.equals("videoStop") || method.equals("videoKey")) {
       VideoHost stream = videoHost;
       if (stream == null || stream.peer != p || a == null || !stream.id.equals(a.optString("id")))
         throw new IOException("串流已结束");
       if (method.equals("videoKeep")) return stream.keep(p, a.optJSONObject("feedback"));
+      else if(method.equals("videoKey"))return stream.keep(p,obj("needKey",true));
       else stream.close();
       return obj();
     }
@@ -773,42 +1115,80 @@ public class LinkService extends Service implements Wire.Listener {
         return shell.bootstrap();
       case "adbStatus":
         requireAdbPermission(p);
-        boolean ready = shell.healthy();
+        boolean ready = shell.healthy() && shell.lastInputError == null;
         return obj("ready", ready, "inputMode", capabilities().optString("inputMode"));
+      case "prepare":
       case "acquire":
         synchronized (this) {
           requireIncomingDirection();
         }
         if (a.optBoolean("newSession") && pausedPeers.remove(p.id)) {
-          revokeConsent(p.id);
+          // Ending a session blocks retries, but does not revoke the saved grant.
           prefs.edit().putStringSet("paused_peers", new HashSet<>(pausedPeers)).apply();
         }
-        requireInputPermission(p);
+        prepareControl(p, a.optBoolean("screen"), a.optBoolean("pointer", !a.optBoolean("screen")));
+        if (method.equals("prepare")) return obj("ready", true);
         synchronized (this) {
           requireIncomingDirection();
           if (owner != null && !owner.equals(p.id) && ownerUntil > System.currentTimeMillis())
             throw new IOException("CONTROL_CONFLICT: 本设备正在被另一台设备控制");
+          boolean pointerMode = a.optBoolean("pointer", !a.optBoolean("screen"));
+          if (!p.id.equals(owner) || ownerPointer != pointerMode)
+            shell.request(obj("method", "release"));
           owner = p.id;
           ownerFallbackAccepted = a.optBoolean("fallbackAccepted");
+          ownerPointer = pointerMode;
+          ownerEdgeSession=a.optString("edgeSession",null);if(ownerEdgeSession!=null && ownerEdgeSession.length()!=36)ownerEdgeSession=null;ownerGlowSeq=0;
+          ownerNativePointer = false;
           ownerUntil = System.currentTimeMillis() + 4000;
         }
+        if (ownerPointer) {
+          try {
+            ownerNativePointer =
+                shell.request(obj("method", "activatePointer")).optBoolean("nativePointer");
+          } catch (Exception ignored) {
+            ownerNativePointer = false;
+          }
+          if (!ownerNativePointer) {
+            synchronized (this) {
+              if (p.id.equals(owner)) owner = null;
+            }
+            releaseInput();
+            throw new IOException("系统虚拟键鼠暂不可用，请恢复 ADB / Root 助手后重试");
+          }
+        }
+        main.post(
+            () -> {
+              if (p.id.equals(owner)) {
+                projectionIdle.expired(true, SystemClock.elapsedRealtime(), screenIdleDelay());
+              }
+            });
+        clearEdgeGlow();
         return capabilities();
       case "release":
         if (p.id.equals(owner)) {
+          boolean departing=a.has("edgeExit") && inboundEdge(p,a.optJSONObject("edgeExit"),true);
           owner = null;
-          releaseInput();
+          releaseInput(departing);
         }
         return obj();
       case "keepControl":
         requireOwner(p);
-        if (shell.ready()) shell.request(obj("method", "heartbeat"));
+        if (shell.ready()) {
+          if (ownerPointer) {
+            boolean nativePointer =
+                shell.request(obj("method", "activatePointer")).optBoolean("nativePointer");
+            ownerNativePointer = nativePointer;
+          } else shell.request(obj("method", "heartbeat"));
+        }
         return obj();
       case "input":
         requireOwner(p);
         try {
           input(a);
         } catch (Exception error) {
-          needPermission(p, "input");
+          if (String.valueOf(error.getMessage()).startsWith("PERMISSION_REQUIRED:"))
+            needPermission(p, "input");
           throw error;
         }
         return obj();
@@ -830,26 +1210,33 @@ public class LinkService extends Service implements Wire.Listener {
         screenViewers.remove(p.id);
         return obj();
       case "screen":
+        if (privilegedScreenReady()) throw new IOException("ADB / Root 投屏使用 H.264 串流，请升级控制端并打开远程窗口");
         synchronized (this) {
           requireScreen(p);
           screenViewers.put(p.id, System.currentTimeMillis() + 4000);
         }
-        if (jpeg == null) throw new IOException("手机正在准备屏幕画面，请稍后重试");
+        VideoWire.Frame frame = latestVideoFrame();
+        if (frame == null) throw new IOException("手机正在准备屏幕画面，请稍后重试");
         return obj(
             "mime",
             "image/jpeg",
             "data",
-            Base64.getEncoder().encodeToString(jpeg),
+            Base64.getEncoder().encodeToString(frame.data),
             "width",
-            screenWidth,
+            frame.width,
             "height",
-            screenHeight);
+            frame.height);
+      case "clipboard-sync":
+        if(!allowed("clipboard") || !canShareClipboard(p.id))throw new IOException("剪贴板共享未授权");groupClipboard.mergeInventory(p,a.optJSONArray("ids"));return obj("latest",groupClipboard.latest());
       case "clipboardGet":
         requireClipboardPermission(p);
         return snapshotClipboard();
       case "fileChunk":
         requireClipboardPermission(p);
-        return fileChunk(a);
+        byte[] fileData=fileBytes(a,p.id);return obj("data",Base64.getEncoder().encodeToString(fileData),"sha256",Wire.hex(Wire.sha(fileData)));
+      case "bulkOpen":
+        requireClipboardPermission(p);
+        return bulk.open(p,a);
       case "paste":
         requireOwner(p);
         requireClipboardPermission(p);
@@ -863,7 +1250,7 @@ public class LinkService extends Service implements Wire.Listener {
     }
   }
 
-  private void requireClipboardPermission(Wire p) throws IOException {
+  void requireClipboardPermission(Wire p) throws IOException {
     requireConsent(p, "clipboard");
     if (!allowed("clipboard")) {
       needPermission(p, "clipboard");
@@ -879,17 +1266,30 @@ public class LinkService extends Service implements Wire.Listener {
   }
 
   private synchronized void input(JSONObject a) throws Exception {
-    if (!shell.ready()) throw new IOException("PERMISSION_REQUIRED: ADB / Root 输入助手未就绪，请在电脑端恢复连接");
-    shell.request(obj("method", "input", "args", a));
+    if (!shell.ready()) throw new IOException("INPUT_RECOVERING: 输入助手正在恢复连接");
+    shell.request(obj("method", "input", "args", a, "pointer", ownerPointer));
   }
 
-  private void releaseInput() {
+  private synchronized void clearEdgeGlow(){long generation=++glowGeneration;main.post(()->{if(generation==glowGeneration){if(edgeGlow!=null)edgeGlow.close();edgeGlow=null;}});}
+  private synchronized boolean inboundEdge(Wire p,JSONObject m,boolean exiting){
+    if(m==null || peers.get(p.id)!=p || !p.id.equals(owner) || ownerUntil<System.currentTimeMillis() || !ownerPointer || !allowed("input") || !consent.allowed(p.id,"input") || ownerEdgeSession==null || !ownerEdgeSession.equals(m.optString("session")))return false;
+    long seq=m.optLong("seq");String phase=m.optString("phase"),edge=m.optString("edge");double progress=m.optDouble("progress",0);
+    if(seq<=ownerGlowSeq || seq>9007199254740991L || !Arrays.asList("left","right","top","bottom").contains(edge) || !(exiting?phase.equals("depart"):phase.equals("countdown")||phase.equals("cancel")) || phase.equals("countdown")&&(!Double.isFinite(progress)||progress<0||progress>1))return false;
+    ownerGlowSeq=seq;long generation=++glowGeneration;main.post(()->{if(generation==glowGeneration)edgeGlow=EdgeGlow.feedback(this,edgeGlow,phase,edge,progress);});return true;
+  }
+  private void releaseInput(){releaseInput(false);}
+  private void releaseInput(boolean preserveGlow) {
+    if(!preserveGlow)clearEdgeGlow();
+    ownerNativePointer = false;
+    main.post(this::updateProjectionIdle);
     touched = false;
     if (shell != null && shell.ready())
       jobs.execute(
           () -> {
             try {
-              shell.request(obj("method", "release"));
+              synchronized (LinkService.this) {
+                if (owner == null) shell.request(obj("method", "release"));
+              }
             } catch (Exception ignored) {
             }
           });
@@ -921,7 +1321,10 @@ public class LinkService extends Service implements Wire.Listener {
   }
 
   private void requireAdbPermission(Wire peer) throws IOException {
-    requireConsent(peer, "input");
+    if (adbRevoked()) throw new IOException("CONSENT_DENIED: 手机已解除 ADB 授权，请在手机重新开启");
+    // Preparing a local helper does not grant this peer input or screen access.
+    // The computer still needs trusted USB debugging, and acquire enforces consent.
+    if (peers.get(peer.id) != peer || group.excluded(peer.id)) throw new IOException("设备连接已结束");
     if (!allowed("input")) {
       needPermission(peer, "input");
       throw new IOException("PERMISSION_REQUIRED: 请先在手机同意远程输入");
@@ -951,9 +1354,20 @@ public class LinkService extends Service implements Wire.Listener {
     }
     boolean acquired = false;
     try {
+      JSONObject report=target.request("permission-status",obj());peerAccess.put(id,report);
+      JSONObject rows=report.optJSONObject("permissions");
+      if(rows!=null)for(String key:new String[]{"input","screen"}){JSONObject row=rows.optJSONObject(key);if(row!=null && (!row.optBoolean("appEnabled") || !row.optBoolean("systemGranted"))){target.request("permission-prepare",obj("permissions",new JSONArray(Arrays.asList("input","screen"))));throw new IOException("PERMISSION_REQUIRED: 设备未就绪，请在被控设备完成权限设置");}}
+      if(!PeerAccess.allowed(report,"input","screen")) {
+        if(!"有限授权".equals(PeerAccess.status(report,target.info.optString("platform"))) && System.currentTimeMillis()-accessRequested.getOrDefault(id,0L)>120000){target.request("permission-request",obj("permissions",new JSONArray(Arrays.asList("input","screen"))));accessRequested.put(id,System.currentTimeMillis());}
+        throw new IOException("有限授权".equals(PeerAccess.status(report,target.info.optString("platform")))?"CONSENT_DENIED: 此功能未授权，请在设备页申请授权":"CONSENT_PENDING: 请在被控设备允许本设备控制");
+      }
+      JSONObject capability = target.info.optJSONObject("capabilities");
+      if (capability != null && capability.optBoolean("controlPrepare"))
+        target.request("prepare", obj("newSession", newSession, "screen", true));
       JSONObject caps =
           target.request(
-              "acquire", obj("newSession", newSession, "fallbackAccepted", fallbackAccepted));
+              "acquire",
+              obj("newSession", newSession, "fallbackAccepted", fallbackAccepted, "screen", true));
       acquired = true;
       synchronized (this) {
         if (outgoingCancelled || peers.get(id) != target)
@@ -1037,7 +1451,11 @@ public class LinkService extends Service implements Wire.Listener {
   }
 
   private void tick() {
+    if(staging!=null)staging.poll();
+    groupClipboard.poll();for(Wire peer:peers.values())try{groupClipboard.inventory(peer);}catch(Exception ignored){}
     if (!running) return;
+    main.post(this::updateProjectionIdle);
+    if(System.currentTimeMillis()-lastAccessPoll>3000){lastAccessPoll=System.currentTimeMillis();for(Wire p:peers.values())if(accessPolling.add(p.id))jobs.execute(()->{try{JSONObject report=p.request("permission-status",obj());if(peers.get(p.id)==p)peerAccess.put(p.id,report);}catch(Exception ignored){peerAccess.remove(p.id);}finally{accessPolling.remove(p.id);}});}
     String controller = controlledBy();
     if (!java.util.Objects.equals(controller, notifiedController)) {
       notifiedController = controller;
@@ -1114,7 +1532,7 @@ public class LinkService extends Service implements Wire.Listener {
     return onMain(
         () -> {
           ClipData c = clipboard.getPrimaryClip();
-          if (c == null) throw new IOException("安卓限制后台剪贴板读取，请切到 LanLink 或启用其输入法");
+          if(c==null){if(shell!=null && shell.ready()){JSONObject read=shell.request(obj("method","clipboard-get"));if(read.optBoolean("exists"))return obj("id",UUID.randomUUID().toString(),"text",read.optString("text"),"files",new JSONArray(),"source",deviceId);}throw new IOException("暂时无法读取剪贴板，请打开 LanLink 或恢复 ADB / Root 助手");}
           JSONArray files = new JSONArray();
           Map<String, Uri> uris = new HashMap<>();
           String text = "";
@@ -1143,7 +1561,7 @@ public class LinkService extends Service implements Wire.Listener {
             } else if (i == 0 && item.getText() != null) text = item.getText().toString();
           }
           String id = UUID.randomUUID().toString();
-          JSONObject offer = obj("id", id, "text", text, "files", files, "source", deviceId);
+          JSONObject offer = obj("id", id, "text", text, "files", files, "source", deviceId,"_fingerprint",c.toString());
           validateOffer(offer);
           if (offers.size() >= 20) {
             String first = offers.keySet().iterator().next();
@@ -1157,13 +1575,13 @@ public class LinkService extends Service implements Wire.Listener {
         });
   }
 
-  public void publishClipboard() throws Exception {
-    allow("clipboard");
-    JSONObject o = snapshotClipboard();
-    for (Wire p : peers.values())
-      if (canShareClipboard(p.id)) p.send(obj("type", "clipboard", "offer", o));
+  public void publishClipboard() throws Exception {publishClipboard(true);}
+  public void publishClipboard(boolean manual) throws Exception {allow("clipboard");groupClipboard.publish(snapshotClipboard(),manual);}
+  void writeClipboardText(String text)throws Exception{
+    groupClipboard.applied(text);
+    if(shell!=null && shell.ready())try{shell.request(obj("method","clipboard-set","text",text));return;}catch(Exception ignored){}
+    onMain(()->{settingClipboard=true;try{clipboard.setPrimaryClip(ClipData.newPlainText("LanLink",text));}finally{main.postDelayed(()->settingClipboard=false,300);}return true;});
   }
-
   public void publishText(String text) throws Exception {
     allow("clipboard");
     onMain(
@@ -1190,6 +1608,13 @@ public class LinkService extends Service implements Wire.Listener {
   }
 
   private JSONObject fileChunk(JSONObject a) throws Exception {
+    byte[] data=fileBytes(a);return obj("data",Base64.getEncoder().encodeToString(data),"sha256",Wire.hex(Wire.sha(data)));
+  }
+  byte[] fileBytes(JSONObject a) throws Exception {
+    return fileBytes(a,null);
+  }
+  byte[] fileBytes(JSONObject a,String requester) throws Exception {
+    if(staging!=null&&staging.owns(a.getString("offerId")))return staging.bytes(a,requester);
     String offerId = a.getString("offerId");
     Map<String, Uri> map = offers.get(offerId);
     Uri uri = map == null ? null : map.get(a.getString("fileId"));
@@ -1213,23 +1638,26 @@ public class LinkService extends Service implements Wire.Listener {
       int n = 0, k;
       while (n < data.length && (k = in.read(data, n, data.length - n)) != -1) n += k;
       data = Arrays.copyOf(data, n);
-      return obj(
-          "data", Base64.getEncoder().encodeToString(data), "sha256", Wire.hex(Wire.sha(data)));
+      return data;
     }
   }
+
+  long bulkRate(){VideoHost stream=videoHost;return stream!=null&&!stream.closed?Math.max(8192,Math.min(128*1024,stream.adaptive.rate*15L/800)):owner!=null?1024*1024:32L*1024*1024;}
 
   public void receiveCurrent() throws Exception {
     if (clip == null) throw new IOException("没有共享内容");
     receive(clip);
   }
 
-  private void receive(JSONObject offer) throws Exception {
+  void receive(JSONObject offer) throws Exception {receive(offer,()->true);}
+  void receive(JSONObject offer,java.util.function.BooleanSupplier current) throws Exception {
     allow("clipboard");
     validateOffer(offer);
     if (!receiving.compareAndSet(false, true)) throw new IOException("正在接收文件，请稍后重试");
     JSONArray files = offer.getJSONArray("files");
     List<File> written = new ArrayList<>();
     try {
+      if(offer.getJSONArray("files").length()==0){if(current.getAsBoolean())writeClipboardText(offer.getString("text"));return;}
       ClipData data;
       if (files.length() == 0) data = ClipData.newPlainText("LanLink", offer.getString("text"));
       else {
@@ -1242,6 +1670,8 @@ public class LinkService extends Service implements Wire.Listener {
           File destination = new File(root, filename);
           written.add(destination);
           long size = f.getLong("size"), offset = 0;
+          BulkTransfer.Reader bulkReader=null;
+          int bulkRetries=0;
           try (FileOutputStream out = new FileOutputStream(destination)) {
             while (offset < size) {
               JSONObject args =
@@ -1252,22 +1682,30 @@ public class LinkService extends Service implements Wire.Listener {
                       f.getString("id"),
                       "offset",
                       offset);
-              JSONObject chunk =
+              Wire source=offer.optString("source").equals(deviceId)?null:peer(offer.getString("source"));
+              if(source!=null&&source.quicConn!=0&&source.fastPath==null){
+                try{byte[] bytes=quic.file(source,args);requireClipboardPermission(source);if(bytes.length==0||bytes.length>192*1024||offset+bytes.length>size)throw new IOException("文件校验失败");out.write(bytes);offset+=bytes.length;if(videoHost!=null&&!videoHost.closed)Thread.sleep(Math.min(1000,bytes.length*1000L/Math.max(8192,bulkRate())));continue;}
+                catch(Exception error){String reason=String.valueOf(error.getMessage());if(reason.contains("校验")||reason.contains("授权")||reason.contains("过期"))throw error;quic.drop(source);}
+              }
+              if(source!=null && source.info.optJSONObject("capabilities")!=null && source.info.optJSONObject("capabilities").optInt("bulk")==1 && bulkReader==null)bulkReader=BulkTransfer.connect(source,source.request("bulkOpen",new JSONObject(args.toString()).put("end",size).put("completeAck",true)));
+              JSONObject chunk =bulkReader!=null?null:
                   offer.optString("source").equals(deviceId)
                       ? fileChunk(args)
                       : peer(offer.getString("source")).request("fileChunk", args);
-              byte[] b = Base64.getDecoder().decode(chunk.getString("data"));
+              byte[] b;
+              try{b=bulkReader!=null?bulkReader.next():Base64.getDecoder().decode(chunk.getString("data"));}
+              catch(java.io.EOFException|java.net.SocketException|java.net.SocketTimeoutException interrupted){if(bulkReader==null||bulkRetries++>=2)throw interrupted;bulkReader.close();bulkReader=null;Thread.sleep(500);continue;}
               if (b.length == 0
                   || b.length > 192 * 1024
                   || offset + b.length > size
-                  || !Wire.hex(Wire.sha(b)).equals(chunk.getString("sha256")))
+                  || chunk!=null && !Wire.hex(Wire.sha(b)).equals(chunk.getString("sha256")))
                 throw new IOException("文件校验失败");
               out.write(b);
               offset += b.length;
               status =
                   "正在接收 " + f.getString("name") + " " + (offset * 100 / Math.max(1, size)) + "%";
             }
-          }
+          }finally{if(bulkReader!=null){try{if(offset==size)bulkReader.complete(size);}finally{bulkReader.close();}}}
           Uri uri =
               new Uri.Builder()
                   .scheme("content")
@@ -1283,7 +1721,7 @@ public class LinkService extends Service implements Wire.Listener {
           () -> {
             settingClipboard = true;
             try {
-              clipboard.setPrimaryClip(result);
+              if(current.getAsBoolean()){groupClipboard.appliedFiles(result.toString());clipboard.setPrimaryClip(result);}
             } finally {
               main.postDelayed(() -> settingClipboard = false, 300);
             }
@@ -1300,6 +1738,7 @@ public class LinkService extends Service implements Wire.Listener {
 
   public void startProjection(int code, Intent data) {
     stopProjection();
+    projectionIdle.reset();
     startForeground(
         1,
         notification(),
@@ -1324,7 +1763,7 @@ public class LinkService extends Service implements Wire.Listener {
           }
         },
         main);
-    android.util.DisplayMetrics metrics = getResources().getDisplayMetrics();
+    android.util.DisplayMetrics metrics = displayMetrics();
     resizeCapture(metrics.widthPixels, metrics.heightPixels);
     display =
         projection.createVirtualDisplay(
@@ -1385,6 +1824,10 @@ public class LinkService extends Service implements Wire.Listener {
   }
 
   public void stopProjection() {
+    RootCapture capture = rootCapture;
+    rootCapture = null;
+    if (capture != null) capture.close();
+    projectionIdle.reset();
     if (videoHost != null) videoHost.close();
     if (videoEncoder != null) {
       videoEncoder.close();
@@ -1412,6 +1855,8 @@ public class LinkService extends Service implements Wire.Listener {
   }
 
   public void groupChanged() {
+    if(staging!=null)try{staging.clearExports();}catch(Exception ignored){}
+    quic.reset();
     if (videoHost != null) videoHost.close();
     owner = null;
     releaseInput();
@@ -1422,7 +1867,7 @@ public class LinkService extends Service implements Wire.Listener {
     }
     offers.clear();
     offerExpiry.clear();
-    clip = null;
+    clip = null;groupClipboard.clear();
     permissionNotice.reset();
     List<Wire> old = new ArrayList<>(sockets);
     main.postDelayed(
@@ -1466,12 +1911,20 @@ public class LinkService extends Service implements Wire.Listener {
     if (videoHost != null) videoHost.close();
     owner = null;
     releaseInput();
-    status = "已结束远程控制";
+    status = "已结束桌面控制";
   }
 
   public void onDestroy() {
+    if(staging!=null)staging.close();
+    quic.close();
+    bulk.close();
+    if(edgeGlow!=null)edgeGlow.close();
+    inputJobs.shutdownNow();
     if (group != null) group.close();
     running = false;
+    if (networkCallback != null)
+      getSystemService(android.net.ConnectivityManager.class)
+          .unregisterNetworkCallback(networkCallback);
     permissionNotice.reset();
     getSystemService(NotificationManager.class).cancel(2);
     if (pairing != null) pairing.close();
@@ -1498,6 +1951,14 @@ public class LinkService extends Service implements Wire.Listener {
   synchronized void requireScreen(Wire p) throws IOException {
     requireIncomingDirection();
     requireConsent(p, "screen");
+    if (allowed("screen") && privilegedScreenReady()) {
+      return;
+    }
+    if (rootEnabled() || allowed("screen") && shell.recovering()) {
+      // A recovering input helper is not a missing MediaProjection grant.
+      if (rootCapture != null && rootCapture.running()) return;
+      throw new IOException("INPUT_RECOVERING: ADB / Root 助手正在恢复，屏幕连接将自动重试");
+    }
     if (!allowed("screen") || projection == null) {
       needPermission(p, "screen");
       throw new IOException("PERMISSION_REQUIRED: 手机尚未授权本次屏幕共享，请在手机开启");
@@ -1509,7 +1970,18 @@ public class LinkService extends Service implements Wire.Listener {
     return data == null ? null : new VideoWire.Frame(data, screenWidth, screenHeight, false, true);
   }
 
-  VideoEncoder startVideoEncoder(VideoEncoder.Output output) throws Exception {
+  VideoSource startVideoEncoder(VideoEncoder.Output output) throws Exception {
+    if (privilegedScreenReady()) {
+      synchronized (this) {
+        if (rootCapture == null || !rootCapture.running()) {
+          if (SystemClock.elapsedRealtime() < rootCaptureRetry)
+            throw new IOException("Root 串流正在恢复，请稍后重试");
+          rootCaptureRetry = SystemClock.elapsedRealtime() + 2000;
+          rootCapture = new RootCapture(this);
+        }
+        return rootCapture.attach(output);
+      }
+    }
     return onMain(
         () -> {
           if (projection == null || display == null) throw new IOException("屏幕共享已结束");
@@ -1521,7 +1993,7 @@ public class LinkService extends Service implements Wire.Listener {
         });
   }
 
-  void stopVideoEncoder(VideoEncoder encoder) {
+  void stopVideoEncoder(VideoSource encoder) {
     main.post(
         () -> {
           if (videoEncoder == encoder) {

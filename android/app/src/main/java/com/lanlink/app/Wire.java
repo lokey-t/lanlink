@@ -27,6 +27,11 @@ public final class Wire implements AutoCloseable {
   public volatile boolean connected;
   public volatile String failure;
   public boolean outgoing;
+  public volatile Wire fastPath;
+  volatile QuicManager quic;volatile long quicConn,quicRetry;
+  QuicMotion.Sender quicTx;QuicMotion.Receiver quicRx;
+  QuicInputQueue quicInputs;
+  private final Object controlOrder = new Object();
   private final JSONObject identity;
   private final byte[] secret;
   private final Listener listener;
@@ -205,7 +210,10 @@ public final class Wire implements AutoCloseable {
     out.flush();
   }
 
-  public synchronized void send(JSONObject m) throws Exception {
+  public void send(JSONObject m) throws Exception {
+    if(quicConn!=0&&quic!=null&&QuicManager.NOTIFY.contains(m.optString("type"))){quic.notify(this,m);return;}sendDirect(m);
+  }
+  synchronized void sendDirect(JSONObject m) throws Exception {
     if (!connected || closed) throw new IOException("设备未连接");
     long sequence = tx++;
     Cipher c = Cipher.getInstance("AES/GCM/NoPadding");
@@ -222,14 +230,36 @@ public final class Wire implements AutoCloseable {
             Base64.getEncoder().encodeToString(c.doFinal(bytes(m.toString())))));
   }
 
+  void receiveNotify(JSONObject message){listener.message(this,message);}
+
   public JSONObject request(String method, JSONObject args) throws Exception {
+    if (AuxLink.CONTROL.contains(method)) synchronized (controlOrder) {
+      Wire fast = fastPath;
+      if (fast != null && fast.connected) {
+        try { return fast.requestDirect(method, args, 1500); }
+        catch (Exception error) {
+          if (!fast.connected || error instanceof TimeoutException) {
+            fastPath = null;
+            fast.close();
+            try { requestDirect("inputReset", obj(), 1500); } catch (Exception ignored) {}
+          }
+          throw error;
+        }
+      }
+      return quicConn!=0?quic.request(this,method,args,15000):requestDirect(method, args, 15000);
+    }
+    int timeout=method.equals("paste")?120000:15000;
+    return quicConn!=0&&!method.equals("quicOpen")?quic.request(this,method,args,timeout):requestDirect(method,args,timeout);
+  }
+
+  JSONObject requestDirect(String method, JSONObject args, int timeout) throws Exception {
     if (pending.size() >= 32) throw new IOException("请求过多");
     String id = UUID.randomUUID().toString();
     CompletableFuture<JSONObject> p = new CompletableFuture<>();
     pending.put(id, p);
     try {
       send(obj("type", "request", "id", id, "method", method, "args", args));
-      return p.get(method.equals("paste") ? 120 : 15, TimeUnit.SECONDS);
+      return p.get(timeout, TimeUnit.MILLISECONDS);
     } finally {
       pending.remove(id);
     }
@@ -237,8 +267,12 @@ public final class Wire implements AutoCloseable {
 
   public void close() {
     if (closed) return;
+    if(quic!=null)quic.drop(this);
     closed = true;
     connected = false;
+    Wire fast = fastPath;
+    fastPath = null;
+    if (fast != null) fast.close();
     try {
       socket.close();
     } catch (Exception ignored) {
