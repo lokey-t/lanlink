@@ -29,7 +29,7 @@ if(!(Test-Path -LiteralPath $quicDll)){throw 'Build the QUIC native library befo
 Copy-Item -LiteralPath $quicDll -Destination (Join-Path $output 'runtime/lanlink_quic.dll')
 New-Item -ItemType Directory -Force (Join-Path $output 'desktop/windows') | Out-Null
 Copy-Item -LiteralPath (Join-Path $root 'desktop/windows/Theme.xaml') -Destination (Join-Path $output 'desktop/windows/Theme.xaml')
-foreach ($name in @('package.json','package-lock.json','README.md','THIRD_PARTY_NOTICES.md')) { Copy-Item -LiteralPath (Join-Path $root $name) -Destination $output }
+foreach ($name in @('package.json','package-lock.json','README.md','README.en.md','CHANGELOG.md','THIRD_PARTY_NOTICES.md')) { Copy-Item -LiteralPath (Join-Path $root $name) -Destination $output }
 & (Join-Path $root 'desktop/windows/build.ps1') -Output "dist/LanLink-$version-windows-x64/LanLink.exe"
 if (-not $NoZip) {
     Add-Type -AssemblyName System.IO.Compression.FileSystem

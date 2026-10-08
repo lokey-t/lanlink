@@ -32,6 +32,7 @@ public final class ScanActivity extends Activity {
 
   @Override
   public void onCreate(Bundle state) {
+    Ui.applyTheme(this);
     super.onCreate(state);
     Ui ui = new Ui(this);
     LinearLayout page = ui.column();

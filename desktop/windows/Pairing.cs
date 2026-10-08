@@ -37,7 +37,7 @@ namespace LanLink.Desktop {
     public PairingPanel(Window owner, Client client, Func<bool, bool> confirm, Func<Task> joined) {
       this.client = client; this.confirm = confirm; this.joined = joined;
       Resources = owner.Resources;
-      Padding = new Thickness(24); Background = Brushes.White; CornerRadius = new CornerRadius(20);
+      Padding = new Thickness(24); Background = MainWindow.Brush("#FFFFFF"); CornerRadius = new CornerRadius(20);
       var panel = MainWindow.Column(); panel.Children.Add(MainWindow.Text("让设备相遇", 25));
       var hint = MainWindow.Text("在同一局域网中，扫码或输入配对码即可加入你的离线组。", 13, "#7B879D"); hint.Margin = new Thickness(0, 9, 0, 24); panel.Children.Add(hint);
       var columns = new Grid(); columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(246) }); columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) }); columns.ColumnDefinitions.Add(new ColumnDefinition()); panel.Children.Add(columns);

@@ -9,7 +9,7 @@ import android.widget.*;
 
 /** Small native design system shared by the phone's pages and sheets. */
 final class Ui {
-  static final int BG = 0xfff7f8fb,
+  static int BG = 0xfff7f8fb,
       INK = 0xff202637,
       MUTED = 0xff788195,
       PURPLE = 0xff7163c8,
@@ -18,6 +18,31 @@ final class Ui {
       GREEN = 0xff368769,
       LINE = 0xffedf0f5,
       RED = 0xffc54d60;
+  static int CARD = Color.WHITE;
+  static int THUMB = Color.WHITE;
+  static boolean dark;
+  static String themeMode(Context context) {
+    String value = context.getSharedPreferences("identity", 0).getString("theme", "system");
+    return "dark".equals(value) || "light".equals(value) ? value : "system";
+  }
+  static void applyTheme(android.app.Activity activity) {
+    String mode = themeMode(activity);
+    dark = "dark".equals(mode) || "system".equals(mode) &&
+        (activity.getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES;
+    BG = dark ? 0xff141b27 : 0xfff7f8fb;
+    CARD = dark ? 0xff222c3c : Color.WHITE;
+    INK = dark ? 0xffe4eaf4 : 0xff202637;
+    MUTED = dark ? 0xffa8b5ca : 0xff65748b;
+    PURPLE = dark ? 0xffaa9cf2 : 0xff7163c8;
+    LILAC = dark ? 0xff34304f : 0xffeeebfc;
+    MINT = dark ? 0xff203e36 : 0xffe3f3ed;
+    GREEN = dark ? 0xff7ac6a6 : 0xff368769;
+    LINE = dark ? 0xff3b4960 : 0xffedf0f5;
+    RED = dark ? 0xffef96a5 : 0xffc54d60;
+    THUMB = dark ? 0xffa8b5ca : Color.WHITE;
+    activity.setTheme(dark ? R.style.AppThemeDark : R.style.AppTheme);
+  }
+  static int dialogTheme() { return dark ? android.R.style.Theme_Material_NoActionBar : android.R.style.Theme_Material_Light_NoActionBar; }
   final Context context;
 
   Ui(Context context) {
@@ -33,6 +58,12 @@ final class Ui {
     d.setColor(color);
     d.setCornerRadius(dp(radius));
     return d;
+  }
+
+  GradientDrawable outlinedShape(int color, int radius, int border) {
+    GradientDrawable drawable = shape(color, radius);
+    drawable.setStroke(dp(1), border);
+    return drawable;
   }
 
   android.graphics.drawable.Drawable touch(int color, int radius) {
@@ -72,7 +103,7 @@ final class Ui {
   LinearLayout card() {
     LinearLayout c = column();
     c.setPadding(dp(20), dp(20), dp(20), dp(20));
-    c.setBackground(shape(Color.WHITE, 24));
+    c.setBackground(shape(CARD, 24));
     return c;
   }
 
@@ -93,7 +124,7 @@ final class Ui {
     b.setText(label);
     b.setAllCaps(false);
     b.setTextSize(15);
-    b.setTextColor(primary ? Color.WHITE : PURPLE);
+    b.setTextColor(primary ? (dark ? 0xff171323 : Color.WHITE) : PURPLE);
     b.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
     b.setBackgroundTintList(null);
     b.setBackground(touch(primary ? PURPLE : LILAC, 16));
@@ -157,11 +188,34 @@ final class Ui {
     return frame;
   }
 
+  View controlTile(String glyph, String label, boolean selected, Runnable action) {
+    LinearLayout tile = column();
+    tile.setGravity(Gravity.CENTER);
+    tile.setPadding(dp(4), dp(12), dp(4), dp(12));
+    tile.setBackground(new RippleDrawable(ColorStateList.valueOf(0x227163c8),
+        outlinedShape(selected ? LILAC : CARD, 22, selected ? PURPLE : LINE), shape(-1, 22)));
+    FrameLayout badge = new FrameLayout(context);
+    badge.setBackground(outlinedShape(selected ? CARD : BG, 15, selected ? PURPLE : LINE));
+    badge.addView(icon(glyph, selected ? PURPLE : MUTED),
+        new FrameLayout.LayoutParams(dp(27), dp(27), Gravity.CENTER));
+    tile.addView(badge, new LinearLayout.LayoutParams(dp(48), dp(48)));
+    gap(tile, 9);
+    TextView title = text(label, 13, selected ? PURPLE : INK);
+    title.setGravity(Gravity.CENTER);
+    title.setSingleLine(true);
+    tile.addView(title, new LinearLayout.LayoutParams(-1, -2));
+    tile.setSelected(selected);
+    tile.setFocusable(true);
+    tile.setContentDescription(label + (selected ? "，已选择" : ""));
+    tile.setOnClickListener(v -> action.run());
+    return tile;
+  }
+
   View clipboardShortcuts(Runnable upload, Runnable download) {
     LinearLayout group=row();group.setBackground(shape(LILAC,16));group.setClipToOutline(true);
     group.setContentDescription("快捷同步剪贴板");
     for(int i=0;i<2;i++) {
-      if(i==1){View divider=new View(context);divider.setBackgroundColor(0xffd8d1ed);group.addView(divider,new LinearLayout.LayoutParams(dp(1),dp(24)));}
+      if(i==1){View divider=new View(context);divider.setBackgroundColor(LINE);group.addView(divider,new LinearLayout.LayoutParams(dp(1),dp(24)));}
       FrameLayout button=new FrameLayout(context);button.setContentDescription(i==0?"上传剪贴板":"下载剪贴板");button.setBackground(touch(Color.TRANSPARENT,0));
       button.addView(icon(i==0?"clipboard-upload":"clipboard-download",PURPLE),new FrameLayout.LayoutParams(dp(24),dp(24),Gravity.CENTER));
       Runnable action=i==0?upload:download;button.setOnClickListener(v->action.run());group.addView(button,new LinearLayout.LayoutParams(dp(48),dp(48)));
@@ -262,13 +316,21 @@ final class Ui {
         case "clipboard":
           rect(c, 5, 4, 19, 22, 2);
           p.setStyle(Paint.Style.FILL);
-          p.setColor(Color.WHITE);
+          p.setColor(CARD);
           rect(c, 9, 2, 15, 6, 1);
           p.setStyle(Paint.Style.STROKE);
           p.setColor(color);
           rect(c, 9, 2, 15, 6, 1);
           line(c, 8, 11, 16, 11);
           line(c, 8, 15, 14, 15);
+          break;
+        case "touchpad":
+          rect(c, 2, 3, 22, 21, 4);
+          line(c, 3, 16, 21, 16);
+          line(c, 12, 16, 12, 20);
+          c.drawCircle(12, 9, 2.2f, p);
+          line(c, 8, 12, 8, 10);
+          line(c, 16, 12, 16, 10);
           break;
         case "keyboard":
           rect(c, 2, 5, 22, 19, 2);

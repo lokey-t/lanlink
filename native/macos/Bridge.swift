@@ -17,6 +17,9 @@ func emit(_ value: [String: Any]) {
  outLock.lock(); print(line); fflush(stdout); outLock.unlock()
 }
 var remote = false
+var cursorDetached = false
+var capturedCursorPosition: CGPoint?
+var capturedDisplay: CGDirectDisplayID?
 var syntheticCursor = false
 var lease = Date.distantPast
 var inputLease = Date.distantPast
@@ -47,12 +50,19 @@ func mouseButton(_ button: Int, _ down: Bool) {
  if down { buttons.insert(button) } else { buttons.remove(button) }
 }
 func releaseAll() { for k in Array(held) { key(k, false) }; for b in Array(buttons) { mouseButton(b, false) } }
+func stopCapture() {
+ remote = false
+ if cursorDetached { _ = CGAssociateMouseAndMouseCursorPosition(1); cursorDetached = false }
+ capturedCursorPosition = nil
+ if let display = capturedDisplay { _ = CGDisplayShowCursor(display); capturedDisplay = nil }
+ releaseAll()
+}
 let callback: CGEventTapCallBack = { _, type, event, _ in
- if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput { remote = false; releaseAll(); if let t = tap { CGEvent.tapEnable(tap: t, enable: true) }; emit(["type":"emergency"]); return Unmanaged.passUnretained(event) }
+ if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput { stopCapture(); if let t = tap { CGEvent.tapEnable(tap: t, enable: true) }; emit(["type":"emergency"]); return Unmanaged.passUnretained(event) }
  if event.getIntegerValueField(.eventSourceUserData) == marker { return Unmanaged.passUnretained(event) }
  if [.mouseMoved,.leftMouseDragged,.rightMouseDragged,.otherMouseDragged].contains(type) { syntheticCursor = false }
  let code = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
- if type == .keyDown && code == 111 && event.flags.contains([.maskControl, .maskAlternate]) { remote = false; releaseAll(); emit(["type":"emergency"]); return nil }
+ if type == .keyDown && code == 111 && event.flags.contains([.maskControl, .maskAlternate]) { stopCapture(); emit(["type":"emergency"]); return nil }
  if type == .flagsChanged {
   let f=event.flags;let mask=(f.contains(.maskControl) ? 1:0)|(f.contains(.maskAlternate) ? 2:0)|(f.contains(.maskShift) ? 4:0)|(f.contains(.maskCommand) ? 8:0)
   emit(["type":"modifiers","mask":mask])
@@ -66,6 +76,7 @@ let callback: CGEventTapCallBack = { _, type, event, _ in
   if let name = reverseCodes[code] { emit(["type":"input","kind":"key","code":name,"down":down]) }
   if !down && localModifierUps.remove(code) != nil{return Unmanaged.passUnretained(event)}
  } else if [.mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged].contains(type) {
+  if let position = capturedCursorPosition { _ = CGWarpMouseCursorPosition(position) }
   emit(["type":"input","kind":"move","dx":event.getIntegerValueField(.mouseEventDeltaX),"dy":event.getIntegerValueField(.mouseEventDeltaY)])
  } else if type == .scrollWheel { emit(["type":"input","kind":"wheel","delta":max(-2400,min(2400,event.getIntegerValueField(.scrollWheelEventDeltaAxis1)*120))]) }
  else {
@@ -82,8 +93,19 @@ func command(_ message: [String: Any]) {
  let a = message["args"] as? [String: Any] ?? [:]
  let display = CGMainDisplayID(), bounds = CGDisplayBounds(display)
  switch method {
- case "capabilities": reply(id,["relativeInput":true,"host":tap != nil,"input":AXIsProcessTrusted(),"screen":CGPreflightScreenCaptureAccess(),"clipboard":true,"shutdown":true,"width":bounds.width,"height":bounds.height])
- case "mode": if a["remote"] as? Bool == true && !remote{localModifierUps=physicalModifiers};remote = a["remote"] as? Bool ?? false; lease = Date().addingTimeInterval(3); if !remote { releaseAll() }; reply(id)
+ case "capabilities": reply(id,["relativeInput":true,"host":AXIsProcessTrusted() && (tap.map { CGEvent.tapIsEnabled(tap: $0) } ?? false),"input":AXIsProcessTrusted(),"screen":CGPreflightScreenCaptureAccess(),"clipboard":true,"shutdown":true,"width":bounds.width,"height":bounds.height])
+ case "mode":
+  if a["remote"] as? Bool == true {
+   if !remote {
+    guard AXIsProcessTrusted(), let tap, CGEvent.tapIsEnabled(tap: tap) else { failure(id,"缺少辅助功能或输入监控权限，无法接管本机键鼠"); return }
+    guard CGAssociateMouseAndMouseCursorPosition(0) == .success else { failure(id,"无法暂停本机鼠标，请重新授予辅助功能权限"); return }
+    cursorDetached = true; capturedCursorPosition = CGEvent(source: nil)?.location
+    guard CGDisplayHideCursor(display) == .success else { stopCapture(); failure(id,"无法隐藏本机光标，已恢复本机操作"); return }
+    capturedDisplay = display; localModifierUps = physicalModifiers; remote = true
+   }
+   lease = Date().addingTimeInterval(3)
+  } else { stopCapture() }
+  reply(id)
  case "file-drag-cancel": if remote { key(53,true);key(53,false);mouseButton(0,false) }; reply(id)
  case "heartbeat": lease = Date().addingTimeInterval(3); inputLease = lease; reply(id)
  case "release": releaseAll(); reply(id)
@@ -123,12 +145,15 @@ func command(_ message: [String: Any]) {
   clipboardCount = pb.changeCount; reply(id)
  case "screen":
   guard CGPreflightScreenCaptureAccess() else { _ = CGRequestScreenCaptureAccess(); failure(id,"请授予屏幕录制权限，然后重启客户端"); return }
+  let requestedWidth = a["maxWidth"] as? Double ?? 1440, requestedQuality = a["quality"] as? Double ?? 0.65
+  let maxWidth = Int(requestedWidth.isFinite ? max(320,min(1920,requestedWidth)) : 1440)
+  let quality = requestedQuality.isFinite ? max(0.2,min(0.85,requestedQuality)) : 0.65
   SCShareableContent.getExcludingDesktopWindows(false,onScreenWindowsOnly:true) { content,error in
    guard let screen = content?.displays.first(where: { $0.displayID == display }) else { failure(id,error?.localizedDescription ?? "无法获取屏幕"); return }
-   let config = SCStreamConfiguration();config.width = min(1440,screen.width);config.height = screen.height*config.width/screen.width;config.showsCursor = true
+   let config = SCStreamConfiguration();config.width = min(maxWidth,screen.width);config.height = max(1,screen.height*config.width/screen.width);config.showsCursor = true
    let filter = SCContentFilter(display:screen,excludingWindows:[])
    SCScreenshotManager.captureImage(contentFilter:filter,configuration:config) { image,error in
-    guard let image = image, let data = NSBitmapImageRep(cgImage:image).representation(using:.jpeg,properties:[.compressionFactor:0.65]) else { failure(id,error?.localizedDescription ?? "屏幕捕获失败"); return }
+    guard let image = image, let data = NSBitmapImageRep(cgImage:image).representation(using:.jpeg,properties:[.compressionFactor:quality]) else { failure(id,error?.localizedDescription ?? "屏幕捕获失败"); return }
     reply(id,["mime":"image/jpeg","data":data.base64EncodedString(),"width":image.width,"height":image.height])
    }
   }
@@ -142,11 +167,11 @@ func command(_ message: [String: Any]) {
 _ = NSApplication.shared
 let types: [CGEventType] = [.keyDown,.keyUp,.flagsChanged,.mouseMoved,.leftMouseDragged,.rightMouseDragged,.otherMouseDragged,.leftMouseDown,.leftMouseUp,.rightMouseDown,.rightMouseUp,.otherMouseDown,.otherMouseUp,.scrollWheel]
 let mask = types.reduce(CGEventMask(0)) { $0 | (CGEventMask(1) << $1.rawValue) }
-tap = CGEvent.tapCreate(tap:.cgSessionEventTap,place:.headInsertEventTap,options:.defaultTap,eventsOfInterest:mask,callback:callback,userInfo:nil)
+tap = CGEvent.tapCreate(tap:.cghidEventTap,place:.headInsertEventTap,options:.defaultTap,eventsOfInterest:mask,callback:callback,userInfo:nil)
 if let t = tap { let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault,t,0);CFRunLoopAddSource(CFRunLoopGetMain(),source,.commonModes);CGEvent.tapEnable(tap:t,enable:true) }
 var ticks = 0
 Timer.scheduledTimer(withTimeInterval:0.02,repeats:true) { _ in
- if remote && Date()>lease { remote=false;releaseAll();emit(["type":"emergency"]) }
+ if remote && Date()>lease { stopCapture();emit(["type":"emergency"]) }
  if (!held.isEmpty || !buttons.isEmpty) && Date()>inputLease { releaseAll() }
  if !remote { let p=CGEvent(source:nil)?.location ?? .zero;let b=CGDisplayBounds(CGMainDisplayID());emit(["type":"cursor","x":p.x-b.minX,"y":p.y-b.minY,"width":b.width,"height":b.height,"synthetic":syntheticCursor]) }
  ticks += 1
@@ -154,6 +179,10 @@ Timer.scheduledTimer(withTimeInterval:0.02,repeats:true) { _ in
 }
 DispatchQueue.global().async {
  while let line = readLine() { guard let data=line.data(using:.utf8),let m=(try? JSONSerialization.jsonObject(with:data)) as? [String:Any] else { continue };DispatchQueue.main.async { command(m) } }
- DispatchQueue.main.async { remote=false;releaseAll();NSApplication.shared.terminate(nil) }
+ DispatchQueue.main.async { stopCapture();NSApplication.shared.terminate(nil) }
 }
+signal(SIGTERM, SIG_IGN)
+let terminationSignal = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+terminationSignal.setEventHandler { stopCapture(); exit(0) }
+terminationSignal.resume()
 NSApplication.shared.run()

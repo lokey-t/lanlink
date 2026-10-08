@@ -87,6 +87,7 @@ function fixture({ status = false, list = listing, failure = false, bootstrapErr
     return bootstrap;
   } };
   service.getPeer = id => { assert.equal(id, 'android-id'); return peer; };
+  service.links = { verifyUsb: async (id, serial) => id === 'android-id' && serial === 'emulator-5580' };
   const manager = new AdbManager(service, { locate: async () => '/sdk/adb', wait: async () => {}, run: async (exe, args, options) => {
     commands.push({ exe, args, options });
     if (failure) throw Error('sensitive executable args ' + secret);
@@ -110,17 +111,63 @@ test('ADB authorization targets one selected transport, verifies helper via pair
 test('ADB authorization does not launch on unauthorized devices, refusal, existing helper, or unsafe serial', async () => {
   const unauthorized = fixture();
   await assert.rejects(unauthorized.manager.authorize({ id: 'android-id', serial: 'phone-2' }), /USB 调试/);
-  assert.equal(unauthorized.requests.length, 0); assert.equal(unauthorized.commands.length, 1);
+  assert.deepEqual(unauthorized.requests, ['adbStatus']); assert.equal(unauthorized.commands.length, 1);
   const refused = fixture({ bootstrapError: 'CONSENT_PENDING' });
   await assert.rejects(refused.manager.authorize({ id: 'android-id', serial: 'emulator-5580' }), /CONSENT_PENDING/);
   assert.equal(refused.commands.length, 1);
   const ready = fixture({ status: true });
   await ready.manager.authorize({ id: 'android-id', serial: 'emulator-5580' });
-  assert.equal(ready.commands.length, 1);
+  assert.equal(ready.commands.length, 0);
   assert.equal(ready.peer.info.capabilities.inputMode, 'adb/root');
   const invalid = fixture();
   await assert.rejects(invalid.manager.authorize({ id: 'android-id', serial: 'phone;reboot' }), /请选择/);
   assert.equal(invalid.commands.length, 0);
+});
+
+test('a second computer reuses the phone helper without local ADB or USB trust and never saves an unverified binding', async () => {
+  const f = fixture({ status: true });
+  f.manager.locate = async () => { throw Error('must not inspect the new computer USB transport'); };
+  f.manager.remember = async () => { throw Error('must not remember an unverified serial'); };
+  const match = await f.manager.match('android-id');
+  assert.equal(match.connected, true); assert.equal(match.ready, true); assert.equal(match.serial, undefined);
+  assert.equal((await f.manager.authorize({ id: 'android-id' })).mode, 'adb/root');
+  assert.equal((await f.manager.authorize({ id: 'android-id', serial: 'unrelated-phone' })).mode, 'adb/root');
+  assert.equal(f.commands.length, 0);
+});
+
+test('ADB setup verifies the exact phone even when two transports have an identical APK path', async () => {
+  const f = fixture();
+  f.manager.service.links.verifyUsb = async () => false;
+  await assert.rejects(f.manager.authorize({ id: 'android-id', serial: 'emulator-5580' }), /身份不匹配/);
+  assert.deepEqual(f.requests, ['adbStatus']);
+  assert.equal(f.commands.length, 1);
+  assert.equal(f.manager.busy, false);
+});
+
+test('ready status from a replaced peer cannot activate or bind the replacement device', async () => {
+  const f = fixture({ status: true });
+  const original = f.manager.service.getPeer;
+  let reads = 0;
+  f.manager.service.getPeer = id => ++reads === 1 ? original(id) : { info: f.peer.info };
+  await assert.rejects(f.manager.authorize({ id: 'android-id' }), /连接已改变/);
+  assert.equal(f.commands.length, 0);
+});
+
+test('two Android devices keep independent readiness and USB bindings on each computer', async () => {
+  for (const computer of ['computer-a', 'computer-b']) {
+    const peers = new Map([
+      ['phone-a', { info: { platform: 'android', name: 'A' }, request: async () => ({ ready: true }) }],
+      ['phone-b', { info: { platform: 'android', name: 'B' }, request: async () => ({ ready: false }) }]
+    ]);
+    const verified = [];
+    const service = new EventEmitter();
+    Object.assign(service, { config: { id: computer, adbBindings: {} }, peers, getPeer: id => peers.get(id), links: { verifyUsb: async (id, serial) => { verified.push([id, serial]); return serial === 'phone-b-usb'; } } });
+    const manager = new AdbManager(service, { locate: async () => '/adb', run: async () => ({ stdout: 'phone-a-usb device\nphone-b-usb device\n' }) });
+    assert.equal((await manager.match('phone-a')).ready, true);
+    assert.equal((await manager.match('phone-b')).serial, 'phone-b-usb');
+    assert.deepEqual(verified, [['phone-b', 'phone-a-usb'], ['phone-b', 'phone-b-usb']]);
+    assert.deepEqual(service.config.adbBindings, {});
+  }
 });
 
 test('ADB error messages never leak helper credentials and always clear operation lock', async () => {

@@ -129,18 +129,12 @@ export class AdbManager {
     return { devices };
   }
   async authorize({ id, serial, automatic = false }) {
-    if (typeof id !== 'string' || typeof serial !== 'string' || !serialPattern.test(serial)) throw Error('请选择目标手机和调试设备');
+    if (typeof id !== 'string' || serial !== undefined && (typeof serial !== 'string' || !serialPattern.test(serial))) throw Error('请选择目标手机和调试设备');
     if (this.busy) throw Error('正在为手机启用 ADB 键鼠，请稍候');
     this.busy = true;
     try {
       const peer = this.service.getPeer(id);
       if (peer.info?.platform !== 'android') throw Error('ADB 键鼠增强仅适用于已连接的安卓设备');
-      const executable = await this.locate();
-      if (!executable) throw Error('未找到 ADB，请先安装 Android SDK Platform-Tools');
-      const devices = parseDevices(await this.command(executable, ['devices', '-l']));
-      const device = devices.find(d => d.serial === serial);
-      if (!device) throw Error('所选调试设备已断开，请刷新设备列表');
-      if (device.status !== 'device') throw Error(device.status === 'unauthorized' ? '请先在手机弹窗中允许此电脑进行 USB 调试，再重试' : '所选调试设备尚未就绪，请重新连接并刷新');
       if (automatic) {
         const report = await peer.request('permission-status', {}, 3000);
         if (report?.engine?.recovering || report?.engine?.root || report?.engine?.revoked) return { skipped: true };
@@ -148,12 +142,23 @@ export class AdbManager {
         if (permission?.peerAllowed !== true || permission.appEnabled !== true) return { skipped: true };
       }
       const before = await peer.request('adbStatus', {}, 5000);
+      if (this.service.getPeer(id) !== peer) throw Error('手机连接已改变，请重试');
       if (before.ready === true) {
         peer.info.capabilities = { ...peer.info.capabilities, input: true, inputMode: 'adb/root' };
         this.service.emit('change');
-        if (!automatic) await this.remember(id, serial, peer);
-        return { mode: 'adb/root', message: '手机的 ADB／Root 输入助手已经连接，可使用增强键鼠控制。' };
+        // The helper belongs to the phone, not the computer that started it.
+        // A ready LAN session does not prove trust of a local USB serial.
+        return { mode: 'adb/root', message: '手机的 ADB／Root 输入助手已就绪，本组电脑可直接使用，无需重新连接数据线。' };
       }
+      if (typeof serial !== 'string') throw Error('手机助手尚未就绪，请连接已信任的 USB／无线调试设备以恢复助手');
+      const executable = await this.locate();
+      if (!executable) throw Error('未找到 ADB，请先安装 Android SDK Platform-Tools');
+      const devices = parseDevices(await this.command(executable, ['devices', '-l']));
+      const device = devices.find(d => d.serial === serial);
+      if (!device) throw Error('所选调试设备已断开，请刷新设备列表');
+      if (device.status !== 'device') throw Error(device.status === 'unauthorized' ? '请先在手机弹窗中允许此电脑进行 USB 调试，再重试' : '所选调试设备尚未就绪，请重新连接并刷新');
+      if (!await this.service.links?.verifyUsb(id, serial)) throw Error('所选调试设备与目标手机的身份不匹配，请核对设备后重试');
+      if (this.service.getPeer(id) !== peer) throw Error('手机连接已改变，请重试');
       const bootstrap = await peer.request('adbBootstrap', {}, 5000);
       const installed = await this.command(executable, ['-s', serial, 'shell', 'pm', 'path', 'com.lanlink.app']);
       const command = helperCommand(bootstrap, installed);
@@ -173,8 +178,9 @@ export class AdbManager {
         if (status.ready === true) {
           peer.info.capabilities = { ...peer.info.capabilities, input: true, inputMode: 'adb/root' };
           this.service.emit('change');
+          if (this.service.getPeer(id) !== peer) throw Error('手机连接已改变，请重试');
           if (!automatic) await this.remember(id, serial, peer);
-          return { mode: 'adb/root', message: '已保存授权绑定。应用重启后助手自动重连；手机重启后，已信任的调试连接可用时电脑会自动恢复。ADB 助手就绪时可直接串流画面，首次桌面控制仍需手机同意。' };
+          return { mode: 'adb/root', message: '已保存恢复绑定。助手就绪时，本组设备无需重复授权或连接数据线即可使用。手机重启后，需通过已信任的调试连接恢复助手。' };
         }
       }
       throw Error('未收到目标手机的助手确认。请核对所选调试设备，并检查手机系统是否限制 ADB 输入');
@@ -183,11 +189,14 @@ export class AdbManager {
   async match(id) {
     const peer=this.service.getPeer(id);
     if(peer.info?.platform!=='android')throw Error('请选择组内安卓设备');
+    const status = await peer.request('adbStatus', {}, 5000);
+    if(this.service.getPeer(id)!==peer)throw Error('设备连接已改变');
+    if(status.ready===true)return {connected:true,ready:true,name:peer.info.name,message:'手机助手已就绪，本组电脑可直接使用，无需连接数据线'};
     const executable=await this.locate();
     if(!executable)return {connected:false,message:'请在 Android Studio 的 SDK Tools 中安装 Android SDK Platform-Tools'};
     const devices=parseDevices(await this.command(executable,['devices','-l'],3000));
     let outdated=false,unmatched=false;
-    for(const d of devices.filter(d=>d.status==='device' && !d.serial.includes(':') && !d.serial.includes('_adb-tls-')).slice(0,8)) {
+    for(const d of devices.filter(d=>d.status==='device' && !d.serial.includes(':') && !d.serial.includes('_adb-tls-'))) {
       if(await this.service.links.verifyUsb(id,d.serial)) {
         if(this.service.getPeer(id)!==peer)throw Error('设备连接已改变');
         return {connected:true,serial:d.serial,name:peer.info.name,message:'已识别 '+peer.info.name+'，点击连接自动配置 ADB'};

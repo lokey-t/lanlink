@@ -30,7 +30,7 @@ export class LinkManager {
           }
           throw error; // Never repeat a possibly delivered key/click/text operation.
         }
-    });
+    }, {adaptive:true,measure:(method,args)=>!primary.quicConn||!!primary.fastLink||method!=='input'||!['move','relative'].includes(args.kind)});
     primary.request = (method,args={},timeout)=>controlMethods.has(method)?primary.inputScheduler.request(method,args,timeout):primary.lanRequest(method,args,timeout);
   }
   valid(primary) {

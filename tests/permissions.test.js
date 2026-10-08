@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import { permissionReport, permissionRows, groupPermissions } from '../src/permissions.js';
 
 test('permission report separates app, OS and per-controller consent without changing grants', () => {
-  const service = { config:{id:'self',permissions:{input:true,screen:false,clipboard:true,shutdown:true},deviceGrants:{peer:{input:false,screen:true}}},native:{capabilities:{input:true,screen:false,clipboard:true,shutdown:true}},consent:{allowed:(id,key)=>service.config.deviceGrants[id]?.[key]===true},canShareClipboard:id=>!Object.hasOwn(service.config.deviceGrants,id)||service.config.deviceGrants[id].clipboard===true };
+  const service = { config:{id:'self',permissions:{input:true,screen:false,clipboard:true,shutdown:true},deviceGrants:{peer:{input:false,screen:true}}},native:{capabilities:{input:true,screen:false,clipboard:true,shutdown:true}},consent:{allowed:(id,key)=>!Object.hasOwn(service.config.deviceGrants,id)||service.config.deviceGrants[id]?.[key]===true},canShareClipboard:id=>!Object.hasOwn(service.config.deviceGrants,id)||service.config.deviceGrants[id].clipboard===true };
   const rows=permissionRows(permissionReport(service,'peer'));
   assert.equal(rows[0].status,'未允许此电脑'); assert.equal(rows[1].status,'应用未开启');
-  assert.equal(permissionRows(permissionReport(service,'new'))[0].status,'待首次确认');
+  assert.equal(permissionRows(permissionReport(service,'new'))[0].status,'已就绪');
   assert.equal(permissionRows(permissionReport(service))[0].status,'已就绪');
   assert.equal(permissionRows(null)[0].status,'状态未知');
   assert.equal(permissionRows({version:1,permissions:{shutdown:{supported:false}}})[3].status,'不支持');

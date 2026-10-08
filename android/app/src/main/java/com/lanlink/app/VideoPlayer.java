@@ -205,6 +205,7 @@ final class VideoPlayer implements AutoCloseable {
               }
             } else connection = VideoWire.connect(peer.socket.getInetAddress().getHostAddress(), info);
           }
+          feedback.reset();
           final java.util.concurrent.ScheduledExecutorService keeper=java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
           final String keepSession=session;final Wire keepPeer=peer;final VideoWire keepConnection=connection;final VideoTransport keepRtc=rtc;
           keeper.scheduleWithFixedDelay(()->{

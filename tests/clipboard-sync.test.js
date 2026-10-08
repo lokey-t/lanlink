@@ -24,7 +24,7 @@ test('group text auto sync works before input consent and system writes do not e
   const [a,b]=await devices(t);assert.equal(a.state().clipboardSettings.upload,true);assert.equal(b.state().clipboardSettings.download,true);
   a.native.copy('第一条');await until(()=>b.native.clip.text==='第一条');await delay(80);
   assert.equal(a.clipboardSync.list().length,1);assert.equal(b.clipboardSync.list().length,1);assert.equal(a.clipboardSync.list()[0].id,b.clipboardSync.list()[0].id);
-  assert.equal(a.consent.allowed(b.config.id,'input'),false);assert.equal(b.native.writes,1);
+  assert.equal(a.consent.allowed(b.config.id,'input'),true);assert.equal(b.native.writes,1);
   b.native.copy('第二条');await until(()=>a.native.clip.text==='第二条');assert.equal(a.clipboardSync.list()[0].source,b.config.id);assert.equal(a.clipboardSync.list().length,2);
 });
 
@@ -81,7 +81,7 @@ test('manual upload of unchanged local text reuses its shared record',async t=>{
   const [a,b]=await devices(t);a.native.copy('重复上传');await until(()=>b.clipboardSync.list().length===1);
   const id=a.clipboardSync.latest.id;await a.clipboardSync.uploadNow();await a.clipboardSync.uploadNow();await delay(80);
   assert.equal(a.clipboardSync.latest.id,id);assert.equal(b.clipboardSync.list().length,1);
-  const report=await a.getPeer(b.config.id).request('permission-status',{});assert.equal(report.permissions.clipboard.peerAllowed,true);assert.equal(report.permissions.input.peerAllowed,null);
+  const report=await a.getPeer(b.config.id).request('permission-status',{});assert.equal(report.permissions.clipboard.peerAllowed,true);assert.equal(report.permissions.input.peerAllowed,true);
 });
 
 test('slow automatic file transfer cannot overwrite a newer local clipboard copy',async t=>{

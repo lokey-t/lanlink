@@ -35,8 +35,6 @@ async function link(a,b,p) {
   assert.equal(a.peers.size,1);assert.equal(b.peers.size,1);
 }
 async function approve(a,b,p) {
-  await assert.rejects(p.request('acquire'),/CONSENT_PENDING/);
-  await b.decideConsent({...b.state().consentRequests[0],accepted:true,permissions:{input:true,screen:true}});
   await p.request('acquire');
 }
 
@@ -71,14 +69,12 @@ test('auxiliary control cannot bypass peer revocation or use privileged manageme
   const {a,b,p}=await pair(t);await link(a,b,p);await approve(a,b,p);
   await assert.rejects(p.fastLink.peer.request('shutdown'),/辅助通道不支持/);
   await b.revokeConsent(a.config.id);
-  await assert.rejects(p.request('input',{kind:'key',code:'KeyA',down:true}),/CONSENT_PENDING|CONTROL_ENDED|控制权/);
+  await assert.rejects(p.request('input',{kind:'key',code:'KeyA',down:true}),/CONSENT_DENIED|CONTROL_ENDED|控制权/);
   assert.equal(b.native.calls.filter(c=>c.method==='input').length,0);
 });
 
 test('both input directions and encrypted video can use the alternate network path',async t=>{
   const {a,b,p,q}=await pair(t);await link(a,b,p);await approve(a,b,p);await p.request('release');
-  await assert.rejects(q.request('acquire'),/CONSENT_PENDING/);
-  await a.decideConsent({...a.state().consentRequests[0],accepted:true,permissions:{input:true,screen:true}});
   await q.request('acquire');await q.request('input',{kind:'relative',dx:5,dy:2});await q.request('release');
   assert.equal(a.native.calls.filter(c=>c.method==='input').length,1);
   b.options.videoSource=(_native,_h264,emit)=>{const timer=setInterval(()=>emit({codec:'jpeg',width:20,height:10,data:Buffer.from('fixture'),key:true}),20);return {close(){clearInterval(timer);}};};

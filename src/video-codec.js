@@ -3,6 +3,25 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 const root = fileURLToPath(new URL('../', import.meta.url));
+const stopping = new WeakMap();
+// FFmpeg can stay blocked on pipe input after SIGTERM. Close owned pipes first,
+// then bound its shutdown so repeated stream changes cannot leak codec workers.
+export function stopVideoProcess(child) {
+  if (!child) return Promise.resolve();
+  if (stopping.has(child)) return stopping.get(child);
+  const done = new Promise(resolve => {
+    let timer;
+    const finished = () => { clearTimeout(timer); resolve(); };
+    child.once('close', finished);
+    child.stdin?.destroy(); child.stdout?.destroy(); child.stderr?.destroy();
+    if (child.exitCode !== null || child.signalCode !== null || !child.pid) { finished(); return; }
+    child.kill('SIGTERM');
+    timer = setTimeout(() => {
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+    }, 750); timer.unref();
+  });
+  stopping.set(child, done); return done;
+}
 export function ffmpegPath() {
   // Only local administrator/user-selected executables; never accept a remote path or arguments.
   const candidates = [process.env.LANLINK_FFMPEG, path.join(root, 'runtime', process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'), ...(process.platform === 'darwin' ? [path.join(root, 'runtime/video/bin/ffmpeg')] : [])];
@@ -32,19 +51,49 @@ export class AnnexBParser {
 export function hasIdr(data) { for (let i = 2; i + 1 < data.length; i++) if (data[i] === 1 && data[i - 1] === 0 && data[i - 2] === 0 && (data[i + 1] & 31) === 5) return true; return false; }
 export const encoderArgs = name => name === 'h264_nvenc' ? ['-preset', 'p1', '-tune', 'ull', '-zerolatency', '1', '-rc-lookahead', '0', '-delay', '0'] : name === 'h264_qsv' ? ['-preset', 'veryfast', '-look_ahead', '0', '-async_depth', '1'] : name === 'h264_amf' ? ['-usage', 'ultralowlatency', '-quality', 'speed'] : name === 'h264_videotoolbox' ? ['-realtime', '1', '-allow_sw', '1'] : [];
 const probeCache = new Map();
-async function probe(exe, encoder) {
+async function probe(exe, encoder, signal) {
   return new Promise(resolve => {
+    if (signal.aborted) { resolve(false); return; }
     const p = spawn(exe, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=size=320x240:rate=30', '-frames:v', '2', '-pix_fmt', 'yuv420p', '-c:v', encoder, ...encoderArgs(encoder), '-f', 'null', '-'], { windowsHide: true, stdio: 'ignore' });
-    const timer = setTimeout(() => { p.kill(); resolve(false); }, 2000); p.on('error', () => { clearTimeout(timer); resolve(false); }); p.on('exit', code => { clearTimeout(timer); resolve(code === 0); });
+    const finish = result => { clearTimeout(timer); signal.removeEventListener('abort', cancel); resolve(result); };
+    const cancel = () => { stopVideoProcess(p).then(() => finish(false)); };
+    const timer = setTimeout(cancel, 2000);
+    signal.addEventListener('abort', cancel, { once: true });
+    p.on('error', () => finish(false)); p.on('close', code => finish(!signal.aborted && code === 0));
   });
 }
-export async function chooseEncoder(exe) {
-  if (!exe) return null; if (probeCache.has(exe)) return probeCache.get(exe);
-  const pending = (async () => { for (const encoder of process.platform === 'darwin' ? ['h264_videotoolbox', 'libopenh264'] : ['h264_nvenc', 'h264_qsv', 'h264_amf', 'h264_mf', 'libopenh264']) if (await probe(exe, encoder)) return encoder; return null; })(); probeCache.set(exe, pending); return pending;
+export async function chooseEncoder(exe, signal) {
+  if (!exe || signal?.aborted) return null;
+  let entry = probeCache.get(exe);
+  if (!entry) {
+    entry = { controller: new AbortController(), consumers: new Set(), settled: false };
+    const pending = entry;
+    entry.promise = (async () => {
+      for (const encoder of process.platform === 'darwin' ? ['h264_videotoolbox', 'libopenh264'] : ['h264_nvenc', 'h264_qsv', 'h264_amf', 'h264_mf', 'libopenh264']) {
+        if (pending.controller.signal.aborted) return null;
+        if (await probe(exe, encoder, pending.controller.signal)) return encoder;
+      }
+      return null;
+    })().finally(() => { pending.settled = true; });
+    probeCache.set(exe, entry);
+  }
+  // Share a probe across viewers, but stop it when every interested capture has
+  // closed. A cancelled probe must not cache "unavailable" for the next stream.
+  const consumer = {}; entry.consumers.add(consumer);
+  const release = () => {
+    entry.consumers.delete(consumer);
+    if (!entry.settled && !entry.consumers.size) {
+      if (probeCache.get(exe) === entry) probeCache.delete(exe);
+      entry.controller.abort();
+    }
+  };
+  signal?.addEventListener('abort', release, { once: true });
+  try { const result = await entry.promise; return signal?.aborted ? null : result; }
+  finally { signal?.removeEventListener('abort', release); release(); }
 }
 export function createDecoder(exe, onFrame, onError) {
   const p = spawn(exe, ['-hide_banner', '-loglevel', 'error', '-flags', 'low_delay', '-probesize', '32', '-analyzeduration', '0', '-f', 'h264', '-i', 'pipe:0', '-an', '-threads', '2', '-c:v', 'mjpeg', '-q:v', '3', '-fps_mode', 'passthrough', '-f', 'image2pipe', '-flush_packets', '1', 'pipe:1'], { windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] });
   let stopped = false, needKey = true; const parser = new JpegParser(onFrame);
-  p.stdout.on('data', d => { try { parser.push(d); } catch (e) { onError(e); } }); p.stdin.on('error', () => {}); p.on('error', onError); p.on('exit', () => { if (!stopped) onError(Error('视频解码器已退出')); });
-  return { push(frame) { if (p.stdin.writableLength > 256 * 1024) { needKey = true; return false; } if (needKey && !frame.key) return false; needKey = false; p.stdin.write(frame.data); return true; }, close() { stopped = true; p.kill(); } };
+  p.stdout.on('data', d => { if (!stopped) try { parser.push(d); } catch (e) { onError(e); } }); p.stdin.on('error', () => {}); p.on('error', e => { if (!stopped) onError(e); }); p.on('exit', () => { if (!stopped) onError(Error('视频解码器已退出')); });
+  return { push(frame) { if (stopped || p.stdin.destroyed || !p.stdin.writable) return false; if (p.stdin.writableLength > 256 * 1024) { needKey = true; return false; } if (needKey && !frame.key) return false; needKey = false; p.stdin.write(frame.data); return true; }, close() { stopped = true; parser.buffer = Buffer.alloc(0); return stopVideoProcess(p); } };
 }

@@ -40,7 +40,7 @@ export class RtcFrameQueue {
     if(this.frames.length>=8||this.bytes+frame.data.length>4*1024*1024||this.frames.length&&this.now()-this.frames[0].at>150){this.clear();if(frame.codec==='h264'&&!frame.key){this.assembler.needKey=true;return;}}
     this.frames.push({frame,at:this.now()});this.bytes+=frame.data.length;
   }
-  shift(){const value=this.frames.shift();if(!value)return null;this.bytes-=value.frame.data.length;return value.frame;}
+  shift(){if(this.frames.length&&this.now()-this.frames[0].at>150&&this.frames[0].frame.codec==='h264'){this.clear();this.assembler.needKey=true;return null;}const value=this.frames.shift();if(!value)return null;this.bytes-=value.frame.data.length;return value.frame;}
 }
 export class RtcVideo{
   constructor(){
@@ -65,6 +65,6 @@ export class RtcVideo{
   async ready(){await timeout(new Promise((resolve,reject)=>{const tick=()=>{if(this.closed)return reject(Error('RTC 已关闭'));if(this.channels.size===2&&[...this.channels.values()].every(c=>c.readyState==='open'))return resolve();setTimeout(tick,20);};tick();}),3500,'RTC 连接超时');}
   get queued(){return [...this.channels.values()].reduce((n,c)=>n+c.bufferedAmount,0);}
   send(frame){if(this.closed)throw Error('RTC 已关闭');const channel=this.channels.get(frame.key?'ll-key':'ll-video');if(!channel||channel.readyState!=='open')return false;if(this.queued>128*1024)return false;for(const packet of splitRtcFrame(frame,this.seq++))channel.send(packet);return true;}
-  async next(){if(this.closed)throw Error('RTC 串流已关闭');const frame=this.queue.shift();if(frame)return frame;return timeout(new Promise((resolve,reject)=>{this.waiter=frame=>frame?resolve(frame):reject(Error('RTC 串流已关闭'));}),5000,'RTC 等待画面超时').finally(()=>this.waiter=null);}
+  async next(){if(this.closed)throw Error('RTC 串流已关闭');const frame=this.queue.shift();if(frame)return frame;if(this.assembler.needKey&&Date.now()-(this.keyAt||0)>500){this.keyAt=Date.now();this.onNeedKey?.();}return timeout(new Promise((resolve,reject)=>{this.waiter=frame=>frame?resolve(frame):reject(Error('RTC 串流已关闭'));}),5000,'RTC 等待画面超时').finally(()=>this.waiter=null);}
   close(){if(this.closed)return;this.closed=true;this.queue.clear();this.waiter?.(null);this.waiter=null;this.pc.close().catch(()=>{});}
 }

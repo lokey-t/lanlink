@@ -26,12 +26,24 @@ test('Root, ready input and desktops skip ADB setup; recovery waits without a gu
   const desktop=fixture();desktop.peer.info.platform='win32';await desktop.guide.check(desktop.peer,desktop.intent);assert.deepEqual(desktop.calls,[]);
   const f=fixture({recovering:true});await assert.rejects(f.guide.check(f.peer,f.intent),/正在恢复/);assert.equal(f.guide.notice,null);
 });
-test('first-time missing ADB authorization prompts the phone and keeps cable setup available',async()=>{
+test('a pending setup for one Android device does not block another ready phone', async () => {
+  const f = fixture({ ready: false });
+  await assert.rejects(f.guide.check(f.peer, f.intent), /ADB_SETUP_REQUIRED/);
+  const pending = f.guide.notice;
+  const other = { info: { platform: 'android', name: 'Other phone' }, request: async () => ({ engine: { ready: true, authorized: true } }) };
+  f.service.peers.set('other', other);
+  await f.guide.check(other, { ...f.intent, id: 'other' });
+  assert.equal(f.guide.notice, pending);
+  other.request = async () => ({ engine: { ready: false } });
+  await assert.rejects(f.guide.check(other, { ...f.intent, id: 'other' }), /另一台手机/);
+  assert.equal(f.guide.notice.id, 'phone');
+});
+test('first-time missing ADB helper keeps cable setup available without another app consent prompt',async()=>{
   const f=fixture({ready:false,authorized:false});
   await assert.rejects(f.guide.check(f.peer,f.intent),/ADB_SETUP_REQUIRED/);
   const id=f.guide.notice.requestId;assert.equal(f.guide.notice.unauthorized,true);
   const status=await f.guide.status(id);assert.equal(status.revoked,false);assert.match(status.message,/尚未完成 ADB 授权/);
-  await f.guide.status(id);assert.equal(f.calls.filter(m=>m==='adb-permission-request').length,1);
+  await f.guide.status(id);assert.equal(f.calls.filter(m=>m==='adb-permission-request').length,0);
   assert.ok(!f.calls.includes('adbBootstrap'));
   f.engine.authorized=true;f.engine.ready=true;assert.equal((await f.guide.complete(id)).id,'phone');
 });
@@ -49,7 +61,7 @@ test('Android permission failure after successful preflight reopens setup and re
     f.peer.request=async method=>{f.calls.push(method);if(method==='permission-status')return {engine:f.engine};if(method===failure){f.engine.ready=false;f.engine.authorized=false;throw Error('PERMISSION_REQUIRED: ADB 未授权');}return {};};
     await assert.rejects(Service.prototype.switchTo.call(s,'phone','right',true,true),/ADB_SETUP_REQUIRED/);
     assert.equal(f.guide.notice.unauthorized,true);assert.equal(f.guide.notice.capture,true);assert.equal(s.active,null);assert.equal(s.switching,false);assert.equal(captured,false);if(failure==='input')assert.equal(released,true);
-    assert.equal(f.calls.filter(m=>m==='adb-permission-request').length,1);
+    assert.equal(f.calls.filter(m=>m==='adb-permission-request').length,0);
   }
 });
 test('revoked ADB changes guide and asks phone once without restoring consent remotely',async()=>{

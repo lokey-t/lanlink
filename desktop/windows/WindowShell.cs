@@ -22,7 +22,7 @@ namespace LanLink.Desktop {
         var tint = menu.Template.FindName("GlassTint", menu) as Border;
         if (source == null || root == null || sample == null || tint == null || menu.ActualWidth <= 0 || menu.ActualHeight <= 0) return;
         root.Clip = new RectangleGeometry(new Rect(0, 0, menu.ActualWidth, menu.ActualHeight), 16, 16);
-        if (SystemParameters.HighContrast) { sample.Fill = null; tint.Background = Brushes.White; return; }
+        if (SystemParameters.HighContrast) { sample.Fill = null; tint.Background = MainWindow.Brush("#FFFFFF"); return; }
         Point origin = source.PointFromScreen(menu.PointToScreen(new Point(0, 0)));
         sample.Fill = new VisualBrush(source) { ViewboxUnits = BrushMappingMode.Absolute, Viewbox = new Rect(origin.X, origin.Y, menu.ActualWidth, menu.ActualHeight), Stretch = Stretch.Fill, AlignmentX = AlignmentX.Left, AlignmentY = AlignmentY.Top };
         sample.Effect = new BlurEffect { KernelType = KernelType.Gaussian, Radius = 18, RenderingBias = RenderingBias.Performance };
@@ -70,7 +70,7 @@ namespace LanLink.Desktop {
     }
     public static Button CaptionButton(string icon,string tip,Action action,bool dark=false) {
       var button=MainWindow.Button("",action);button.Content=Glyph(icon,18);button.Width=36;button.Height=32;button.Padding=new Thickness(0);button.Margin=new Thickness(2,0,2,0);button.Background=Brushes.Transparent;button.BorderThickness=new Thickness(0);button.ToolTip=tip;
-      if(dark)((System.Windows.Shapes.Path)((Viewbox)button.Content).Child).Stroke=MainWindow.Brush("#C7CDD8");
+      if(dark)((System.Windows.Shapes.Path)((Viewbox)button.Content).Child).Stroke=new SolidColorBrush(Color.FromRgb(199,205,216));
       System.Windows.Automation.AutomationProperties.SetName(button,tip);return button;
     }
     public static Border Wrap(Window window, UIElement content, bool resize = true, bool compact = false, bool dark = false, UIElement captionAccessory = null, Action<FrameworkElement> captionReady = null) {
@@ -85,7 +85,7 @@ namespace LanLink.Desktop {
       var caption = new Grid { Background = Brushes.Transparent, Margin = new Thickness(18, 0, 10, 0) };
       caption.ColumnDefinitions.Add(new ColumnDefinition()); caption.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); root.Children.Add(caption);
       var label = new DockPanel { VerticalAlignment = VerticalAlignment.Center };
-      if (!compact) { var brand = Glyph("brand", 23); brand.Margin = new Thickness(0, 0, 10, 0); DockPanel.SetDock(brand, Dock.Left); label.Children.Add(brand); } var captionText=MainWindow.Text(window.Title, compact ? 12 : 14,dark?"#DCE0E8":"#233957");captionText.TextTrimming=TextTrimming.CharacterEllipsis;label.Children.Add(captionText); caption.Children.Add(label);
+      if (!compact) { var brand = Glyph("brand", 23); brand.Margin = new Thickness(0, 0, 10, 0); DockPanel.SetDock(brand, Dock.Left); label.Children.Add(brand); } var captionText=MainWindow.Text(window.Title, compact ? 12 : 14,dark?"#DCE0E8":"#233957");if(dark)captionText.Foreground=new SolidColorBrush(Color.FromRgb(220,224,232));captionText.TextTrimming=TextTrimming.CharacterEllipsis;label.Children.Add(captionText); caption.Children.Add(label);
       caption.MouseLeftButtonDown += delegate(object sender, MouseButtonEventArgs e) {
         if (e.ClickCount == 2 && resize) window.WindowState = window.WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
         else if (e.LeftButton == MouseButtonState.Pressed) window.DragMove();

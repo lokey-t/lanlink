@@ -19,7 +19,7 @@ foreach ($name in @('build.gradle','settings.gradle','gradle.properties','gradle
 foreach ($name in @('src','build.gradle')) {
     Copy-Item -LiteralPath (Join-Path $root "android/app/$name") -Destination $appStage -Recurse -Force
 }
-foreach ($name in @('package.json','package-lock.json','README.md','THIRD_PARTY_NOTICES.md','start-windows.cmd','start-macos.command','.gitignore')) {
+foreach ($name in @('package.json','package-lock.json','README.md','README.en.md','CHANGELOG.md','THIRD_PARTY_NOTICES.md','start-windows.cmd','start-macos.command','.gitignore')) {
     Copy-Item -LiteralPath (Join-Path $root $name) -Destination $stage -Force
 }
 $version = (Get-Content (Join-Path $root 'package.json') -Raw | ConvertFrom-Json).version

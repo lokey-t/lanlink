@@ -148,6 +148,16 @@ public final class PermissionFlowTest extends Instrumentation {
       while (LinkService.instance == null && System.currentTimeMillis() < end) Thread.sleep(50);
       LinkService service = LinkService.instance;
       check(service != null, "service started");
+      if(options!=null&&options.containsKey("fullscreenGestureProbe")){result.putString("stream",FullscreenGestureProbe.run(this)+"\n");finish(Activity.RESULT_OK,result);return;}
+      if(options!=null&&options.containsKey("fullscreenUiProbe")){result.putString("stream",FullscreenGestureProbe.runUi(this,activity)+"\n");finish(Activity.RESULT_OK,result);return;}
+      if(options!=null&&options.containsKey("inputOnlyTouchpadProbe")){result.putString("stream",InputOnlyTouchpadProbe.run(this,service)+"\n");finish(Activity.RESULT_OK,result);return;}
+      if(options!=null&&options.containsKey("touchpadCenterProbe")){result.putString("stream",TouchpadCenterProbe.run(this,activity,service)+"\n");finish(Activity.RESULT_OK,result);return;}
+      if(options!=null&&options.containsKey("remoteInteractionProbe")){RemoteInteractionProbe.run(this,activity,service);result.putString("stream","PASS: existing remote viewport, cursor-follow and control lifecycle regressions\n");finish(Activity.RESULT_OK,result);return;}
+      if(options!=null&&options.containsKey("groupConsentProbe")){result.putString("stream",GroupConsentProbe.run(service)+"\n");finish(Activity.RESULT_OK,result);return;}
+      if(options!=null&&options.containsKey("adaptiveTransportProbe")){result.putString("stream",AdaptiveTransportProbe.run()+"\n");finish(Activity.RESULT_OK,result);return;}
+      if(options!=null&&options.containsKey("multiComputerPorts")){result.putString("stream",MultiComputerProbe.run(this,activity,service,options)+"\n");finish(Activity.RESULT_OK,result);return;}
+      if(options!=null&&options.containsKey("pairJoinCode")){result.putString("stream",PairJoinProbe.run(this,service,options)+"\n");finish(Activity.RESULT_OK,result);return;}
+      if(options!=null&&options.containsKey("udpProbePort")){result.putString("stream",UdpBroadcastProbe.run(this,options)+"\n");finish(Activity.RESULT_OK,result);return;}
       if(options!=null&&options.containsKey("adbPermissionProbe")){result.putString("stream",AdbPermissionProbe.run(this,activity,service)+"\n");finish(Activity.RESULT_OK,result);return;}
       if(options!=null&&options.containsKey("edgeGlowProbe")){result.putString("stream",EdgeGlowProbe.run(this,service)+"\n");finish(Activity.RESULT_OK,result);return;}
       if(options!=null&&options.containsKey("quicProbe")){result.putString("stream",QuicProbe.run(service)+"\n");finish(Activity.RESULT_OK,result);return;}
@@ -254,7 +264,16 @@ public final class PermissionFlowTest extends Instrumentation {
           "unknown peer cannot create permission prompt");
       service.peers.put(peer.id, peer);
       denied(method, service, peer, "acquire", Wire.obj());
-      check(service.consent.peek() != null, "first control requires a local decision");
+      check(service.consent.peek() == null, "first group control never asks for application consent");
+      JSONObject initial = (JSONObject) method.invoke(service, peer, "permission-status", Wire.obj());
+      for (String key : DeviceConsent.KEYS)
+        check(initial.getJSONObject("permissions").getJSONObject(key).getBoolean("peerAllowed"), "group default allows " + key);
+      check(!initial.getJSONObject("permissions").getJSONObject("input").getBoolean("systemGranted"), "group default never replaces system permission");
+      check(((JSONObject) method.invoke(service, peer, "permission-request", Wire.obj())).getBoolean("ready"), "already allowed requests do not prompt");
+      service.revokeConsent(peer.id);
+      check(!service.consent.allowed(peer.id, "input"), "explicit revocation overrides the default");
+      method.invoke(service, peer, "permission-request", Wire.obj("permissions", new org.json.JSONArray().put("input")));
+      check(service.consent.peek() != null, "only an explicit request to restore revoked access needs a decision");
       Activity currentActivity = activity;
       Method refresh = MainActivity.class.getDeclaredMethod("update");
       refresh.setAccessible(true);

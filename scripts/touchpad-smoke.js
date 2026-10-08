@@ -8,7 +8,7 @@ import { loadConfig } from '../src/identity.js';
 import { Service } from '../src/service.js';
 import { NativeBridge } from '../src/native.js';
 import { findAdb } from '../src/adb.js';
-const exec=promisify(execFile),serial='emulator-5580',adb=await findAdb();
+const exec=promisify(execFile),serial=process.env.LANLINK_SERIAL||'emulator-5580',adb=await findAdb();
 const hardware=(await exec(adb,['-s',serial,'shell','getprop','ro.hardware'],{windowsHide:true})).stdout.trim();
 if(!/ranchu|goldfish/.test(hardware))throw Error('Disposable emulator required');
 const dir=await mkdtemp(path.join(os.tmpdir(),'lanlink-touchpad-')),config=await loadConfig(dir);

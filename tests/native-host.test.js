@@ -8,6 +8,25 @@ import { Service } from '../src/service.js';
 import { loadConfig } from '../src/identity.js';
 import os from 'node:os';
 import path from 'node:path';
+import net from 'node:net';
+
+test('native host reports an occupied service port and exits unsuccessfully', { timeout: 15000 }, async t => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'lanlink-pipe-conflict-'));
+  const blocker = net.createServer();
+  await new Promise((resolve, reject) => { blocker.once('error', reject); blocker.listen(0, '0.0.0.0', resolve); });
+  const child = spawn(process.execPath, ['src/native-host.js', '--simulate', '--no-discovery', '--data', dir, '--port', String(blocker.address().port)]);
+  let output = '', errors = ''; child.stdout.on('data', d => output += d); child.stderr.on('data', d => errors += d);
+  const exit = new Promise((resolve, reject) => { child.once('exit', resolve); child.once('error', reject); });
+  t.after(async () => {
+    if (child.exitCode === null && child.signalCode === null) child.kill();
+    await exit; await new Promise(resolve => blocker.close(resolve)); await rm(dir, { recursive: true, force: true });
+  });
+  assert.equal(await exit, 1, errors);
+  const messages = output.trim().split('\n').map(line => JSON.parse(line));
+  assert.equal(messages.some(message => message.ready), false);
+  assert.equal(messages[0].code, 'EADDRINUSE');
+  assert.match(messages[0].fatal, /端口已被占用/);
+});
 
 test('native inherited-pipe host persists settings, rejects unknown actions and stops on UI exit', { timeout: 15000 }, async t => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'lanlink-pipe-'));
@@ -42,10 +61,9 @@ test('native inherited-pipe host persists settings, rejects unknown actions and 
   await call('settings', { permissions: { clipboard: true } });
   await call('connect', { host: '127.0.0.1', port: target.port });
   for (let i = 0; !(await call('state')).peers.length; i++) { assert(i < 100, 'peer connection timed out'); await new Promise(r => setTimeout(r, 10)); }
-  await assert.rejects(call('control', { id: config.id }), /CONSENT_PENDING/);
-  await target.decideConsent({ ...target.state().consentRequests[0], accepted: true, permissions: { input: true, clipboard: true } });
-  await assert.rejects(target.getPeer(state.id).request('acquire'), /CONSENT_PENDING/);
-  await call('consent-decide', { ...(await call('state')).consentRequests[0], accepted: true, permissions: { clipboard: true } });
+  await call('control', { id: config.id });
+  assert.equal(target.state().consentRequests.length, 0, 'paired devices work without a first-use confirmation');
+  await call('release');
   await call('clipboard', { text: '来自原生设备菜单的中文' });
   await call('device-paste', { id: config.id });
   assert.equal(native.clip.text, '来自原生设备菜单的中文'); assert(native.calls.includes('paste'));

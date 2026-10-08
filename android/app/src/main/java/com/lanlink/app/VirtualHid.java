@@ -90,14 +90,130 @@ final class VirtualHid implements Closeable {
     return false;
   }
 
+  // Numeric Linux uinput ABI values also work on Android 14, whose reader cannot parse names.
+  static int eventCode(String name) {
+    switch (name) {
+      case "BTN_LEFT": return 272;
+      case "BTN_MIDDLE": return 274;
+      case "BTN_RIGHT": return 273;
+      case "EV_KEY": return 1;
+      case "EV_REL": return 2;
+      case "EV_SYN": return 0;
+      case "KEY_0": return 11;
+      case "KEY_1": return 2;
+      case "KEY_2": return 3;
+      case "KEY_3": return 4;
+      case "KEY_4": return 5;
+      case "KEY_5": return 6;
+      case "KEY_6": return 7;
+      case "KEY_7": return 8;
+      case "KEY_8": return 9;
+      case "KEY_9": return 10;
+      case "KEY_A": return 30;
+      case "KEY_APOSTROPHE": return 40;
+      case "KEY_B": return 48;
+      case "KEY_BACKSLASH": return 43;
+      case "KEY_BACKSPACE": return 14;
+      case "KEY_C": return 46;
+      case "KEY_CAPSLOCK": return 58;
+      case "KEY_COMMA": return 51;
+      case "KEY_D": return 32;
+      case "KEY_DELETE": return 111;
+      case "KEY_DOT": return 52;
+      case "KEY_DOWN": return 108;
+      case "KEY_E": return 18;
+      case "KEY_END": return 107;
+      case "KEY_ENTER": return 28;
+      case "KEY_EQUAL": return 13;
+      case "KEY_ESC": return 1;
+      case "KEY_F": return 33;
+      case "KEY_F1": return 59;
+      case "KEY_F10": return 68;
+      case "KEY_F11": return 87;
+      case "KEY_F12": return 88;
+      case "KEY_F2": return 60;
+      case "KEY_F3": return 61;
+      case "KEY_F4": return 62;
+      case "KEY_F5": return 63;
+      case "KEY_F6": return 64;
+      case "KEY_F7": return 65;
+      case "KEY_F8": return 66;
+      case "KEY_F9": return 67;
+      case "KEY_G": return 34;
+      case "KEY_GRAVE": return 41;
+      case "KEY_H": return 35;
+      case "KEY_HOME": return 102;
+      case "KEY_I": return 23;
+      case "KEY_INSERT": return 110;
+      case "KEY_J": return 36;
+      case "KEY_K": return 37;
+      case "KEY_KP0": return 82;
+      case "KEY_KP1": return 79;
+      case "KEY_KP2": return 80;
+      case "KEY_KP3": return 81;
+      case "KEY_KP4": return 75;
+      case "KEY_KP5": return 76;
+      case "KEY_KP6": return 77;
+      case "KEY_KP7": return 71;
+      case "KEY_KP8": return 72;
+      case "KEY_KP9": return 73;
+      case "KEY_L": return 38;
+      case "KEY_LEFT": return 105;
+      case "KEY_LEFTALT": return 56;
+      case "KEY_LEFTBRACE": return 26;
+      case "KEY_LEFTCTRL": return 29;
+      case "KEY_LEFTMETA": return 125;
+      case "KEY_LEFTSHIFT": return 42;
+      case "KEY_M": return 50;
+      case "KEY_MINUS": return 12;
+      case "KEY_N": return 49;
+      case "KEY_O": return 24;
+      case "KEY_P": return 25;
+      case "KEY_PAGEDOWN": return 109;
+      case "KEY_PAGEUP": return 104;
+      case "KEY_Q": return 16;
+      case "KEY_R": return 19;
+      case "KEY_RIGHT": return 106;
+      case "KEY_RIGHTALT": return 100;
+      case "KEY_RIGHTBRACE": return 27;
+      case "KEY_RIGHTCTRL": return 97;
+      case "KEY_RIGHTMETA": return 126;
+      case "KEY_RIGHTSHIFT": return 54;
+      case "KEY_S": return 31;
+      case "KEY_SEMICOLON": return 39;
+      case "KEY_SLASH": return 53;
+      case "KEY_SPACE": return 57;
+      case "KEY_T": return 20;
+      case "KEY_TAB": return 15;
+      case "KEY_U": return 22;
+      case "KEY_UP": return 103;
+      case "KEY_V": return 47;
+      case "KEY_W": return 17;
+      case "KEY_X": return 45;
+      case "KEY_Y": return 21;
+      case "KEY_Z": return 44;
+      case "REL_WHEEL": return 8;
+      case "REL_X": return 0;
+      case "REL_Y": return 1;
+      case "SYN_REPORT": return 0;
+      default: throw new IllegalArgumentException("Unsupported input code: " + name);
+    }
+  }
+
+  private static JSONArray eventCodes(String[] names) {
+    JSONArray values = new JSONArray();
+    for (String name : names) values.put(eventCode(name));
+    return values;
+  }
+
   private static JSONObject register(int id, String name, int vid, int pid,
                                      String[] eventTypes, String[] buttons, String[] relative)
       throws JSONException {
     JSONArray configuration = new JSONArray();
-    configuration.put(new JSONObject().put("type", "UI_SET_EVBIT").put("data", new JSONArray(Arrays.asList(eventTypes))));
-    configuration.put(new JSONObject().put("type", "UI_SET_KEYBIT").put("data", new JSONArray(Arrays.asList(buttons))));
+    configuration.put(new JSONObject().put("type", 100).put("data", eventCodes(eventTypes)));
+    configuration.put(new JSONObject().put("type", 101).put("data", eventCodes(buttons)));
     if (relative != null)
-      configuration.put(new JSONObject().put("type", "UI_SET_RELBIT").put("data", new JSONArray(Arrays.asList(relative))));
+      configuration.put(new JSONObject().put("type", 102).put("data", eventCodes(relative)));
     return new JSONObject().put("id", id).put("command", "register").put("name", name)
         .put("vid", vid).put("pid", pid).put("bus", "bluetooth")
         .put("configuration", configuration);
@@ -112,8 +228,9 @@ final class VirtualHid implements Closeable {
 
   private void inject(int id, Object... events) throws Exception {
     JSONArray data = new JSONArray();
-    for (Object event : events) data.put(event);
-    send(new JSONObject().put("id", id).put("command", "updateTimeBase"));
+    for (Object event : events) data.put(event instanceof String ? eventCode((String) event) : event);
+    if (android.os.Build.VERSION.SDK_INT >= 35)
+      send(new JSONObject().put("id", id).put("command", "updateTimeBase"));
     send(new JSONObject().put("id", id).put("command", "inject").put("events", data));
   }
 

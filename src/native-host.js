@@ -13,14 +13,17 @@ const service = new Service(await loadConfig(dir), dir, new NativeBridge({ disab
   { port: Number(option('--port', 45831)), noDiscovery: args.includes('--no-discovery') });
 const write = value => { if (!process.stdout.destroyed) process.stdout.write(JSON.stringify(value) + '\n'); };
 let closing = false, inFlight = 0, mutations = Promise.resolve();
-async function close() {
+async function close(exitCode = 0) {
   if (closing) return; closing = true;
   const guard = setTimeout(() => process.exit(1), 8000); guard.unref();
-  await service.close().catch(() => {}); process.exit(0);
+  await service.close().catch(() => {}); process.exit(exitCode);
 }
-process.stdin.on('end', close); process.on('SIGTERM', close); process.on('SIGINT', close);
-process.stdout.on('error', close); service.once('stop', close);
-try { await service.start(); } catch (e) { write({ fatal: e.message }); await close(); }
+process.stdin.on('end', () => close()); process.on('SIGTERM', () => close()); process.on('SIGINT', () => close());
+process.stdout.on('error', () => close()); service.once('stop', () => close());
+try { await service.start(); } catch (e) {
+  write({ fatal: e.code === 'EADDRINUSE' ? 'LanLink 的连接端口已被占用。请打开已运行的 LanLink；若刚刚退出，请稍后重新启动。' : e.message, code: e.code });
+  await close(1);
+}
 const invoke = createActions(service);
 service.on('edge-feedback', feedback => write({event:'edge-feedback',feedback}));
 write({ ready: true });

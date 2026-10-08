@@ -36,7 +36,7 @@ final class RtcVideo implements VideoTransport {
       public void onAddTrack(RtpReceiver receiver,MediaStream[] streams){}
     });if(pc==null)throw new IOException("WebRTC 初始化失败");
   }
-  void attach(DataChannel channel){if(!channel.label().equals("ll-video")&&!channel.label().equals("ll-key")){channel.close();return;}channels.put(channel.label(),channel);channel.registerObserver(new DataChannel.Observer(){
+  synchronized void attach(DataChannel channel){if(closed||!channel.label().equals("ll-video")&&!channel.label().equals("ll-key")){new Thread(()->{channel.close();channel.dispose();},"lanlink-rtc-discard").start();return;}channels.put(channel.label(),channel);channel.registerObserver(new DataChannel.Observer(){
     public void onBufferedAmountChange(long previous){}
     public void onStateChange(){}
     public void onMessage(DataChannel.Buffer buffer){try{if(!buffer.binary)throw new IOException("RTC 消息类型无效");byte[] data=new byte[buffer.data.remaining()];buffer.data.get(data);VideoWire.Frame frame=assembler.push(data);if(frame!=null)enqueue(frame);if(assembler.last>=0&&assembler.needKey&&System.currentTimeMillis()-keyAt>500){keyAt=System.currentTimeMillis();Runnable action=onNeedKey;if(action!=null)action.run();}}catch(Exception error){close();}}
@@ -69,10 +69,10 @@ final class RtcVideo implements VideoTransport {
     if(!frame.heartbeat&&(!frame.h264||frame.key)){frames.clear();queueBytes=0;}
     long now=android.os.SystemClock.elapsedRealtime();
     if(frames.remainingCapacity()==0||queueBytes+frame.data.length>MAX||!frames.isEmpty()&&now-queueAt>150){frames.clear();queueBytes=0;if(frame.h264&&!frame.key){assembler.needKey=true;return;}}
-    if(frames.isEmpty())queueAt=now;frames.offer(frame);queueBytes+=frame.data.length;
+    frame.queuedAt=now;if(frames.isEmpty())queueAt=now;frames.offer(frame);queueBytes+=frame.data.length;
   }
-  public VideoWire.Frame next()throws Exception{VideoWire.Frame frame=frames.poll(5,TimeUnit.SECONDS);if(frame==null)throw new IOException(closed?"RTC 串流已关闭":"RTC 等待画面超时");synchronized(this){queueBytes=Math.max(0,queueBytes-frame.data.length);if(frames.isEmpty())queueAt=0;}return frame;}
-  public void close(){if(closed)return;closed=true;new Thread(()->{for(DataChannel channel:channels.values()){channel.unregisterObserver();channel.close();channel.dispose();}channels.clear();pc.close();pc.dispose();},"lanlink-rtc-close").start();}
+  public VideoWire.Frame next()throws Exception{long until=android.os.SystemClock.elapsedRealtime()+5000;while(!closed&&android.os.SystemClock.elapsedRealtime()<until){VideoWire.Frame frame=frames.poll(100,TimeUnit.MILLISECONDS);if(frame==null)continue;synchronized(this){queueBytes=Math.max(0,queueBytes-frame.data.length);queueAt=frames.isEmpty()?0:frames.peek().queuedAt;if(frame.h264&&android.os.SystemClock.elapsedRealtime()-frame.queuedAt>150){frames.clear();queueBytes=0;assembler.needKey=true;Runnable callback=onNeedKey;if(callback!=null)callback.run();continue;}}return frame;}throw new IOException(closed?"RTC 串流已关闭":"RTC 等待画面超时");}
+  public synchronized void close(){if(closed)return;closed=true;new Thread(()->{for(DataChannel channel:channels.values()){channel.unregisterObserver();channel.close();channel.dispose();}channels.clear();pc.close();pc.dispose();},"lanlink-rtc-close").start();}
   static final class Entry{long at=System.currentTimeMillis();byte[] data;int count;BitSet seen=new BitSet();Entry(int total,int count){data=new byte[total];this.count=count;}}
   static final class Assembler{
     final Map<Integer,Entry> parts=new LinkedHashMap<>();int last=-1;volatile boolean needKey=true;

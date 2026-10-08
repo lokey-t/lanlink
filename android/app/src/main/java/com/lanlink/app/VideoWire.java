@@ -22,6 +22,7 @@ public final class VideoWire implements AutoCloseable {
     public int width, height;
     public boolean h264, key, heartbeat;
     public long time;
+    long queuedAt; // Local monotonic arrival time; never serialized.
 
     public Frame(byte[] data, int width, int height, boolean h264, boolean key) {
       this.data = data;

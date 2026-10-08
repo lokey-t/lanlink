@@ -105,7 +105,7 @@ public class MainActivity extends Activity {
     Set<String> connectedBefore = new HashSet<>();
     if (LinkService.instance != null) connectedBefore.addAll(LinkService.instance.peers.keySet());
     boolean[] awaitingConnection = {false};
-    Dialog dialog = new Dialog(this, android.R.style.Theme_Material_Light_NoActionBar);
+    Dialog dialog = new Dialog(this, Ui.dialogTheme());
     pairDialog = dialog;
     LinearLayout outer = ui.column();
     outer.setBackgroundColor(Ui.BG);
@@ -298,7 +298,7 @@ public class MainActivity extends Activity {
                 Bitmap bitmap = Bitmap.createBitmap(320, 320, Bitmap.Config.ARGB_8888);
                 for (int y = 0; y < 320; y++)
                   for (int x = 0; x < 320; x++)
-                    bitmap.setPixel(x, y, matrix.get(x, y) ? Ui.INK : Color.WHITE);
+                    bitmap.setPixel(x, y, matrix.get(x, y) ? Color.BLACK : Color.WHITE);
                 qr.setImageBitmap(bitmap);
                 lastQr[0] = id;
               }
@@ -419,6 +419,7 @@ public class MainActivity extends Activity {
   }
 
   public void onCreate(Bundle state) {
+    Ui.applyTheme(this);
     super.onCreate(state);
     ui = new Ui(this);
     if (state != null) {
@@ -443,7 +444,7 @@ public class MainActivity extends Activity {
     window
         .getDecorView()
         .setSystemUiVisibility(
-            View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+            Ui.dark ? 0 : View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
     if (Build.VERSION.SDK_INT >= 30) {
       window.setDecorFitsSystemWindows(false);
       view.setOnApplyWindowInsetsListener(
@@ -480,7 +481,7 @@ public class MainActivity extends Activity {
     navigation.setPadding(ui.dp(20), ui.dp(10), ui.dp(20), ui.dp(10));
     // A translucent surface over the pale page provides a quiet glass-like footer.
     // Keep text and icons sharp, including on devices without window blur support.
-    navigation.setBackground(ui.shape(Color.WHITE, 26));
+    navigation.setBackground(ui.shape(Ui.CARD, 26));
     navigation.setElevation(ui.dp(4));
     for (String tab : new String[] {"devices", "center", "settings"}) {
       boolean on = tab.equals(page) || tab.equals("settings") && page.equals("permissions");
@@ -617,6 +618,16 @@ public class MainActivity extends Activity {
     identity.addView(
         ui.item(
             "phone", "设备名称", service == null ? Build.MODEL : service.name, null, this::showRename));
+    ui.line(identity);
+    String appearance = Ui.themeMode(this);
+    identity.addView(ui.item("settings", "外观", "仅对本设备生效", "dark".equals(appearance) ? "深色" : "light".equals(appearance) ? "浅色" : "跟随系统", () -> {
+      String[] modes = {"system", "dark", "light"};
+      int selectedTheme = java.util.Arrays.asList(modes).indexOf(Ui.themeMode(this));
+      new AlertDialog.Builder(this).setTitle("外观").setSingleChoiceItems(new String[]{"跟随系统", "深色", "浅色"}, selectedTheme, (dialog, which) -> {
+        getSharedPreferences("identity", 0).edit().putString("theme", modes[which]).apply();
+        dialog.dismiss(); recreate();
+      }).setNegativeButton("取消", null).show();
+    }));
     layout.addView(identity);
     ui.gap(layout, 16);
 
@@ -663,7 +674,7 @@ public class MainActivity extends Activity {
               "keyboard",
               "ADB 授权",
               adb ? service.shell.ready() ? "键鼠与屏幕串流已就绪" : "授权已保存，等待助手恢复" : "通过电脑为本机开启键鼠与屏幕串流",
-              adb ? "已授权" : "未授权",
+              adb ? service.shell.ready() ? "已就绪" : "待恢复" : "未授权",
               adb,
               this::showAdbAuthorization));
 
@@ -815,7 +826,7 @@ public class MainActivity extends Activity {
     Dialog dialog = (Dialog) box.getTag();
     LinkService service = LinkService.instance;
     boolean granted = service != null && service.adbAuthorized();
-    box.addView(ui.text(granted ? "已授权。是否解除本机的 ADB 键鼠授权？" : "未授权。需要通过电脑完成一次授权。", 15, Ui.INK));
+    box.addView(ui.text(granted ? service.shell.ready() ? "ADB 助手已就绪，同组设备可直接使用，无需重复连接数据线。" : "ADB 授权已保存，但助手尚未运行。请连接已信任的电脑恢复助手，恢复后同组设备均可直接使用。" : "未授权。需要通过电脑完成一次配置。", 15, Ui.INK));
     ui.gap(box, 12);
     box.addView(
         ui.text(
@@ -866,7 +877,7 @@ public class MainActivity extends Activity {
       settingsFooter();
       return;
     }
-    layout.addView(ui.text("无需等待对方发起控制，可提前授权；离线设备也可编辑，连接后按已保存的权限生效。系统 ADB / Root 就绪状态需单独设置。", 13, Ui.MUTED));
+    layout.addView(ui.text("同组设备默认允许全部功能，无需首次确认。可单独关闭某台设备的功能；离线设备的设置也会保存。系统 ADB / Root 权限仍需单独配置。", 13, Ui.MUTED));
     ui.gap(layout, 16);
     JSONObject known = service.authorizationDevices();
     ArrayList<String> ids = new ArrayList<>();
@@ -899,7 +910,11 @@ public class MainActivity extends Activity {
         toggle.setThumbTintList(
             new android.content.res.ColorStateList(
                 new int[][] {new int[] {android.R.attr.state_checked}, new int[] {}},
-                new int[] {Ui.PURPLE, 0xffaab0be}));
+                new int[] {Ui.PURPLE, Ui.THUMB}));
+        toggle.setTrackTintList(
+            new android.content.res.ColorStateList(
+                new int[][] {new int[] {android.R.attr.state_checked}, new int[] {}},
+                new int[] {Ui.LILAC, Ui.LINE}));
         toggle.setOnCheckedChangeListener(
             (button, enabled) -> {
               toggle.setEnabled(false);
@@ -927,7 +942,7 @@ public class MainActivity extends Activity {
   }
 
   private String deviceGrantSummary(LinkService service, String id) {
-    if (!service.consent.hasGrant(id)) return "未设置 · 可提前选择允许的功能";
+    if (!service.consent.hasGrant(id)) return "组内默认 · 全部允许";
     int count = 0;
     for (String key : DeviceConsent.KEYS) if (service.consent.allowed(id, key)) count++;
     return count == 0 ? "已保存 · 暂不允许任何功能" : count == DeviceConsent.KEYS.length ? "已保存 · 全部授权" : "已保存 · 有限授权（" + count + "/" + DeviceConsent.KEYS.length + "）";
@@ -937,7 +952,7 @@ public class MainActivity extends Activity {
     LinearLayout box = sheet("使用说明");
     box.addView(ui.title("连接设备", 15));
     ui.gap(box, 8);
-    box.addView(ui.text("让设备连接同一局域网，在设备页右上角添加设备，扫码或输入八位数字码加入组。可在组设备授权管理中提前授权；尚未设置授权时，首次控制需在被控端同意。", 13, Ui.MUTED));
+    box.addView(ui.text("让设备连接同一局域网，在设备页右上角添加设备，扫码或输入八位数字码加入组。同组设备默认允许协作，无需首次确认；可在组设备授权管理中关闭指定功能。", 13, Ui.MUTED));
     ui.gap(box, 18);
     box.addView(ui.title("选择权限模式", 15));
     ui.gap(box, 8);
@@ -971,9 +986,13 @@ public class MainActivity extends Activity {
     toggle.setThumbTintList(
         new android.content.res.ColorStateList(
             new int[][] {new int[] {android.R.attr.state_checked}, new int[] {}},
-            new int[] {Ui.PURPLE, 0xffaab0be}));
+            new int[] {Ui.PURPLE, Ui.THUMB}));
+        toggle.setTrackTintList(
+            new android.content.res.ColorStateList(
+                new int[][] {new int[] {android.R.attr.state_checked}, new int[] {}},
+                new int[] {Ui.LILAC, Ui.LINE}));
     toggle.setChecked(
-        getSharedPreferences("identity", MODE_PRIVATE).getBoolean("allow_" + key, false));
+        getSharedPreferences("identity", MODE_PRIVATE).getBoolean("allow_" + key, java.util.Arrays.asList(DeviceConsent.KEYS).contains(key)));
     toggle.setOnCheckedChangeListener(
         (v, on) -> {
           LinkService s = LinkService.instance;
@@ -1008,7 +1027,7 @@ public class MainActivity extends Activity {
     LinearLayout b = ui.column();
     b.setGravity(Gravity.CENTER);
     b.setPadding(ui.dp(14), ui.dp(16), ui.dp(14), ui.dp(16));
-    b.setBackground(ui.touch(selected.equals(id) ? Ui.LILAC : Color.WHITE, 22));
+    b.setBackground(ui.touch(selected.equals(id) ? Ui.LILAC : Ui.CARD, 22));
     b.addView(
         ui.icon(icon, selected.equals(id) ? Ui.PURPLE : Ui.INK),
         new LinearLayout.LayoutParams(ui.dp(30), ui.dp(30)));
@@ -1204,12 +1223,12 @@ public class MainActivity extends Activity {
     box.addView(
         ui.item(
             "settings",
-            "重置此设备的本机授权",
-            "下次控制本机时重新确认",
+            "撤销此设备的本机授权",
+            "关闭此设备的全部功能，需要重新申请恢复",
             null,
             () -> {
               if (LinkService.instance != null) LinkService.instance.revokeConsent(peer.id);
-              toast("授权已重置");
+              toast("已撤销此设备的授权");
               ((Dialog) box.getTag()).dismiss();
             }));
     box.addView(
@@ -1283,17 +1302,59 @@ public class MainActivity extends Activity {
 
   private String clipboardHistorySignature="";
   static String fileSize(long size){if(size<1024)return size+" B";if(size<1024*1024)return String.format(java.util.Locale.ROOT,"%.1f KB",size/1024.0);if(size<1024L*1024*1024)return String.format(java.util.Locale.ROOT,"%.1f MB",size/1048576.0);return String.format(java.util.Locale.ROOT,"%.2f GB",size/1073741824.0);}
-  private String centerKey(){LinkService s=LinkService.instance;return (s==null||s.staging==null?"":s.staging.list().toString())+clipboardHistoryKey();}
-  private void controlCenter(ScrollView scroll){
-    LinkService s=LinkService.instance;if(centerSelection.isEmpty())centerSelection=s!=null&&s.staging!=null&&s.staging.list().length()>0?"files":"clipboard";
-    centerContent=layout;centerScroll=scroll;refreshCenter();
-    HorizontalScrollView horizontal=new HorizontalScrollView(this);horizontal.setHorizontalScrollBarEnabled(false);horizontal.setFillViewport(true);LinearLayout functions=ui.row();functions.setGravity(Gravity.CENTER_VERTICAL);functions.setPadding(ui.dp(22),ui.dp(8),ui.dp(22),ui.dp(12));horizontal.addView(functions);horizontal.setBackground(ui.shape(Ui.LILAC,22));
-    for(String key:new String[]{"files","clipboard"}){LinearLayout tile=ui.column();tile.setGravity(Gravity.CENTER);tile.setPadding(ui.dp(20),ui.dp(14),ui.dp(20),ui.dp(14));tile.setBackground(ui.touch(key.equals(centerSelection)?Color.WHITE:Color.TRANSPARENT,20));tile.addView(ui.icon(key.equals("files")?"files":"clipboard",Ui.PURPLE),new LinearLayout.LayoutParams(ui.dp(28),ui.dp(28)));ui.gap(tile,10);tile.addView(ui.text(key.equals("files")?"文件暂存区":"剪贴板",14,Ui.INK));tile.setContentDescription(key.equals("files")?"文件暂存区功能":"剪贴板功能");LinearLayout.LayoutParams space=new LinearLayout.LayoutParams(ui.dp(154),-2);space.setMargins(0,0,ui.dp(12),0);functions.addView(tile,space);tile.setOnClickListener(v->{centerSelection=key;renderPage();});}
-    root.addView(horizontal,new LinearLayout.LayoutParams(-1,0,1));
+  private String centerKey() {
+    LinkService service = LinkService.instance;
+    StringBuilder value = new StringBuilder(service == null || service.staging == null
+        ? "" : service.staging.list().toString());
+    value.append(clipboardHistoryKey());
+    if (service != null && centerSelection.equals("touchpad")) {
+      JSONObject devices = service.authorizationDevices();
+      List<String> ids = new ArrayList<>();
+      for (Iterator<String> it = devices.keys(); it.hasNext();) ids.add(it.next());
+      Collections.sort(ids);
+      for (String id : ids) {
+        Wire peer = service.peers.get(id);
+        value.append(id).append(devices.optJSONObject(id)).append(peer != null && peer.connected)
+            .append(service.peerAccess.get(id));
+      }
+    }
+    return value.toString();
+  }
+
+  private void controlCenter(ScrollView scroll) {
+    LinkService service = LinkService.instance;
+    if (centerSelection.isEmpty()) centerSelection = service != null && service.staging != null
+        && service.staging.list().length() > 0 ? "files" : "clipboard";
+    centerContent = layout;
+    centerScroll = scroll;
+    refreshCenter();
+    LinearLayout.LayoutParams contentSize = (LinearLayout.LayoutParams) scroll.getLayoutParams();
+    contentSize.weight = 1;
+    scroll.setLayoutParams(contentSize);
+    LinearLayout functions = ui.row();
+    functions.setGravity(Gravity.CENTER);
+    String[] keys = {"files", "clipboard", "touchpad"};
+    String[] titles = {"文件暂存区", "剪贴板", "触控板"};
+    for (int i = 0; i < keys.length; i++) {
+      final String key = keys[i];
+      View tile = ui.controlTile(key, titles[i], key.equals(centerSelection), () -> {
+        if (!key.equals(centerSelection)) {
+          centerSelection = key;
+          renderPage();
+        }
+      });
+      LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(0, ui.dp(112), 1);
+      if (i > 0) size.setMargins(ui.dp(10), 0, 0, 0);
+      functions.addView(tile, size);
+    }
+    LinearLayout.LayoutParams stripSize = new LinearLayout.LayoutParams(-1, -2);
+    stripSize.setMargins(ui.dp(22), ui.dp(8), ui.dp(22), ui.dp(14));
+    root.addView(functions, stripSize);
   }
   private void refreshCenter(){
     if(centerContent==null)return;centerContent.removeAllViews();layout=centerContent;centerSignature=centerKey();
     if(centerSelection.equals("clipboard")){clipboardPage();return;}
+    if(centerSelection.equals("touchpad")){touchpadDevicesPage();return;}
     heading("文件暂存区","接收文件 · 查看或保存到指定位置");LinkService s=LinkService.instance;org.json.JSONArray list=s==null||s.staging==null?new org.json.JSONArray():s.staging.list();
     if(list.length()==0){LinearLayout empty=ui.card();empty.addView(ui.item("files","暂存区是空的","其他设备发送的文件会出现在这里",null,null));layout.addView(empty);return;}
     for(int i=0;i<list.length();i++){if(i>0)ui.gap(layout,16);org.json.JSONObject r=list.optJSONObject(i);String id=r.optString("id"),state=r.optString("state");LinearLayout card=ui.card();String label=state.equals("ready")?"已接收":state.equals("receiving")?"传输中 · "+(r.optLong("received")*100/Math.max(1,r.optLong("size")))+"%":state.equals("pending")?"待传输":state.equals("queued")?"等待传输":"传输失败";
@@ -1304,6 +1365,81 @@ public class MainActivity extends Activity {
       if(!state.equals("receiving")){View remove=ui.iconButton("close","移除暂存文件",()->run(()->{link().staging.remove(id);main.post(this::refreshCenter);}));LinearLayout.LayoutParams space=new LinearLayout.LayoutParams(ui.dp(48),ui.dp(48));space.setMargins(ui.dp(10),0,0,0);actions.addView(remove,space);}ui.gap(card,12);card.addView(actions);layout.addView(card);
     }
   }
+  private void touchpadDevicesPage() {
+    heading("触控板", "将手机变成触控板，控制组内设备");
+    LinkService service = LinkService.instance;
+    JSONObject devices = service == null ? new JSONObject() : service.authorizationDevices();
+    List<String> ids = new ArrayList<>();
+    for (Iterator<String> it = devices.keys(); it.hasNext();) {
+      String id = it.next();
+      JSONObject device = devices.optJSONObject(id);
+      JSONObject capabilities = device == null ? null : device.optJSONObject("capabilities");
+      if (capabilities != null && capabilities.optBoolean("relativeInput")) ids.add(id);
+    }
+    ids.sort((first, second) -> {
+      Wire a = service.peers.get(first), b = service.peers.get(second);
+      int online = Boolean.compare(b != null && b.connected, a != null && a.connected);
+      return online != 0 ? online : devices.optJSONObject(first).optString("name")
+          .compareToIgnoreCase(devices.optJSONObject(second).optString("name"));
+    });
+    if (ids.isEmpty()) {
+      LinearLayout empty = ui.card();
+      empty.addView(ui.item("touchpad", "暂无支持触控板的设备",
+          "请打开组内电脑的 LanLink，并更新到支持原生触控板的版本。设备上线后会自动出现在这里。", null, null));
+      layout.addView(empty);
+    } else {
+      for (String id : ids) {
+        Wire peer = service.peers.get(id);
+        JSONObject device = devices.optJSONObject(id);
+        boolean online = peer != null && peer.connected;
+        JSONObject report = service.peerAccess.get(id);
+        String state = online ? touchpadAccessStatus(report) : "离线 · 等待设备上线";
+        LinearLayout card = ui.card();
+        View row = ui.item(platformIcon(device.optString("platform")), device.optString("name", "设备"),
+            state, online ? "进入" : null, online ? () -> openTouchpad(peer) : null);
+        row.setContentDescription(device.optString("name", "设备") + "，" + state
+            + (online ? "，打开全屏触控板" : ""));
+        if (!online) row.setAlpha(.55f);
+        else if (report != null && !PeerAccess.allowed(report, "input")) guardFeature(row, peer, "input");
+        card.addView(row);
+        layout.addView(card);
+        ui.gap(layout, 12);
+      }
+    }
+    ui.gap(layout, 14);
+    LinearLayout help = ui.card();
+    help.addView(ui.title("原生触控板", 16));
+    ui.gap(help, 8);
+    help.addView(ui.text("单指移动与轻点单击，双指滚动与轻点右键，长按后拖动。连接只需远程输入授权，无需共享屏幕。", 13, Ui.MUTED));
+    layout.addView(help);
+  }
+
+  private String touchpadAccessStatus(JSONObject report) {
+    JSONObject permissions = report == null ? null : report.optJSONObject("permissions");
+    JSONObject input = permissions == null ? null : permissions.optJSONObject("input");
+    if (input == null) return "在线 · 正在检查授权";
+    if (!input.optBoolean("appEnabled") || !input.optBoolean("systemGranted"))
+      return "在线 · 需要开启输入权限";
+    return input.optBoolean("peerAllowed") ? "在线 · 已授权" : "在线 · 点击请求授权";
+  }
+
+  private void openTouchpad(Wire peer) {
+    LinkService service = LinkService.instance;
+    if (service == null || !peer.connected || service.peers.get(peer.id) != peer) {
+      toast("设备已离线，请等待设备重新连接");
+      refreshCenter();
+      return;
+    }
+    if (viewer != null) viewer.dismiss();
+    TouchpadDialog session = new TouchpadDialog(this, service, peer);
+    viewer = session;
+    session.setOnDismissListener(ignored -> {
+      if (viewer == session) viewer = null;
+      if (page.equals("center") && centerSelection.equals("touchpad")) refreshCenter();
+    });
+    session.show();
+  }
+
   private void openStage(org.json.JSONObject row){org.json.JSONArray files=row.optJSONArray("files");if(files==null)return;if(row.optString("type").equals("folder")){LinearLayout box=sheet(row.optString("name"));for(int i=0;i<files.length();i++){org.json.JSONObject f=files.optJSONObject(i);box.addView(ui.item("files",f.optString("relative"),fileSize(f.optLong("size")),null,()->viewStageFile(row.optString("id"),f.optString("relative"))));}if(files.length()==0)box.addView(ui.text("这是一个空文件夹",14,Ui.MUTED));}else if(files.length()>0)viewStageFile(row.optString("id"),files.optJSONObject(0).optString("relative"));}
   private void viewStageFile(String id,String relative){try{android.net.Uri uri=link().staging.uri(id,relative);String mime=getContentResolver().getType(uri);startActivity(new Intent(Intent.ACTION_VIEW).setDataAndType(uri,mime==null?"application/octet-stream":mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION));}catch(Exception e){toast("没有可打开此文件的应用，可以先保存到手机");}}
   private void saveStage(org.json.JSONObject row){savingStage=row.optString("id");if(row.optString("type").equals("folder"))startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE),43);else{String name=row.optString("name");String ext=android.webkit.MimeTypeMap.getFileExtensionFromUrl(name),mime=android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext.toLowerCase(java.util.Locale.ROOT));startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType(mime==null?"application/octet-stream":mime).putExtra(Intent.EXTRA_TITLE,name),42);}}
@@ -1317,7 +1453,7 @@ public class MainActivity extends Activity {
     for(String key:new String[]{"upload","download","shortcuts"}){
       if(key.equals("shortcuts") && getSharedPreferences("identity",0).getBoolean("clipboard_upload",true) && getSharedPreferences("identity",0).getBoolean("clipboard_download",true))continue;
       String title=key.equals("upload")?"允许自动上传剪贴板信息到组":key.equals("download")?"允许自动获取组剪贴板到本机":"在首页显示快捷同步剪贴板按钮";
-      LinearLayout row=ui.row();TextView label=ui.text(title,13,Ui.INK);row.addView(label,new LinearLayout.LayoutParams(0,-2,1));Switch toggle=new Switch(this);toggle.setContentDescription(title);toggle.setChecked(getSharedPreferences("identity",0).getBoolean("clipboard_"+key,!key.equals("shortcuts")));toggle.setThumbTintList(new android.content.res.ColorStateList(new int[][]{new int[]{android.R.attr.state_checked},new int[]{}},new int[]{Ui.PURPLE,0xffaab0be}));row.addView(toggle);card.addView(row);
+      LinearLayout row=ui.row();TextView label=ui.text(title,13,Ui.INK);row.addView(label,new LinearLayout.LayoutParams(0,-2,1));Switch toggle=new Switch(this);toggle.setContentDescription(title);toggle.setChecked(getSharedPreferences("identity",0).getBoolean("clipboard_"+key,!key.equals("shortcuts")));toggle.setThumbTintList(new android.content.res.ColorStateList(new int[][]{new int[]{android.R.attr.state_checked},new int[]{}},new int[]{Ui.PURPLE,Ui.THUMB}));toggle.setTrackTintList(new android.content.res.ColorStateList(new int[][]{new int[]{android.R.attr.state_checked},new int[]{}},new int[]{Ui.LILAC,Ui.LINE}));row.addView(toggle);card.addView(row);
       boolean upload=key.equals("upload");if(!key.equals("shortcuts") && !toggle.isChecked()){ui.gap(card,8);Button manual=ui.button(upload?"上传":"下载",false,()->manualClipboard(upload));manual.setContentDescription(upload?"上传剪贴板":"下载剪贴板");manual.setTextSize(12);manual.setMinWidth(0);manual.setMinimumWidth(0);manual.setPadding(ui.dp(10),ui.dp(8),ui.dp(10),ui.dp(8));LinearLayout.LayoutParams compact=new LinearLayout.LayoutParams(-2,-2);compact.setMargins(ui.dp(8),0,0,0);row.addView(manual,compact);}
       toggle.setOnCheckedChangeListener((button,on)->{getSharedPreferences("identity",0).edit().putBoolean("clipboard_"+key,on).apply();renderPage();});ui.gap(card,12);
     }
@@ -1504,12 +1640,12 @@ public class MainActivity extends Activity {
     if (controlled != null) {
       LinearLayout activeBanner = ui.row();
       activeBanner.setPadding(ui.dp(16), ui.dp(12), ui.dp(12), ui.dp(28));
-      activeBanner.setBackground(ui.shape(0xffeeebf8,20));
+      activeBanner.setBackground(ui.shape(Ui.LILAC,20));
       LinearLayout.LayoutParams bannerParams=new LinearLayout.LayoutParams(-1,-2);bannerParams.setMargins(0,ui.dp(8),0,0);activeBanner.setLayoutParams(bannerParams);
       LinearLayout labels = ui.column();
-      TextView controlledText=ui.title("● 正在被控制 / 共享屏幕",14);controlledText.setTextColor(0xff554a88);labels.addView(controlledText);
+      TextView controlledText=ui.title("● 正在被控制 / 共享屏幕",14);controlledText.setTextColor(Ui.PURPLE);labels.addView(controlledText);
       ui.gap(labels, 5);
-      TextView deviceName=ui.text(controlled,12,0xff78718f);
+      TextView deviceName=ui.text(controlled,12,Ui.MUTED);
       deviceName.setSingleLine(true);
       deviceName.setEllipsize(android.text.TextUtils.TruncateAt.END);
       labels.addView(deviceName);
@@ -1524,7 +1660,7 @@ public class MainActivity extends Activity {
                 update();
               });
       stopButton.setTextSize(13);
-      stopButton.setBackground(ui.touch(0xffe1dcef,14));
+      stopButton.setBackground(ui.touch(Ui.LILAC,14));
       activeBanner.addView(stopButton,new LinearLayout.LayoutParams(-2,ui.dp(48)));
       noticeBox.addView(activeBanner);
     }
@@ -1724,7 +1860,7 @@ public class MainActivity extends Activity {
       boolean granted = permissionRows.get(b).getAsBoolean();
       b.setText(permissionTitles.get(b) + (granted ? " · 已授权" : ""));
       b.setEnabled(!granted);
-      b.setTextColor(granted ? Ui.GREEN : Color.WHITE);
+      b.setTextColor(granted ? Ui.GREEN : Ui.dark ? 0xff171323 : Color.WHITE);
       b.setBackground(ui.touch(granted ? Ui.MINT : Ui.PURPLE, 16));
     }
   }
@@ -1841,6 +1977,16 @@ public class MainActivity extends Activity {
     state.putString("selected", selected);state.putString("savingStage",savingStage);state.putString("centerSelection",centerSelection);
   }
 
+  @Override
+  public void onConfigurationChanged(android.content.res.Configuration configuration) {
+    super.onConfigurationChanged(configuration);
+    if (viewer == null) renderPage();
+    else if (viewer.getWindow() != null) {
+      viewer.getWindow().setLayout(-1, -1);
+      viewer.getWindow().getDecorView().requestApplyInsets();
+    }
+  }
+
   protected void onResume() {
     super.onResume();
     resumed = true;
@@ -1884,7 +2030,7 @@ public class MainActivity extends Activity {
       return;
     }
     viewing = p.id;
-    viewer = new Dialog(this, android.R.style.Theme_Material_Light_NoActionBar);
+    viewer = new Dialog(this, Ui.dialogTheme());
     final Dialog session = viewer;
     final long openedAt = System.currentTimeMillis();
     final java.util.concurrent.atomic.AtomicBoolean freshRequest =
@@ -1928,10 +2074,13 @@ public class MainActivity extends Activity {
     boolean phone = "android".equals(p.info.optString("platform"));
     TextureView videoTexture = new TextureView(this);
     VideoViewport videoBox = new VideoViewport(this, videoTexture, image, !phone);
+    final RemoteFullscreen[] fullscreen = new RemoteFullscreen[1];
     videoBox.followCursor = getPreferences(0).getBoolean("follow_remote_cursor", true);
     videoBox.setBackground(ui.shape(0xff202637, 22));
     videoBox.setClipToOutline(true);
-    box.addView(videoBox, new LinearLayout.LayoutParams(-1, 0, 1));
+    FrameLayout videoStage = new FrameLayout(this);
+    videoStage.addView(videoBox, new FrameLayout.LayoutParams(-1, -1));
+    box.addView(videoStage, new LinearLayout.LayoutParams(-1, 0, 1));
     final VideoPlayer player = new VideoPlayer(p, videoTexture, image, frameStatus);
     player.viewport = videoBox;
     if (!phone) {
@@ -1956,6 +2105,7 @@ public class MainActivity extends Activity {
     if (phone)
       videoBox.setOnTouchListener(
           (v, e) -> {
+            if (fullscreen[0] != null && fullscreen[0].isActive()) return false;
             if (!"android".equals(p.info.optString("platform"))) return true;
             LinkService s = LinkService.instance;
             if (s == null || !p.id.equals(s.active)) return true;
@@ -2131,15 +2281,43 @@ public class MainActivity extends Activity {
     footer.addView(
         ui.button("粘贴", false, () -> run(() -> link().pasteRemote())),
         new LinearLayout.LayoutParams(0, -2, 1));
+    footer.addView(
+        ui.button("全屏", false, () -> { keyboardShown[0] = false; fullscreen[0].enter(); }),
+        new LinearLayout.LayoutParams(0, -2, 1));
     for (int i = 0; i < footer.getChildCount(); i++) {
       LinearLayout.LayoutParams spacing =
           (LinearLayout.LayoutParams) footer.getChildAt(i).getLayoutParams();
       spacing.setMargins(ui.dp(3), 0, ui.dp(3), 0);
     }
     box.addView(footer);
+    JSONObject remoteCapabilities = p.info.optJSONObject("capabilities");
+    fullscreen[0] = new RemoteFullscreen(this, session, outer, box, videoStage, videoBox,
+        keyboard, touchpad, remoteCapabilities != null && remoteCapabilities.optBoolean("relativeInput"),
+        event -> link().remoteInput(p.id, event),
+        error -> main.post(() -> {
+          if (viewer == session) {
+            frameStatus.setText(displayError(error.getMessage()));
+            control.setText("重新请求");
+          }
+        }),
+        (x,y) -> run(() -> {
+          LinkService service = link();
+          service.remoteInput(p.id, obj("kind", "move", "x", x, "y", y));
+          service.remoteInput(p.id, obj("kind", "button", "button", 0, "down", true));
+          try { service.remoteInput(p.id, obj("kind", "button", "button", 0, "down", false)); }
+          catch (Exception error) { service.releaseControl(); throw error; }
+        }),
+        () -> applyInsets(outer, session.getWindow()));
+    frameStatus.addTextChangedListener(new android.text.TextWatcher() {
+      public void beforeTextChanged(CharSequence s,int start,int count,int after) {}
+      public void onTextChanged(CharSequence s,int start,int before,int count) { fullscreen[0].connectionStatus(s); }
+      public void afterTextChanged(android.text.Editable text) {}
+    });
+    fullscreen[0].connectionStatus(frameStatus.getText());
     viewer.setContentView(outer);
     viewer.setOnDismissListener(
         d -> {
+          fullscreen[0].close();
           touchpad.close();
           player.close();
           autoControl.set(false);

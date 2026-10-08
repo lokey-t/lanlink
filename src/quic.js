@@ -13,7 +13,7 @@ export class QuicManager {
     this.native.on('connected',e=>{const p=this.offers.get(e.owner);if(p)this.bind(p,e.conn);});
     this.native.on('request',e=>this.incoming(e).catch(error=>{if(process.env.LANLINK_QUIC_DEBUG)process.stderr.write('QUIC incoming failure: '+error.message+' conn '+e.conn+' known '+this.connections.has(e.conn)+'\n');this.native.call('close',{conn:e.conn}).catch(()=>{});}));
     this.native.on('datagram',e=>this.motion(e).catch(()=>{}));this.native.on('video',e=>this.videos.get(e.conn+':'+e.channel)?.receive(e));
-    this.native.on('stats',e=>{for(const video of this.videos.values())if(video.conn===e.conn)video.queued=e.queued;});
+    this.native.on('stats',e=>{this.connections.get(e.conn)?.inputScheduler?.feedback({queued:e.queued});for(const video of this.videos.values())if(video.conn===e.conn)video.queued=e.queued;});
     this.native.on('closed',e=>{if(!e){this.enabled=false;for(const p of this.connections.values())this.drop(p);}else{const p=this.connections.get(e.conn);if(p)this.drop(p);}});
     this.timer=setInterval(()=>{for(const p of this.service.peers.values()){if(p.quicConn)this.rpc(p,'linkPing',{},2500).catch(()=>this.drop(p));else this.connect(p).catch(()=>{});}},4000);this.timer.unref();
   }catch(e){this.enabled=false;this.native?.close();this.service.log('QUIC 不可用，使用兼容通道：'+e.message);}}
@@ -32,20 +32,23 @@ export class QuicManager {
     }this.service.emit('change');}
   async rpc(p,method,args={},timeout=15000){if(!this.valid(p)||!p.quicConn)throw Error('QUIC 连接已结束');const conn=p.quicConn;
     if(method==='acquire'||method==='inputReset'||method==='release'){p.quicTx.reset();args={...args,__motionEpoch:p.quicTx.epoch};}
-    if(method==='input'&&['move','relative'].includes(args.kind)){const data=p.quicTx.move(args);try{await this.native.call('datagram',{conn,data:wire(data)},timeout);return {};}catch(e){this.drop(p);throw e;}}
-    if(method==='input'&&p.quicTx.snapshot)args={...args,__motion:p.quicTx.snapshot};
-    const r=await this.native.call('request',{conn,data:wire({method,args})},timeout+250);const data=Buffer.from(r.data,'base64');
+    if(method==='input'&&['move','relative'].includes(args.kind)){const data=p.quicTx.move(args);try{const result=await this.native.call('datagram',{conn,data:wire(data)},timeout);if(p.quicConn===conn)p.inputScheduler?.feedback({queued:result.queued||0});return {};}catch(e){if(/\bDone\b|datagram.*(?:full|congest)/i.test(e.message)){p.inputScheduler?.feedback({queued:131072});return {};}this.drop(p);throw e;}}
+    if(method==='input'&&p.quicTx.snapshot)args={...args,__motion:p.quicTx.barrier()};
+    const started=performance.now(),r=await this.native.call('request',{conn,data:wire({method,args})},timeout+250);if(p.quicConn===conn)p.inputScheduler?.feedback({rttMs:performance.now()-started});const data=Buffer.from(r.data,'base64');
     if(method==='quicFile'){if(data[0]!==0)throw Error(data.subarray(1).toString()||'QUIC 文件传输失败');if(data.length<33||!createHash('sha256').update(data.subarray(33)).digest().equals(data.subarray(1,33)))throw Error('QUIC 文件校验失败');return data.subarray(33);}const result=JSON.parse(data);if(result.error)throw Error(result.error);return result.result;
   }
   inputQueue(p){return p.quicInputs ||= new InputQueue(async(method,a)=>a.motion?(p.quicConn===a.conn?this.applyMotion(p,a.motion):undefined):a.run());}
+  track(task){return this.service.trackTask?.(task)||task;}
   ordered(p,work){return this.inputQueue(p).request('__control',{run:work});}
   async applyMotion(p,m){if(!this.valid(p)||!p.quicConn)return;for(const input of p.quicRx.accept(m))await this.service.handle(p,'input',input);}
-  async motion(e){const p=this.connections.get(e.conn);if(!p||!this.valid(p)||p.quicConn!==e.conn)return;const m=JSON.parse(Buffer.from(e.data,'base64'));await this.inputQueue(p).request('input',{kind:m.kind,motion:m,conn:e.conn});}
-  async incoming(e){const p=this.connections.get(e.conn);if(!p||!this.valid(p)||p.quicConn!==e.conn){if(process.env.LANLINK_QUIC_DEBUG)process.stderr.write('QUIC rejected state '+JSON.stringify({conn:e.conn,current:p?.quicConn,enabled:this.enabled,closing:this.service.closing,changing:this.service.changingGroup,closed:p?.closed,primary:p&&this.service.peers.get(p.remote.id)===p,excluded:p&&this.service.group.excluded(p.remote.id)})+'\n');throw Error('QUIC 会话已结束');}const m=JSON.parse(Buffer.from(e.data,'base64'));let bytes;
+  motion(e){return this.track(this.receiveMotion(e));}
+  async receiveMotion(e){const p=this.connections.get(e.conn);if(!p||!this.valid(p)||p.quicConn!==e.conn)return;const m=JSON.parse(Buffer.from(e.data,'base64'));await this.inputQueue(p).request('input',{kind:m.kind,motion:m,conn:e.conn});}
+  incoming(e){return this.track(this.receiveRequest(e));}
+  async receiveRequest(e){const p=this.connections.get(e.conn);if(!p||!this.valid(p)||p.quicConn!==e.conn){if(process.env.LANLINK_QUIC_DEBUG)process.stderr.write('QUIC rejected state '+JSON.stringify({conn:e.conn,current:p?.quicConn,enabled:this.enabled,closing:this.service.closing,changing:this.service.changingGroup,closed:p?.closed,primary:p&&this.service.peers.get(p.remote.id)===p,excluded:p&&this.service.group.excluded(p.remote.id)})+'\n');throw Error('QUIC 会话已结束');}const m=JSON.parse(Buffer.from(e.data,'base64'));let bytes;
     const run=async()=>{if(!this.valid(p)||p.quicConn!==e.conn)throw Error('设备连接已结束');const a={...m.args};
       if(['acquire','inputReset','release'].includes(m.method)){p.quicRx.reset();if(typeof a.__motionEpoch==='string'&&a.__motionEpoch.length===36)p.quicRx.epoch=a.__motionEpoch;delete a.__motionEpoch;}
       if(a.__motion){await this.applyMotion(p,a.__motion);delete a.__motion;}
-      if(m.method==='quicFile'){this.service.authorize(p,'clipboard');return await this.service.fileBytes(a,p.remote.id);}
+      if(m.method==='quicFile'){this.service.authorize(p,'clipboard');return await (this.service.bulk?.quicBytes(p,a)||this.service.fileBytes(a,p.remote.id));}
       if(m.method==='__notify'){if(!notifyTypes.has(a.type))throw Error('QUIC 消息无效');p.emit('message',a);return {};}
       return await this.service.handle(p,m.method,a);
     };
@@ -53,9 +56,9 @@ export class QuicManager {
     catch(error){bytes=m.method==='quicFile'?Buffer.concat([Buffer.from([1]),Buffer.from(error.message)]):Buffer.from(JSON.stringify({error:error.message}));}
     if(this.valid(p))await this.native.call('reply',{conn:e.conn,stream:e.stream,data:bytes.toString('base64')});
   }
-  video(p,channel){if(!this.valid(p)||!p.quicConn)throw Error('QUIC 串流未就绪');const video=new QuicVideo(this,p,p.quicConn,channel);this.videos.set(p.quicConn+':'+channel,video);return video;}
+  video(p,channel){if(!this.valid(p)||!p.quicConn)throw Error('QUIC 串流未就绪');const key=p.quicConn+':'+channel;this.videos.get(key)?.close();const video=new QuicVideo(this,p,p.quicConn,channel);this.videos.set(key,video);return video;}
   drop(p){if(!p?.quicConn)return;const conn=p.quicConn;p.quicConn=0;p.quicRetry=Date.now()+15000;this.connections.delete(conn);for(const [key,v]of this.videos)if(v.conn===conn){v.close();this.videos.delete(key);}this.native?.call('close',{conn},1000).catch(()=>{});
-    const cleanup=[this.service.handle(p,'release',{})];if(p.tcpRequest&&!p.closed)cleanup.push(p.tcpRequest('release',{},1500));if(this.service.active===p.remote.id)cleanup.push(this.service.returnLocal());this.service.emit('change');return Promise.allSettled(cleanup);}
+    const cleanup=[this.service.handle(p,'release',{})];if(p.tcpRequest&&!p.closed)cleanup.push(p.tcpRequest('release',{},1500));if(this.service.active===p.remote.id)cleanup.push(this.service.returnLocal());this.service.emit('change');return this.track(Promise.allSettled(cleanup));}
   async reset(){this.offers.clear();const work=[...this.connections.values()].map(p=>this.drop(p));this.native?.call('resetTickets').catch(()=>{});await Promise.all(work);}
   close(){clearInterval(this.timer);this.enabled=false;this.reset().catch(()=>{});this.native?.close();}
 }
@@ -67,6 +70,6 @@ export class QuicVideo {
   key(){if(Date.now()-(this.keyAt||0)>500){this.keyAt=Date.now();this.onNeedKey?.();}}
   send(frame){if(this.closed||this.inflight>=4)return false;const b=Buffer.alloc(16);b[0]=frame.codec==='h264'?2:frame.codec==='jpeg'?1:3;b[1]=frame.key?1:0;b.writeUInt16BE(frame.width,2);b.writeUInt16BE(frame.height,4);b.writeBigUInt64BE(BigInt(Math.floor(frame.time??Date.now())),8);const data=Buffer.concat([b,frame.data]);this.inflight++;this.queued+=data.length;
     this.manager.native.call('video',{conn:this.conn,channel:this.channel,data:data.toString('base64')},3000).then(r=>{this.queued=Math.max(0,r.queued);},()=>this.onSendDrop?.()).finally(()=>{this.inflight--;});return true;}
-  async next(){if(this.closed)throw Error('QUIC 串流已关闭');const f=this.queue.shift();if(f)return f;return new Promise((resolve,reject)=>{const t=setTimeout(()=>{this.waiter=null;reject(Error('QUIC 等待画面超时'));},5000);this.waiter=f=>{clearTimeout(t);f?resolve(f):reject(Error('QUIC 串流已关闭'));};});}
-  close(){if(this.closed)return;this.closed=true;this.waiter?.(null);this.waiter=null;this.queue.clear();this.manager.videos.delete(this.conn+':'+this.channel);}
+  async next(){if(this.closed)throw Error('QUIC 串流已关闭');const f=this.queue.shift();if(f)return f;if(this.assembler.needKey)this.key();return new Promise((resolve,reject)=>{const t=setTimeout(()=>{this.waiter=null;reject(Error('QUIC 等待画面超时'));},5000);this.waiter=f=>{clearTimeout(t);f?resolve(f):reject(Error('QUIC 串流已关闭'));};});}
+  close(){if(this.closed)return;this.closed=true;this.waiter?.(null);this.waiter=null;this.queue.clear();const key=this.conn+':'+this.channel;if(this.manager.videos.get(key)===this)this.manager.videos.delete(key);}
 }

@@ -132,6 +132,8 @@ final class SettingsProbe {
           .commit();
       helper.edit().putBoolean("adb_authorized", false).commit();
       service.consent = new DeviceConsent("{}");
+      service.consent.revoke(a);
+      service.consent.revoke(b);
       // A pending Root manager decision survives Activity refresh and cannot queue another switch.
       java.util.concurrent.atomic.AtomicBoolean changing =
           (java.util.concurrent.atomic.AtomicBoolean) field(service, "rootChanging");
@@ -232,11 +234,13 @@ final class SettingsProbe {
       page("permissions");
       check(!service.peers.containsKey(c) && !service.knownDevices().has(c),"fixture is only a group member, never connected");
       check(find(decor,"尚未连接的电脑 键鼠标操作")!=null,"offline group member can be configured before first connection");
-      check(!service.consent.hasGrant(c),"viewing the page does not silently grant access");
+      check(!service.consent.hasGrant(c) && service.consent.allowed(c,"input"),"viewing the page preserves implicit group defaults");
       click(decor,"尚未连接的电脑 键鼠标操作");
       until=SystemClock.elapsedRealtime()+3000;
-      while(!service.consent.allowed(c,"input") && SystemClock.elapsedRealtime()<until)Thread.sleep(30);
-      service.setDevicePermission(c,"screen",true);
+      while(service.consent.allowed(c,"input") && SystemClock.elapsedRealtime()<until)Thread.sleep(30);
+      check(!service.consent.allowed(c,"input") && service.consent.allowed(c,"screen"),"disabling one default leaves other features allowed");
+      service.setDevicePermission(c,"input",true);
+      service.setDevicePermission(c,"clipboard",false);
       service.consent.require(c,"尚未连接的电脑","input");
       service.consent.require(c,"尚未连接的电脑","screen");
       check(service.consent.peek()==null,"pre-authorized device does not need first-control confirmation");

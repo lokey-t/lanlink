@@ -21,3 +21,4 @@ native/macos/LanLinkBridge
 native/quic/target/
 android/app/src/main/jniLibs/*/liblanlink_quic.so
 android/app/src/main/jniLibs/*/libc++_shared.so
+runtime/*.dylib

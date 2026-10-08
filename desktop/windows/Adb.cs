@@ -41,7 +41,7 @@ namespace LanLink.Desktop {
       var scroll = new ScrollViewer { Content = content, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled }; SetRow(scroll, 1); Children.Add(scroll);
       var actions = new DockPanel { Margin = new Thickness(0, 14, 0, 10) }; DockPanel.SetDock(authorize, Dock.Right); actions.Children.Add(authorize); actions.Children.Add(status); SetRow(actions, 2); Children.Add(actions);
     }
-    Border Card(StackPanel content) { return new Border { Background = Brushes.White, CornerRadius = new CornerRadius(18), BorderBrush = MainWindow.Brush("#E5EBF5"), BorderThickness = new Thickness(1), Padding = new Thickness(22), Margin = new Thickness(0, 0, 0, 16), Child = content }; }
+    Border Card(StackPanel content) { return new Border { Background = MainWindow.Brush("#FFFFFF"), CornerRadius = new CornerRadius(18), BorderBrush = MainWindow.Brush("#E5EBF5"), BorderThickness = new Thickness(1), Padding = new Thickness(22), Margin = new Thickness(0, 0, 0, 16), Child = content }; }
     public void Open(Device ignored, bool scan=true) { target.Text="帮助其他组的设备完成 ADB 配置，无需加入本组。请先在手机打开新版 LanLink。";if(scan)main.Run(Refresh); }
     public void SetPreview(object result) { var json = new System.Web.Script.Serialization.JavaScriptSerializer(); Display(json.DeserializeObject(json.Serialize(result))); }
     void Display(object result) {
@@ -61,7 +61,7 @@ namespace LanLink.Desktop {
     }
     async Task Authorize() {
       if (busy || serial == "") return; busy = true; refresh.IsEnabled = false; authorize.IsEnabled = false; transports.IsEnabled = false;
-      status.Text = "请留意手机上的 LanLink 授权提示，并确认允许此电脑启用增强控制…";
+      status.Text = "正在配置手机助手；如有系统 USB 调试提示，请在手机确认…";
       try {
         var result = await main.Client.Call("adb-local-authorize", new { serial=serial });
         Display(await main.Client.Call("adb-local-devices"));

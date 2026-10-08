@@ -27,34 +27,35 @@ async function pair(t, permissions = { input: true, screen: true, clipboard: tru
   for (const name of ['A', 'B']) { const dir = path.join(folder, name); await mkdir(dir); const config = { id: randomUUID(), name, token, dwell: 450, edges: {}, master: true, permissions: { ...permissions } }; const s = new Service(config, dir, new FakeNative(), { port: 0, host: '127.0.0.1', noDiscovery: true }); await s.start(); services.push(s); }
   t.after(async () => { await Promise.all(services.map(s => s.close())); await rm(folder, { recursive: true, force: true }); });
   services[0].connect('127.0.0.1', services[1].port); await until(() => services.every(s => s.peers.size === 1));
-  if (approve) for (const [source, target] of [[services[0], services[1]], [services[1], services[0]]]) {
-    await assert.rejects(source.getPeer(target.config.id).request('acquire'), /CONSENT_PENDING/);
-    const request = target.state().consentRequests[0];
-    await target.decideConsent({ ...request, accepted: true, permissions: { input: true, screen: true, clipboard: true, shutdown: true } });
-  }
   return { a: services[0], b: services[1], folder };
 }
-test('first control is blocked until local decision and only selected permissions persist', async t => {
-  const { a, b } = await pair(t, undefined, false), p = a.getPeer(b.config.id);
-  const baseline = b.native.calls.length;
-  await assert.rejects(p.request('acquire'), /CONSENT_PENDING/);
-  await assert.rejects(p.request('screen'), /CONSENT_PENDING/);
-  assert.equal((await p.request('clipboardGet')).text,'');
-  await assert.rejects(p.request('shutdown'), /CONSENT_PENDING/);
-  assert.equal(b.state().consentRequests.length, 1); assert.equal(b.owner, null); assert.equal(b.shutdownAt, undefined);
-  assert.equal(b.native.calls.length, baseline+1);
+test('authenticated group requests work immediately, while explicit restrictions persist after reconnect', async t => {
+  const { a, b } = await pair(t), p = a.getPeer(b.config.id);
+  const report = await p.request('permission-status');
+  assert.ok(Object.values(report.permissions).every(permission => permission.peerAllowed));
+  assert.equal((await p.request('permission-request', { permissions: ['input', 'screen'] })).ready, true);
+  await a.switchTo(b.config.id, 'right', false);
+  assert.equal(b.owner.id, a.config.id);
+  assert.equal((await p.request('screen')).data, 'fixture');
+  assert.equal((await p.request('clipboardGet')).text, '');
+  assert.ok((await p.request('shutdown')).at); b.cancelShutdown();
+  assert.equal(b.state().consentRequests.length, 0);
+  assert.deepEqual(b.config.deviceGrants, {});
+  await b.revokeConsent(a.config.id); await until(() => !a.active);
+  assert.equal(b.owner, null);
+  for (const method of ['acquire', 'screen', 'clipboardGet', 'shutdown']) await assert.rejects(p.request(method), /CONSENT_DENIED/);
+  await p.request('permission-request', { permissions: ['input'] });
   const request = b.state().consentRequests[0];
   await assert.rejects(b.decideConsent({ ...request, requestId: 'stale', accepted: true }), /请求已结束/);
-  await b.decideConsent({ ...request, accepted: true, permissions: { input: true, screen: false, clipboard: false, shutdown: false } });
+  await b.decideConsent({ ...request, accepted: true, permissions: { input: true } });
   await a.switchTo(b.config.id, 'right', false);
   for (const method of ['screen', 'clipboardGet', 'shutdown']) await assert.rejects(p.request(method), /CONSENT_DENIED/);
-  assert.equal(b.state().consentRequests.length, 0);
   assert.equal((await loadConfig(b.dir)).deviceGrants[a.config.id].input, true);
   await a.returnLocal(); p.close(); await until(() => !a.peers.size && !b.peers.size);
   a.connect('127.0.0.1', b.port); await until(() => a.peers.size && b.peers.size);
   await a.switchTo(b.config.id, 'right', false); assert.equal(b.state().consentRequests.length, 0);
   await b.revokeConsent(a.config.id); assert.equal(b.owner, null);
-  await assert.rejects(a.getPeer(b.config.id).request('input', { kind: 'key', code: 'KeyA', down: true }), /CONSENT_PENDING/);
+  await assert.rejects(a.getPeer(b.config.id).request('input', { kind: 'key', code: 'KeyA', down: true }), /CONSENT_DENIED/);
 });
 
 test('offline identity persists and rejects malformed / noncanonical tokens', async t => {
@@ -67,7 +68,9 @@ test('offline identity persists and rejects malformed / noncanonical tokens', as
 test('target termination blocks retries while retaining grants for a new explicit session', async t => {
   const {a,b}=await pair(t,{input:false,screen:false,clipboard:false,shutdown:false},false);
   const p=a.getPeer(b.config.id);
-  await assert.rejects(p.request('acquire'),/CONSENT_PENDING/);
+  await assert.rejects(p.request('acquire'),/PERMISSION_REQUIRED/);
+  await b.revokeConsent(a.config.id);
+  await p.request('permission-request', {permissions:['input','screen']});
   await b.decideConsent({...b.state().consentRequests[0],accepted:true,permissions:{input:true,screen:true,clipboard:false,shutdown:false}});
   assert.deepEqual(b.config.permissions,{input:true,screen:true,clipboard:false,shutdown:false});
   await a.switchTo(b.config.id,'right',false,true); await p.request('input',{kind:'relative',dx:30,dy:-12});
@@ -80,7 +83,7 @@ test('target termination blocks retries while retaining grants for a new explici
   assert.equal((await loadConfig(b.dir)).deviceGrants[a.config.id].input,true);
   await assert.rejects(p.request('clipboardGet'),/CONSENT_DENIED/);
   await b.revokeConsent(a.config.id);
-  await assert.rejects(p.request('acquire',{newSession:true}),/CONSENT_PENDING/);
+  await assert.rejects(p.request('acquire',{newSession:true}),/CONSENT_DENIED/);
 });
 
 test('online removal disconnects the real encrypted peer, resets its group and invalidates the old credential', async t => {
@@ -100,8 +103,7 @@ test('online removal disconnects the real encrypted peer, resets its group and i
 
 test('locally initiated control supports clipboard return without granting reverse control', async t => {
   const { a, b } = await pair(t, undefined, false);
-  await assert.rejects(a.getPeer(b.config.id).request('acquire'), /CONSENT_PENDING/);
-  await b.decideConsent({ ...b.state().consentRequests[0], accepted: true, permissions: { input: true, clipboard: true } });
+  a.config.deviceGrants[b.config.id] = { input: false, clipboard: true };
   await a.switchTo(b.config.id, 'right', false);
   a.native.clip = { text: '发送', files: [] }; await a.snapshotClipboard(); await until(() => b.clipboard?.text === '发送');
   b.native.clip = { text: '返回', files: [] }; await b.snapshotClipboard(); await until(() => a.clipboard?.text === '返回');
@@ -109,7 +111,7 @@ test('locally initiated control supports clipboard return without granting rever
   await assert.rejects(b.getPeer(a.config.id).request('acquire'), /CONTROL_CONFLICT/);
   await a.returnLocal(); assert.equal(a.native.clip.text, '返回');
   assert.equal(a.canShareClipboard(b.config.id), true);
-  await assert.rejects(b.getPeer(a.config.id).request('acquire'), /CONSENT_PENDING/);
+  await assert.rejects(b.getPeer(a.config.id).request('acquire'), /CONSENT_DENIED/);
 });
 
 test('paired device metadata survives disconnect and identity change clears the layout', async t => {
@@ -169,6 +171,10 @@ test('file clipboard transfers multiple chunks with preserved name and matching 
   const { a, b, folder } = await pair(t); const file = path.join(folder, '文档.bin'), bytes = randomBytes(500000); await writeFile(file, bytes); a.native.clip = { text: '', files: [file] };
   const offer = await a.snapshotClipboard(); await until(() => b.clipboard?.id === offer.id); await b.materialize(b.clipboard);
   assert.equal(path.basename(b.native.clip.files[0]), '文档.bin'); assert.deepEqual(await readFile(b.native.clip.files[0]), bytes);
+  const range = { offerId: offer.id, fileId: offer.files[0].id, offset: 7, maxBytes: 1024 };
+  assert.deepEqual(await a.fileBytes(range), bytes.subarray(7, 1031));
+  assert.deepEqual(await a.fileBytes({ ...range, end: 17 }), bytes.subarray(7, 17));
+  for (const maxBytes of [0, -1, 192 * 1024 + 1, 1.5, '1024']) await assert.rejects(a.fileBytes({ ...range, maxBytes }), /范围/);
   await writeFile(file, 'changed'); await assert.rejects(a.fileChunk({ offerId: offer.id, fileId: offer.files[0].id, offset: 0 }), /变化/);
   await assert.rejects(a.fileChunk({ offerId: offer.id, fileId: 'unissued', offset: 0 }), /过期/);
 });
@@ -259,4 +265,19 @@ test('zero dwell switches on the first eligible edge sample; leaving cancels pro
   e.update(50,50,100,100,edges,1000);assert.equal(e.progress,null);
   t=1600;e.update(99,50,100,100,edges,1000);assert.equal(e.progress.progress,0);
   e.update(99,50,100,100,edges,1000,false);assert.equal(e.progress,null);
+});
+
+test('appearance is validated, persisted locally, and never changes a paired device', async t => {
+  const {a,b}=await pair(t);
+  assert.equal(a.state().theme,'system');
+  assert.equal(b.state().theme,'system');
+  for(const theme of ['dark','light','system']) {
+    await a.settings({theme});
+    assert.equal(a.state().theme,theme);
+    assert.equal((await loadConfig(a.dir)).theme,theme);
+    assert.equal(b.state().theme,'system');
+  }
+  await assert.rejects(a.settings({theme:'invalid'}),/主题/);
+  assert.equal(a.state().theme,'system');
+  assert.equal((await loadConfig(a.dir)).theme,'system');
 });

@@ -34,7 +34,7 @@ test('feature preflight is read-only until explicit consent and blocks before op
   assert.equal(f.calls.at(-1),'permission-prepare');assert.ok(!f.calls.includes('permission-request'));
 });
 test('USB detection explains outdated Android instead of claiming no cable',async()=>{
-  const peer={info:{platform:'android'}};
+  const peer={info:{platform:'android'},request:async()=>({})};
   const adb=new AdbManager({getPeer:()=>peer,links:{verifyUsb:async()=>false}},
     {locate:async()=>'/adb',run:async(exe,args)=>({stdout:args[0]==='devices'?'phone device model:Xiaomi\n':'versionCode=20 versionName=0.3.18'})});
   const result=await adb.match('phone');assert.equal(result.connected,false);assert.match(result.message,/版本过旧/);
@@ -54,7 +54,7 @@ test('explicit upgrade preserves existing grants until user approves, cancellati
   const g=fixture();const n2=await g.access.request('phone',['input']);g.r.requestRejected=true;assert.equal((await g.access.status(n2.requestId)).ended,true);
 });
 test('automatic ADB selection verifies paired identity and never uses first/model matches',async()=>{
-  const tried=[],peer={info:{platform:'android',name:'Phone'}};
+  const tried=[],peer={info:{platform:'android',name:'Phone'},request:async()=>({})};
   const service={getPeer:()=>peer,links:{verifyUsb:async(id,serial)=>{tried.push(serial);return serial==='right-phone';}}};
   const adb=new AdbManager(service,{locate:async()=>'/adb',run:async()=>({stdout:'other-phone device model:Same_Model\nright-phone device model:Same_Model\n'})});
   assert.equal((await adb.match('target')).serial,'right-phone');assert.deepEqual(tried,['other-phone','right-phone']);
@@ -65,4 +65,14 @@ test('group clipboard defaults do not skip first input consent or end its pendin
   const f=fixture();f.r.permissions.clipboard.peerAllowed=true;f.r.requestPending=false;
   await assert.rejects(f.access.check(f.peer,{id:'phone'}),/CONSENT_PENDING/);
   assert.ok(f.calls.includes('permission-request'));assert.equal((await f.access.status(f.access.notice.requestId)).ended,false);
+});
+
+test('default trusted group readiness proceeds without requesting or displaying consent', async () => {
+  const f=fixture(report(true)); f.s.adbGuide={check:async()=>{}};
+  assert.deepEqual(await f.access.prepare('phone',['input','screen','clipboard']),{ready:true,allowed:true});
+  await f.access.check(f.peer,{id:'phone',screen:true});
+  assert.deepEqual(f.calls,['permission-status','permission-status']); assert.equal(f.access.notice,null);
+  f.access.notice={id:'other-phone',requestId:'other-request'};
+  await f.access.check(f.peer,{id:'phone',screen:true});
+  assert.equal(f.access.notice.id,'other-phone');
 });

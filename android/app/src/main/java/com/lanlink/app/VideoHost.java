@@ -10,6 +10,7 @@ final class VideoHost implements AutoCloseable {
   final AdaptiveVideo adaptive = new AdaptiveVideo();
   final LinkService service;
   final Wire peer;
+  final boolean h264Requested;
   final String id = UUID.randomUUID().toString();
   final byte[] secret = VideoWire.random();
   final ServerSocket server;
@@ -32,6 +33,7 @@ final class VideoHost implements AutoCloseable {
       throw new IOException("VIDEO_H264_REQUIRED: ADB / Root 投屏需要 H.264，请升级控制端后重试");
     this.service = service;
     this.peer = peer;
+    this.h264Requested = h264;
     server = new ServerSocket(0);
     if(channel>0){try{rtc=service.quic.video(peer,channel);quicChannel=channel;rtc.keyCallback(()->{needKey=true;if(encoder!=null)encoder.requestKey();});}catch(Exception error){server.close();throw error;}}
     else if(offer!=null){try{RtcVideo stream=new RtcVideo(service);rtc=stream;rtcAnswer=stream.answer(offer);}catch(Exception error){if(rtc!=null)rtc.close();server.close();throw error;}}
@@ -84,15 +86,17 @@ final class VideoHost implements AutoCloseable {
                     frame = new VideoWire.Frame(new byte[0], 1, 1, false, false);
                     frame.heartbeat = true;
                   }
+                  if(frame!=null&&frame.h264&&System.currentTimeMillis()-frame.time>150){frames.clear();needKey=true;if(encoder!=null)encoder.requestKey();continue;}
                   if (frame != null) {
                     sendingAt = System.currentTimeMillis();
-                    if(rtc!=null){if(!rtc.send(frame)){needKey=true;if(encoder!=null)encoder.requestKey();}}else wire.send(frame);
+                    if(rtc!=null){if(!rtc.send(frame)){needKey=true;if(adaptive.congested(Math.max(rtc.queued(),128*1024))&&encoder!=null)encoder.setBitrate(adaptive.rate);if(encoder!=null)encoder.requestKey();}}else wire.send(frame);
                     sentAt = System.currentTimeMillis();
                     sendingAt = 0;
                   }
-                  if (encoder == null) Thread.sleep(50);
+                  if (encoder == null) Thread.sleep(frame==null||frame.heartbeat?50:Math.max(50,Math.min(2000,frame.data.length*8000L/adaptive.rate)));
                 }
-              } catch (Exception ignored) {
+              } catch (Exception error) {
+                if (!closed) android.util.Log.w("LanLinkVideoHost", "Video stream stopped", error);
               } finally {
                 close();
               }
@@ -106,7 +110,8 @@ final class VideoHost implements AutoCloseable {
                   Thread.sleep(500);
                   service.requireScreen(peer);
                   long now = System.currentTimeMillis();
-                  if (now > expires || sendingAt != 0 && now - sendingAt > 2000) close();
+                  if(sendingAt!=0&&now-sendingAt>150&&adaptive.congested(128*1024)&&encoder!=null)encoder.setBitrate(adaptive.rate);
+                  if (now > expires || sendingAt != 0 && now - sendingAt > 5000) close();
                 } catch (Exception ignored) {
                   close();
                 }
@@ -142,8 +147,7 @@ final class VideoHost implements AutoCloseable {
   }
 
   public void close() {
-    if (closed) return;
-    closed = true;
+    synchronized(this){if (closed) return;closed = true;}
     if(rtc!=null)rtc.close();
     try {
       server.close();

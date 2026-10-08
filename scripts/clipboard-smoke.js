@@ -11,7 +11,7 @@ import {Service} from '../src/service.js';
 import {loadConfig} from '../src/identity.js';
 import {findAdb,AdbManager} from '../src/adb.js';
 import {RtcVideo} from '../src/rtc-video.js';
-const exec=promisify(execFile),adb=await findAdb(),serial='emulator-5580';
+const exec=promisify(execFile),adb=await findAdb(),serial=process.env.LANLINK_SERIAL||'emulator-5580';
 if(!adb)throw Error('ADB missing');
 const run=(args,timeout=15000)=>exec(adb,['-s',serial,...args],{windowsHide:true,timeout,maxBuffer:2*1024*1024});
 assert.match((await run(['shell','getprop','ro.hardware'])).stdout,/ranchu|goldfish/);

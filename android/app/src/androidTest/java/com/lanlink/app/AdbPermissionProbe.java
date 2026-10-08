@@ -34,7 +34,12 @@ final class AdbPermissionProbe {
         JSONObject report=service.handle(peer,"permission-status",Wire.obj());
         check(!report.getJSONObject("engine").getBoolean("ready")&&!report.getJSONObject("engine").getBoolean("authorized"),"ADB missing is not ready");
         service.handle(peer,"adb-permission-request",Wire.obj());
-        check(service.permissionNotice.peek(System.currentTimeMillis()).needs.contains("adb"),"both first-time and revoked requests prompt ADB approval");
+        if(!revoked){
+          check(service.permissionNotice.peek(System.currentTimeMillis())==null,"first-time setup does not add application approval to system USB debugging");
+          check(!service.adbAuthorized(),"skipping application approval never pretends system helper is ready");
+          continue;
+        }
+        check(service.permissionNotice.peek(System.currentTimeMillis()).needs.contains("adb"),"explicitly revoked ADB requires local restoration");
         test.runOnMainSync(()->{try{update.invoke(activity);}catch(Exception e){throw new RuntimeException(e);}});test.waitForIdleSync();
         Dialog dialog=(Dialog)field(activity,"permissionDialog");check(dialog!=null&&dialog.isShowing(),"phone confirmation is visible");
         View button=find(dialog.getWindow().getDecorView(),"允许 ADB 授权");check(button!=null&&button.isShown(),"explicit allow action is visible");
@@ -43,7 +48,7 @@ final class AdbPermissionProbe {
         check(!service.adbRevoked()&&!service.adbAuthorized(),"approval enables setup but does not pretend helper is authorized");
         check(field(service,"owner")==null&&!service.consent.hasGrant(peer.id),"ADB approval does not grant device control");
       }
-      return "PASS: first-time/revoked ADB status, visible approval popup, explicit local confirmation and independent device grants";
+      return "PASS: first-time ADB setup without redundant app approval, truthful helper readiness, visible explicit-revocation restoration and independent device grants";
     }finally{
       service.peers.remove(peer.id,peer);peer.close();service.permissionNotice.removePeer(peer.id);service.dismissPermissionNotice();
       restore(identity,original,"root_mode","adb_revoked","allow_input");restore(helper,originalHelper,"adb_authorized");

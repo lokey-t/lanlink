@@ -103,10 +103,7 @@ final class AdbInputProbe {
                 public void ready(Wire p) {
                   service.ready(p);
                   try {
-                    try {
-                      service.consent.require(p.id, "ADB smoke desktop", "input");
-                    } catch (java.io.IOException expected) {
-                    }
+                    service.consent.request(p.id, "ADB smoke desktop");
                     DeviceConsent.Request request = service.consent.peek();
                     if (request == null) throw new AssertionError("fixture consent missing");
                     service.consent.decide(
@@ -143,7 +140,11 @@ final class AdbInputProbe {
                           JSONObject route = new JSONObject(info.toString()).put("port", info.getInt("usbPort"));
                           try (VideoWire video = VideoWire.connect("127.0.0.1", route)) {
                             VideoWire.Frame frame = video.next();
-                            if (frame.width != 20 || frame.height != 10) throw new AssertionError("Reverse video dimensions");
+                            if (m.getJSONObject("args").optBoolean("realVideo")) {
+                              android.graphics.Bitmap picture = android.graphics.BitmapFactory.decodeByteArray(frame.data, 0, frame.data.length);
+                              if (picture == null || picture.getWidth() < 100 || picture.getHeight() < 100) throw new AssertionError("Real Mac screen could not be decoded on Android");
+                              picture.recycle();
+                            } else if (frame.width != 20 || frame.height != 10) throw new AssertionError("Reverse video dimensions");
                           }
                         } finally { p.request("videoStop", Wire.obj("id", info.getString("id"))); }
                         p.send(Wire.obj("type", "response", "id", m.optString("id"), "result", Wire.obj("ok", true)));

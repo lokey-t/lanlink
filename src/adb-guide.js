@@ -11,13 +11,14 @@ export class AdbGuide {
   }
   async check(peer, intent) {
     if (peer.info?.platform !== 'android') return;
-    if (this.notice) throw Error('ADB_SETUP_REQUIRED: 请先完成电脑上的手机连接引导');
+    if (this.notice?.id === intent.id) throw Error('ADB_SETUP_REQUIRED: 请先完成电脑上的手机连接引导');
     const generation = this.generation;
     const report = await peer.request('permission-status', {}, 4000);
     if (generation !== this.generation) throw Error('CONTROL_ENDED: 控制请求已取消');
     if (this.service.getPeer(intent.id) !== peer) throw Error('CONTROL_ENDED: 手机连接已改变');
     const engine = report?.engine;
     if (!engine || engine.ready && (engine.root || !engine.revoked && engine.authorized!==false)) return;
+    if (this.notice) throw Error('ADB_SETUP_REQUIRED: 请先完成或关闭另一台手机的连接引导');
     if(engine.root){
       if(engine.ready)return;
       await peer.request('permission-prepare',{permissions:['input',...(intent.screen?['screen']:[])]},4000);
@@ -30,7 +31,7 @@ export class AdbGuide {
     throw Error('ADB_SETUP_REQUIRED: 需要先为手机启用 ADB，请按连接引导操作');
   }
   async promptRevoked(peer,notice) {
-    if(!(notice.revoked || notice.unauthorized) || notice.promptSent)return;
+    if(!notice.revoked || notice.promptSent)return;
     notice.promptSent=true;
     try {await peer.request('adb-permission-request',{},4000);}catch{notice.promptSent=false;}
   }
@@ -44,7 +45,8 @@ export class AdbGuide {
     notice.revoked=report?.engine?.revoked===true && !report?.engine?.root;
     notice.unauthorized=report?.engine?.authorized===false && !report?.engine?.root;
     await this.promptRevoked(peer,notice);
-    return { ready: report?.engine?.ready === true && !notice.revoked && !notice.unauthorized, revoked:notice.revoked, unauthorized:notice.unauthorized, message: notice.revoked?'请在手机上允许 ADB 授权，允许后可继续连接':report?.engine?.root ? 'Root 助手正在准备，请在手机上检查 Root 授权。' : notice.unauthorized?'手机尚未完成 ADB 授权。请在手机允许授权，并连接数据线后点击连接。':report?.engine?.message || '等待手机授权…' };
+    const ready = report?.engine?.ready === true && !notice.revoked && !notice.unauthorized;
+    return { ready, revoked:notice.revoked, unauthorized:notice.unauthorized, message: ready ? '手机助手已就绪，本组设备可直接使用，无需重新连接数据线。' : notice.revoked?'请在手机上允许 ADB 授权，允许后可继续连接':report?.engine?.root ? 'Root 助手正在准备，请在手机上检查 Root 授权。' : notice.unauthorized?'手机尚未完成 ADB 授权。请连接数据线，在手机允许系统 USB 调试后点击连接。':report?.engine?.message || '已保存授权，等待已信任的调试连接恢复手机助手。' };
   }
   async complete(requestId) {
     const notice = this.notice;

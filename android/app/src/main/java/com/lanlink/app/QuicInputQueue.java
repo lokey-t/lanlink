@@ -11,7 +11,7 @@ final class QuicInputQueue {
   final ArrayDeque<Job> jobs=new ArrayDeque<>();final Executor executor;boolean running;
   QuicInputQueue(Executor executor){this.executor=executor;}
   synchronized void add(JSONObject motion,Runnable work){
-    Job tail=jobs.peekLast();if(motion!=null&&tail!=null&&tail.motion!=null&&motion.optString("kind").equals(tail.motion.optString("kind"))&&motion.optString("epoch").equals(tail.motion.optString("epoch"))){tail.motion=motion;tail.work=work;return;}
+    Job tail=jobs.peekLast();if(motion!=null&&tail!=null&&tail.motion!=null&&motion.optString("kind").equals(tail.motion.optString("kind"))&&motion.optString("epoch").equals(tail.motion.optString("epoch"))){if(motion.optLong("seq")>tail.motion.optLong("seq")){tail.motion=motion;tail.work=work;}return;}
     if(jobs.size()>=64)throw new RejectedExecutionException("QUIC 输入队列已满");jobs.addLast(new Job(motion,work));if(!running){running=true;try{executor.execute(this::next);}catch(RuntimeException error){running=false;jobs.clear();throw error;}}
   }
   void next(){Job job;synchronized(this){job=jobs.pollFirst();}try{if(job!=null)job.work.run();}finally{synchronized(this){if(jobs.isEmpty())running=false;else try{executor.execute(this::next);}catch(RuntimeException error){running=false;jobs.clear();}}}}

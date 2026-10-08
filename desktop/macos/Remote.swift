@@ -10,6 +10,7 @@ struct RemoteView: View {
     var body:some View{HStack(spacing:0){
         VStack(spacing:4){
             RemoteSurface(model:model).frame(maxWidth:.infinity,maxHeight:.infinity).background(.black).clipped()
+                .overlay { if model.screen == nil { VStack(spacing: 14) { if !model.controlConflict { ProgressView() }; Text("正在连接设备画面").font(.headline); Text(model.notice).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true) }.padding(24).frame(maxWidth: 300) } }
             ZStack(alignment:.trailing){
                 if model.remotePhone{HStack(spacing:4){ForEach(["back","home","recents"],id:\.self){action in RemoteNavigationTool(symbol:["back":"chevron.left","home":"circle","recents":"square"][action]!,title:["back":"返回","home":"主页","recents":"最近任务"][action]!){model.sendInput(["kind":"navigation","action":action])}.disabled(!model.controlling)}}.frame(maxWidth:.infinity)}
                 Button(action:model.toggleRemoteSidebar){Image(systemName:model.remoteSidebarCollapsed ? "chevron.right":"chevron.left").frame(width:28,height:40)}.buttonStyle(.plain).foregroundStyle(.gray).help(model.remoteSidebarCollapsed ? "展开侧栏":"收起侧栏")
@@ -67,7 +68,7 @@ struct RemoteSurface: NSViewRepresentable {
     override func otherMouseDragged(with event: NSEvent) { mouseMoved(with: event) }
     func button(_ event: NSEvent, _ button: Int, _ down: Bool) {
         guard model?.controlling == true, let move = coordinates(event) else { return }
-        window?.makeFirstResponder(self); model?.sendInput(move); held = down
+        latestMove = nil; window?.makeFirstResponder(self); model?.sendInput(move); held = down
         model?.sendInput(["kind": "button", "button": button, "down": down])
     }
     override func mouseDown(with event: NSEvent) { button(event, 0, true) }

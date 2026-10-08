@@ -15,7 +15,7 @@ import UniformTypeIdentifiers
     }
     func chooseShareDevice(_ urls:[URL]) {
         guard !urls.isEmpty else { return }
-        (NSApp.delegate as? AppDelegate)?.showMain()
+        appDelegate?.showMain()
         Task {
             await refresh()
             let online=devices.filter { $0.online && !$0.local }
@@ -60,7 +60,7 @@ struct StagingCard:View {
                 if state != "receiving" { Button("移除") { model.stageAction("stage-remove",id) } }
             }
             if let error=row["error"] as? String,!error.isEmpty { Text(error).font(.caption).foregroundStyle(.red) }
-        }.padding(20).frame(maxWidth:.infinity,alignment:.leading).background(.white,in:RoundedRectangle(cornerRadius:20)).overlay(RoundedRectangle(cornerRadius:20).stroke(Palette.line))
+        }.padding(20).frame(maxWidth:.infinity,alignment:.leading).background(Palette.card,in:RoundedRectangle(cornerRadius:20)).overlay(RoundedRectangle(cornerRadius:20).stroke(Palette.line))
     }
 }
 

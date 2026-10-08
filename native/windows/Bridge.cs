@@ -158,7 +158,14 @@ namespace LanLink {
    if(method=="clipboardSet") {if(a.ContainsKey("files")) {var list=new System.Collections.Specialized.StringCollection();foreach(object f in (System.Collections.IEnumerable)a["files"])list.Add(Convert.ToString(f));Clipboard.SetFileDropList(list);} else {string text=Str(a,"text");if(text.Length==0)Clipboard.Clear();else Clipboard.SetText(text);} ClipboardSequence=GetClipboardSequenceNumber();return new {};}
    if(method=="screen") {
     using(Bitmap full=new Bitmap(r.Width,r.Height)) {using(Graphics g=Graphics.FromImage(full))g.CopyFromScreen(r.Left,r.Top,0,0,r.Size);
-     int width=Math.Min(1440,r.Width),height=(int)((double)r.Height*width/r.Width);using(Bitmap small=new Bitmap(full,width,height))using(MemoryStream output=new MemoryStream()) {small.Save(output,ImageFormat.Jpeg);return new {mime="image/jpeg",data=Convert.ToBase64String(output.ToArray()),width=width,height=height};}}
+     double requestedWidth=Num(a,"maxWidth",1440),quality=Num(a,"quality",.65);
+     if(double.IsNaN(requestedWidth)||double.IsInfinity(requestedWidth))requestedWidth=1440;
+     if(double.IsNaN(quality)||double.IsInfinity(quality))quality=.65;
+     int width=Math.Min((int)Math.Max(320,Math.Min(1920,requestedWidth)),r.Width),height=Math.Max(1,(int)((double)r.Height*width/r.Width));
+     using(Bitmap small=new Bitmap(full,width,height))using(MemoryStream output=new MemoryStream())using(EncoderParameters parameters=new EncoderParameters(1)) {
+      parameters.Param[0]=new EncoderParameter(System.Drawing.Imaging.Encoder.Quality,(long)(Math.Max(.2,Math.Min(.85,quality))*100));
+      ImageCodecInfo jpeg=Array.Find(ImageCodecInfo.GetImageEncoders(),codec=>codec.FormatID==ImageFormat.Jpeg.Guid);
+      small.Save(output,jpeg,parameters);return new {mime="image/jpeg",data=Convert.ToBase64String(output.ToArray()),width=width,height=height};}}
    }
    if(method=="shutdown") { Process.Start(new ProcessStartInfo("shutdown.exe","/s /t 0") {UseShellExecute=false,CreateNoWindow=true});return new {}; }
    throw new Exception("不支持的原生操作");

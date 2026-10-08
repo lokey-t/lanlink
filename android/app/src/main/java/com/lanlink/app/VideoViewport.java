@@ -4,10 +4,12 @@ import android.content.Context;
 import android.graphics.Matrix;
 import android.view.MotionEvent;
 import android.view.TextureView;
+import android.view.ViewConfiguration;
+import android.view.ViewParent;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 
-/** Local-only viewport. Its gestures never reach the remote input channel. */
+/** Shared video surfaces with optional, explicitly enabled fullscreen remote gestures. */
 @android.annotation.SuppressLint("ViewConstructor") // Constructed with its shared render surfaces.
 final class VideoViewport extends FrameLayout {
   final TextureView texture;
@@ -20,6 +22,33 @@ final class VideoViewport extends FrameLayout {
   private boolean moved, multi;
   boolean followCursor = true;
   private boolean gestureActive;
+  private final int touchSlop;
+  private boolean remoteGestures, pinchEnabled;
+  private boolean keyboardGesture;
+  private TapListener tapListener;
+  private Runnable keyboardListener;
+
+  interface TapListener {
+    /** Source-image coordinates, normalized to the inclusive range [0, 1]. */
+    void tap(float x, float y);
+  }
+
+  /** Switching modes resets the transform; updating fullscreen options preserves it. */
+  void setRemoteGestures(
+      boolean enabled, boolean pinchEnabled, TapListener tap, Runnable keyboard) {
+    boolean changed = remoteGestures != enabled;
+    endGesture();
+    lastTap = 0;
+    remoteGestures = enabled;
+    this.pinchEnabled = enabled && pinchEnabled;
+    tapListener = enabled ? tap : null;
+    keyboardListener = enabled ? keyboard : null;
+    if (changed) reset();
+    setContentDescription(
+        enabled
+            ? "全屏远程画面，单指轻点点击，双指缩放移动，三指打开键盘"
+            : interactive ? "远程画面，可拖动、双指缩放，双击复位" : "远程手机画面");
+  }
 
   void cursor(float x, float y) {
     if (!followCursor
@@ -47,6 +76,7 @@ final class VideoViewport extends FrameLayout {
     this.texture = texture;
     this.image = image;
     this.interactive = interactive;
+    touchSlop = ViewConfiguration.get(context).getScaledTouchSlop();
     image.setScaleType(ImageView.ScaleType.MATRIX);
     addView(texture, new LayoutParams(-1, -1));
     addView(image, new LayoutParams(-1, -1));
@@ -87,8 +117,9 @@ final class VideoViewport extends FrameLayout {
     if (sourceWidth < 1 || sourceHeight < 1 || w < 1 || h < 1) return;
     float scale = baseScale() * zoom;
     float dw = sourceWidth * scale, dh = sourceHeight * scale;
-    // Keep a zoomed image covering the viewport; fitted letterbox space can be repositioned.
-    float limitX = Math.abs(dw - w) / 2, limitY = Math.abs(dh - h) / 2;
+    // Fullscreen centers letterboxed axes; the ordinary local viewport retains its free pan.
+    float limitX = (remoteGestures ? Math.max(0, dw - w) : Math.abs(dw - w)) / 2;
+    float limitY = (remoteGestures ? Math.max(0, dh - h) : Math.abs(dh - h)) / 2;
     panX = Math.max(-limitX, Math.min(limitX, panX));
     panY = Math.max(-limitY, Math.min(limitY, panY));
     float left = (w - dw) / 2 + panX, top = (h - dh) / 2 + panY;
@@ -108,19 +139,21 @@ final class VideoViewport extends FrameLayout {
 
   @Override
   public boolean onInterceptTouchEvent(MotionEvent e) {
-    return interactive;
+    return interactive || remoteGestures;
   }
 
   @Override
   public boolean onTouchEvent(MotionEvent e) {
+    if (remoteGestures) return onRemoteTouchEvent(e);
     if (!interactive) return super.onTouchEvent(e);
     int action = e.getActionMasked(), count = e.getPointerCount();
+    if (!gestureActive && action != MotionEvent.ACTION_DOWN) return true;
     float x = count > 1 ? (e.getX(0) + e.getX(1)) / 2 : e.getX(),
         y = count > 1 ? (e.getY(0) + e.getY(1)) / 2 : e.getY();
     float span = count > 1 ? (float) Math.hypot(e.getX(1) - e.getX(0), e.getY(1) - e.getY(0)) : 0;
     if (action == MotionEvent.ACTION_DOWN) {
       gestureActive = true;
-      getParent().requestDisallowInterceptTouchEvent(true);
+      disallowParentIntercept(true);
       lastX = downX = x;
       lastY = downY = y;
       lastSpan = 0;
@@ -157,9 +190,132 @@ final class VideoViewport extends FrameLayout {
         } else lastTap = e.getEventTime();
         performClick();
       }
-      getParent().requestDisallowInterceptTouchEvent(false);
+      disallowParentIntercept(false);
     }
     return true;
+  }
+
+  private boolean onRemoteTouchEvent(MotionEvent e) {
+    int action = e.getActionMasked(), count = e.getPointerCount();
+    if (action == MotionEvent.ACTION_DOWN) {
+      gestureActive = true;
+      disallowParentIntercept(true);
+      downX = lastX = e.getX();
+      downY = lastY = e.getY();
+      downAt = e.getEventTime();
+      lastSpan = 0;
+      moved = multi = keyboardGesture = false;
+      return true;
+    }
+    // Configuration changes and cancelled gestures cannot turn leftover events into a click.
+    if (!gestureActive) return true;
+    if (action == MotionEvent.ACTION_CANCEL) {
+      endGesture();
+      return true;
+    }
+    if (action == MotionEvent.ACTION_UP) {
+      boolean tapped =
+          !multi
+              && !moved
+              && !keyboardGesture
+              && Math.hypot(e.getX() - downX, e.getY() - downY) <= touchSlop
+              && e.getEventTime() - downAt < ViewConfiguration.getLongPressTimeout();
+      // End before callbacks: showing the keyboard or changing the view may reenter this view.
+      endGesture();
+      if (tapped) dispatchRemoteTap(e.getX(), e.getY());
+      return true;
+    }
+    if (count >= 3) {
+      multi = true;
+      lastSpan = 0;
+      if (!keyboardGesture) {
+        keyboardGesture = true;
+        if (keyboardListener != null) keyboardListener.run();
+      }
+    }
+    // After a three-finger gesture, consume every remaining finger until the final ACTION_UP.
+    if (keyboardGesture) return true;
+    if (action == MotionEvent.ACTION_POINTER_DOWN) {
+      multi = true;
+      if (count == 2) rebasePinch(e);
+      return true;
+    }
+    if (action == MotionEvent.ACTION_POINTER_UP) {
+      multi = true;
+      // The event still contains the departing pointer. A subsequent pair starts a new pinch.
+      lastSpan = 0;
+      return true;
+    }
+    if (action == MotionEvent.ACTION_MOVE) {
+      if (count == 1) {
+        if (Math.hypot(e.getX() - downX, e.getY() - downY) > touchSlop) moved = true;
+        return true;
+      }
+      multi = true;
+      if (count == 2 && pinchEnabled) {
+        float x = (e.getX(0) + e.getX(1)) / 2;
+        float y = (e.getY(0) + e.getY(1)) / 2;
+        float span = (float) Math.hypot(e.getX(1) - e.getX(0), e.getY(1) - e.getY(0));
+        if (lastSpan > 1) {
+          float before = zoom;
+          zoom = Math.max(1, Math.min(5, zoom * span / lastSpan));
+          float ratio = zoom / before;
+          // Preserve the source point beneath the moving midpoint, including while at a limit.
+          panX = (panX - (lastX - getWidth() / 2f)) * ratio + x - getWidth() / 2f;
+          panY = (panY - (lastY - getHeight() / 2f)) * ratio + y - getHeight() / 2f;
+          apply();
+        }
+        lastX = x;
+        lastY = y;
+        lastSpan = span;
+      }
+    }
+    return true;
+  }
+
+  private void rebasePinch(MotionEvent e) {
+    lastX = (e.getX(0) + e.getX(1)) / 2;
+    lastY = (e.getY(0) + e.getY(1)) / 2;
+    lastSpan = (float) Math.hypot(e.getX(1) - e.getX(0), e.getY(1) - e.getY(0));
+  }
+
+  private void dispatchRemoteTap(float x, float y) {
+    if (tapListener == null
+        || sourceWidth < 1
+        || sourceHeight < 1
+        || getWidth() < 1
+        || getHeight() < 1
+        || x < 0
+        || x > getWidth()
+        || y < 0
+        || y > getHeight()) return;
+    float scale = baseScale() * zoom;
+    float dw = sourceWidth * scale, dh = sourceHeight * scale;
+    float left = (getWidth() - dw) / 2 + panX, top = (getHeight() - dh) / 2 + panY;
+    // Letterbox touches never produce remote input.
+    if (x < left || x > left + dw || y < top || y > top + dh) return;
+    tapListener.tap(
+        Math.max(0, Math.min(1, (x - left) / dw)),
+        Math.max(0, Math.min(1, (y - top) / dh)));
+    performClick();
+  }
+
+  private void disallowParentIntercept(boolean disallow) {
+    ViewParent parent = getParent();
+    if (parent != null) parent.requestDisallowInterceptTouchEvent(disallow);
+  }
+
+  private void endGesture() {
+    gestureActive = false;
+    keyboardGesture = false;
+    lastSpan = 0;
+    disallowParentIntercept(false);
+  }
+
+  @Override
+  protected void onDetachedFromWindow() {
+    endGesture();
+    super.onDetachedFromWindow();
   }
 
   @Override

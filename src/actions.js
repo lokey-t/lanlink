@@ -82,7 +82,7 @@ export function createActions(service) {
     },
     connect: a => service.connect(a.host, Number(a.port || 45831)),
     control: a => service.switchTo(a.id, a.edge || 'right', !!a.capture, a.newSession === true, a.fallbackAccepted === true, a.screen === true),
-    release: () => service.returnLocal(),
+    release: a => !a?.id || service.active === a.id || service.controlIntent?.id === a.id ? service.returnLocal() : {},
     stop: () => { setTimeout(() => service.emit('stop'), 50); },
     input: a => { if (service.active !== a.id) throw new Error('请先开始控制'); return service.getPeer(a.id).request('input', a.input); },
     text: a => { if (service.active !== a.id) throw new Error('请先开始控制'); return service.getPeer(a.id).request('text', { text: a.text }); },

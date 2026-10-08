@@ -4,7 +4,7 @@ import java.io.IOException;
 import java.util.*;
 import org.json.*;
 
-/** Authenticated device consent, independent from Android system permissions. */
+/** Permissions for authenticated group members, independent from Android system permissions. */
 final class DeviceConsent {
   static final String[] KEYS = {"input", "screen", "clipboard"};
 
@@ -33,8 +33,9 @@ final class DeviceConsent {
   }
 
   synchronized boolean allowed(String id, String key) {
+    if (!Arrays.asList(KEYS).contains(key)) return false;
     JSONObject g = grants.optJSONObject(id);
-    return g != null && g.optBoolean(key);
+    return !grants.has(id) || g != null && g.optBoolean(key);
   }
 
   synchronized boolean hasGrant(String id) {
@@ -68,16 +69,7 @@ final class DeviceConsent {
 
   synchronized void require(String id, String name, String key) throws IOException {
     peek();
-    if (grants.has(id)) {
-      if (!allowed(id, key)) throw new IOException("CONSENT_DENIED: 此设备未获准使用该功能");
-      return;
-    }
-    if (denied.containsKey(id)) throw new IOException("CONSENT_DENIED: 手机暂未同意，请稍后重新发起");
-    if (!pending.containsKey(id)) {
-      if (pending.size() >= 8) throw new IOException("待确认请求过多");
-      pending.put(id, new Request(id, name, System.currentTimeMillis()));
-    }
-    throw new IOException("CONSENT_PENDING: 等待手机同意首次控制");
+    if (!allowed(id, key)) throw new IOException("CONSENT_DENIED: 此设备未获准使用该功能");
   }
 
   synchronized String decide(String id, String requestId, boolean accept, JSONObject permissions)
@@ -108,7 +100,7 @@ final class DeviceConsent {
       JSONObject grant = grants.optJSONObject(id);
       if (grant == null) {
         grant = new JSONObject();
-        for (String entry : KEYS) grant.put(entry, false);
+        for (String entry : KEYS) grant.put(entry, true);
       }
       grant.put(key, enabled);
       grants.put(id, grant);
@@ -121,9 +113,14 @@ final class DeviceConsent {
   }
 
   synchronized String revoke(String id) {
-    grants.remove(id);
+    // Removing an override would restore group defaults. Persist the explicit denial.
+    JSONObject grant = new JSONObject();
+    try {
+      for (String key : KEYS) grant.put(key, false);
+      grants.put(id, grant);
+    } catch (JSONException error) { throw new IllegalStateException(error); }
     pending.remove(id);
-    denied.put(id, System.currentTimeMillis() + 30000);
+    denied.remove(id);
     return grants.toString();
   }
 

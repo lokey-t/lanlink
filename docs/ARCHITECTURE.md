@@ -20,6 +20,12 @@ Android：前台 Service 保持网络连接，Activity 提供界面，Accessibil
 与 InputMethodService 提供基础控制。MediaProjection 处理用户授权录屏。
 可选的 shell UID / root 助手仅负责输入注入，有独立环回通道和临时凭据。
 
+## 组内权限默认值（0.3.45）
+
+加密握手通过且未移出组的当前连接，缺省允许 input / screen / clipboard / shutdown（Android 不支持 shutdown）。本机保存的逐设备限制优先，未设置的旧版 Android 应用开关缺省开启，已显式设置的 false 不迁移。请求不会写入持久允许记录。撤销写入全 false，不能删除记录后重新落回默认允许。系统辅助功能、录屏、ADB / Root 状态仍独立检查。
+
+一次一个输入控制来源的租约约束保持不变；不同被控设备可以同时接受不同电脑控制。所有输入排队按当前认证 peer 隔离，键/按钮是移动合并边界。原生窗口关闭支持按目标 id 释放，旧目标不能停止不同目标的新会话。
+
 ## 动态配对 v2（0.3.3）
 
 - 配对展示由本机界面调用 pairing，返回八位数字 code、随机 invitation id、expiresAt、remainingMs、durationMs。默认不返回二维码或组密钥；reveal=true 才生成二维码。
@@ -115,8 +121,8 @@ offer/file id 可读，分享有效期一小时，最多保留 20 份。Windows/
 本机主动控制另一设备期间，若尚无该设备的授权记录，可临时双向接力剪贴板。
 这项例外随控制结束失效，不授予反向键鼠控制；已明确禁止剪贴板的记录始终优先。
 
-系统权限独立于设备授权。Windows / Mac 的能力由原生模块报告；Android 检查输入助手、
-输入助手和当前 MediaProjection 会话。客户端遇到 `CONSENT_PENDING` / `PERMISSION_REQUIRED`
+系统权限独立于设备授权。Windows / Mac 的能力由原生模块报告；Android 检查输入助手
+和当前 MediaProjection 会话。客户端遇到 `CONSENT_PENDING` / `PERMISSION_REQUIRED`
 时以约 2 秒间隔重试，遇到明确拒绝时停止自动请求。UI 去除这些内部错误前缀。
 
 Android 导航使用 `navigation` 输入类型，action 仅允许 back / home / recents，仍要求
@@ -126,7 +132,7 @@ Android 导航使用 `navigation` 输入类型，action 仅允许 back / home / 
 
 每个端点一次只处于控制方或被控方。桌面在发出 acquire、videoOpen 和截图请求前同步保留控制方向，Android 远程窗口与待处理 acquire 同样保留方向。入站请求在操作前重新检查方向；取消与换组后，迟到的授权／串流会被释放，不恢复控制。截图兼容路径使用短租约并提供 screenStop 释放；被控提示覆盖输入、串流和截图。该约束也禁止一台设备在被查看时转而控制第三台设备。
 
-ADB 页面使用本机 Platform-Tools，必须选择序列号。adbBootstrap / adbStatus 走现有加密控制连接，并受手机的设备输入授权、暂停状态和应用开关检查。桌面只接受严格格式的参数，核对所选 ADB 设备的 LanLink 安装路径，固定启动 ShellAgent，再通过目标手机确认助手心跳。安装路径检查不是设备公钥身份证明；明确选择正确的调试设备仍是用户操作步骤。
+0.3.45 起，ADB 页面先通过目标的加密连接查询实时 adbStatus。手机助手已就绪时，另一台同组电脑无需本机 Platform-Tools、USB 或序列号即可使用；该结果不代表新电脑已获得 Android 系统的 USB 调试信任，也不保存未经验证的调试绑定。确需启动助手时才使用本机 Platform-Tools，通过加密辅助连接核对所选 USB 序列号对应的目标身份，固定启动 ShellAgent，再确认助手心跳。adbBootstrap / adbStatus 仍受手机的设备输入限制、暂停状态和应用开关检查。首次不增加应用确认；手机用户明确撤销助手权限后，恢复需要本机确认。
 
 0.3.9 安卓仅使用 Root／ADB 输入助手，移除无障碍触控与 IME 服务。ShellChannel 在应用私有偏好中保存凭据和环回端口，双方使用随机挑战及角色分离 HMAC 验证，ShellAgent 断线后重连。桌面持久保存手动批准的设备公钥与调试序列号，每 30 秒检查授权和助手状态；仍为本组成员且允许输入时恢复已信任的调试设备，不选择其他手机。手机重启仍需可用的调试连接。MediaProjection 需单独确认。
 Mac 登录自启动使用 [SMAppService.mainApp](https://developer.apple.com/documentation/servicemanagement/smappservice/mainapp?language=objc)，

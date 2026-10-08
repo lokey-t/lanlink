@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="150" height="300" viewBox="0 0 150 300" fill="none">
+  <defs>
+    <linearGradient id="p-shell" x1="10" y1="14" x2="141" y2="285" gradientUnits="userSpaceOnUse"><stop stop-color="#EBEFF2"/><stop offset=".14" stop-color="#8997A2"/><stop offset=".37" stop-color="#DFE6EB"/><stop offset=".61" stop-color="#768591"/><stop offset=".82" stop-color="#BAC6D0"/><stop offset="1" stop-color="#E6ECF0"/></linearGradient>
+    <linearGradient id="p-bezel" x1="18" y1="13" x2="128" y2="281" gradientUnits="userSpaceOnUse"><stop stop-color="#36434D"/><stop offset=".42" stop-color="#101B23"/><stop offset="1" stop-color="#283740"/></linearGradient>
+    <linearGradient id="p-screen" x1="125" y1="28" x2="22" y2="284" gradientUnits="userSpaceOnUse"><stop stop-color="#DFEBF3"/><stop offset=".37" stop-color="#C4D9E8"/><stop offset=".75" stop-color="#ECF5FB"/><stop offset="1" stop-color="#A1BDD1"/></linearGradient>
+    <linearGradient id="p-wave-one" x1="24" y1="58" x2="108" y2="270" gradientUnits="userSpaceOnUse"><stop stop-color="#91B0C7"/><stop offset=".28" stop-color="#F2F8FC"/><stop offset=".51" stop-color="#D0E2EE"/><stop offset=".75" stop-color="#9EBFD6"/><stop offset="1" stop-color="#F4F9FD"/></linearGradient>
+    <linearGradient id="p-wave-two" x1="113" y1="119" x2="25" y2="281" gradientUnits="userSpaceOnUse"><stop stop-color="#AECBDC"/><stop offset=".33" stop-color="#F6FBFE"/><stop offset=".52" stop-color="#E6F1F8"/><stop offset="1" stop-color="#82A8C4"/></linearGradient>
+    <filter id="p-shadow" x="15" y="282" width="120" height="18" filterUnits="userSpaceOnUse"><feGaussianBlur stdDeviation="3"/></filter>
+    <filter id="p-window-shadow" x="20" y="79" width="114" height="144" filterUnits="userSpaceOnUse"><feDropShadow dx="0" dy="5" stdDeviation="5" flood-color="#47637A" flood-opacity=".16"/></filter>
+    <clipPath id="p-clip"><rect x="18" y="12" width="114" height="272" rx="19"/></clipPath>
+  </defs>
+  <ellipse cx="75" cy="291" rx="52" ry="2" fill="#526572" opacity=".22" filter="url(#p-shadow)"/>
+  <rect x="8" y="53" width="3" height="17" rx="1.5" fill="#9FAEB8"/>
+  <rect x="8" y="82" width="3" height="29" rx="1.5" fill="#A8B6C0"/>
+  <rect x="139" y="76" width="3" height="37" rx="1.5" fill="#8899A6"/>
+  <rect x="10" y="4" width="130" height="288" rx="26" fill="url(#p-shell)"/>
+  <rect x="12" y="6" width="126" height="284" rx="24" fill="url(#p-bezel)"/>
+  <g clip-path="url(#p-clip)">
+    <rect x="18" y="12" width="114" height="272" fill="url(#p-screen)"/>
+    <path d="M20 48C1 111 39 132 105 159C152 178 151 239 112 289H27C88 239 72 216 45 190C-10 137-28 85 20 48Z" fill="url(#p-wave-one)"/>
+    <path d="M140 89C182 151 96 156 65 197C47 221 74 253 131 273L123 303C45 275 13 230 39 185C69 132 155 151 140 89Z" fill="url(#p-wave-two)"/>
+    <path d="M19 58C-1 115 41 136 105 164C157 187 139 247 106 282" stroke="white" stroke-opacity=".65" stroke-width=".8"/>
+    <path d="M145 100C166 151 101 151 66 191C38 223 72 261 124 279" stroke="white" stroke-opacity=".7" stroke-width=".8"/>
+    <text x="30" y="31" fill="#375367" font-family="Arial, Helvetica, sans-serif" font-size="6" font-weight="600">9:41</text>
+    <g stroke="#456173" stroke-width=".9" stroke-linecap="round"><path d="M105 27V30M108 25.5V30M111 24V30"/><rect x="115" y="25" width="8" height="4.5" rx="1"/><path d="M125 26.5V28"/></g>
+    <text x="75" y="65" text-anchor="middle" fill="#354F63" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="600" letter-spacing="-.4">LanLink</text>
+    <g filter="url(#p-window-shadow)">
+      <rect x="29" y="92" width="92" height="117" rx="10" fill="white" fill-opacity=".94" stroke="white" stroke-opacity=".8" stroke-width=".7"/>
+      <circle cx="75" cy="119" r="13" fill="#E8F2FA"/>
+      <g stroke="#78A5C7" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><rect x="68" y="113" width="14" height="9" rx="1.3"/><path d="M72 125H78M75 122V125"/></g>
+      <text x="75" y="146" text-anchor="middle" fill="#425E72" font-family="Arial, Helvetica, sans-serif" font-size="7" font-weight="600">Windows</text>
+      <circle cx="64" cy="156" r="1.5" fill="#87B79A"/><rect x="69" y="155" width="19" height="2" rx="1" fill="#9BADB8"/>
+      <path d="M39 169H111" stroke="#E4EDF4" stroke-width=".7"/>
+      <rect x="39" y="180" width="12" height="14" rx="2" fill="#E8F1F8"/>
+      <path d="M43 184H47M43 187H47M43 190H45" stroke="#91B0C8" stroke-width=".8" stroke-linecap="round"/>
+      <rect x="57" y="181" width="37" height="2.5" rx="1.25" fill="#69889F"/><rect x="57" y="188" width="52" height="2" rx="1" fill="#E0EBF4"/><rect x="57" y="188" width="41" height="2" rx="1" fill="#82ACCD"/>
+      <rect x="57" y="195" width="21" height="1.5" rx=".75" fill="#AFBFCA"/>
+    </g>
+    <rect x="41" y="246" width="68" height="19" rx="9.5" fill="white" fill-opacity=".5" stroke="white" stroke-opacity=".6" stroke-width=".7"/>
+    <g stroke="#6F93AD" stroke-width="1.1" stroke-linecap="round"><rect x="54" y="252" width="8" height="5" rx="1"/><path d="M56 259H60M58 257V259M75 252V259M72 255.5H78M90 252H95M90 255.5H95M90 259H95"/></g>
+    <rect x="55" y="277" width="40" height="2.5" rx="1.25" fill="#35556B" fill-opacity=".5"/>
+  </g>
+  <rect x="57" y="17" width="36" height="9" rx="4.5" fill="#172630"/>
+  <circle cx="86" cy="21.5" r="2" fill="#263D4D"/><circle cx="86.3" cy="21.2" r=".8" fill="#3C5C73"/>
+  <path d="M14 48V29C14 16.8497 23.8497 7 36 7H114C126.15 7 136 16.8497 136 29V264" stroke="white" stroke-opacity=".38" stroke-width=".7"/>
+  <path d="M11 46H13M137 46H139M11 251H13M137 251H139" stroke="#607581" stroke-width="1.5"/>
+</svg>

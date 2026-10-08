@@ -1,9 +1,21 @@
 import net from 'node:net';
 import {randomBytes,createHash,createCipheriv,createDecipheriv,timingSafeEqual} from 'node:crypto';
-import {once} from 'node:events';
 import {BinaryReader,serverHandshake,hmac} from './video-wire.js';
 
 export const BULK_CHUNK=192*1024;
+export function bulkBudget(service){
+  const media=[...(service.videoHost?.sessions.values()||[]),...(service.videoViewer?.sessions.values()||[])];
+  return media.length?Math.max(8192,Math.min(128*1024,Math.min(...media.map(v=>v.adaptive?.rate||v.bitrate||4000000))/8*.15)):service.active||service.owner?1024*1024:32*1024*1024;
+}
+// Small slices keep control latency low and traffic moving within socket idle limits.
+export function bulkSlice(rate,maxBytes=BULK_CHUNK){return Math.max(1,Math.min(BULK_CHUNK,maxBytes,Math.max(128,Math.floor(rate/10))));}
+const sleep=ms=>new Promise(resolve=>setTimeout(resolve,Math.max(1,ms)));
+const receivers=new WeakMap();
+function receiverLease(service,reuse){let active=receivers.get(service);if(!active){active=new Set();receivers.set(service,active);}const ticket=reuse||Symbol('file');active.add(ticket);return {ticket,close(){if(!reuse)active.delete(ticket);}};}
+function receiveRate(service){return Math.max(128,Math.floor(bulkBudget(service)/Math.max(1,receivers.get(service)?.size||0)));}
+function requestedRate(rate){if(rate===undefined)return 32*1024*1024;if(!Number.isSafeInteger(rate)||rate<128||rate>32*1024*1024)throw Error('文件速率无效');return rate;}
+function requestedBytes(bytes){if(bytes===undefined)return BULK_CHUNK;if(!Number.isSafeInteger(bytes)||bytes<1||bytes>BULK_CHUNK)throw Error('文件块大小无效');return bytes;}
+async function drain(socket){if(socket.destroyed)throw Error('文件连接已结束');await new Promise((resolve,reject)=>{const done=()=>finish(),closed=()=>finish(Error('文件连接已结束')),error=e=>finish(e);function finish(e){socket.off('drain',done);socket.off('close',closed);socket.off('error',error);e?reject(e):resolve();}socket.once('drain',done);socket.once('close',closed);socket.once('error',error);});}
 const nonce=n=>{const b=Buffer.alloc(12);b.writeBigUInt64BE(BigInt(n),4);return b;};
 export function packBulk(key,seq,data){
   if(data.length>BULK_CHUNK)throw Error('文件块过大');
@@ -26,34 +38,52 @@ export async function connectBulk(host,info){
     return {socket,async next(){const size=(await reader.read(4)).readUInt32BE();return unpackBulk(key,seq++,await reader.read(size));},complete(end){finished=true;if(info.completeAck)socket.write(hmac(key,'bulk-complete:'+end));},close(){if(finished)socket.end();else socket.destroy();}};
   }catch(error){socket.destroy();throw error;}
 }
-export async function receiveBulk(service,sourceId,args,end,write,progress){
-  let offset=args.offset,retries=0;
-  while(offset<end){let connection,route;
-    try{const peer=service.getPeer(sourceId),info=await peer.request('bulkOpen',{...args,offset,end,completeAck:true});route=await service.links?.videoEndpoint(peer,info);connection=await connectBulk(route?.host||peer.socket.remoteAddress,route?.info||info);
-      while(offset<end){service.allow('clipboard');if(!service.canShareClipboard(sourceId)||service.group.excluded(sourceId))throw Error('剪贴板共享未授权');const data=await connection.next();if(!data.length||offset+data.length>end)throw Error('文件传输校验失败');await write(data);offset+=data.length;progress(offset);}connection.complete(end);
-    }catch(error){const transient=['ECONNRESET','ETIMEDOUT','ECONNREFUSED','EPIPE'].includes(error.code)||/连接已断开|设备不在线|串流连接已结束|响应超时|文件连接已结束/.test(error.message);if(!transient||retries++>=2)throw error;await new Promise(resolve=>setTimeout(resolve,500));}
+export async function receiveBulk(service,sourceId,args,end,write,progress,reservation){
+  const lease=receiverLease(service,reservation);let offset=args.offset,retries=0;
+  try{while(offset<end){let connection,route;
+    try{const peer=service.getPeer(sourceId),maxRate=receiveRate(service),info=await peer.request('bulkOpen',{...args,offset,end,completeAck:true,maxRate});route=await service.links?.videoEndpoint(peer,info);connection=await connectBulk(route?.host||peer.socket.remoteAddress,route?.info||info);
+      while(offset<end){service.allow('clipboard');if(!service.canShareClipboard(sourceId)||service.group.excluded(sourceId))throw Error('剪贴板共享未授权');
+        const rate=receiveRate(service);
+        // Re-negotiate a bounded record size when remote control starts/stops on
+        // another device; keep the verified offset and never count this as failure.
+        if(rate<maxRate*.75||rate>maxRate*1.5)break;
+        const started=performance.now(),data=await connection.next();service.allow('clipboard');if(!service.canShareClipboard(sourceId)||service.group.excluded(sourceId))throw Error('剪贴板共享未授权');if(!data.length||offset+data.length>end)throw Error('文件传输校验失败');await write(data);offset+=data.length;progress(offset);
+        if(offset<end){const wait=data.length*1000/rate-(performance.now()-started);if(wait>0)await sleep(Math.min(data.length>bulkSlice(rate)?250:1000,wait));}
+      }if(offset===end)connection.complete(end);
+    }catch(error){const transient=['ECONNRESET','ETIMEDOUT','ECONNREFUSED','EPIPE'].includes(error.code)||/连接已断开|设备不在线|串流连接已结束|响应超时|文件连接已结束/.test(error.message);if(!transient||retries++>=2)throw error;await sleep(500);}
     finally{connection?.close();await route?.close();}
-  }
+  }}finally{lease.close();}
 }
 export async function receiveQuicFile(service,source,args,end,write,progress){
-  let offset=args.offset;
-  while(offset<end){
-    if(!source.quicConn||source.fastLink){await receiveBulk(service,source.remote.id,{...args,offset},end,write,progress);return;}
-    service.allow('clipboard');if(!service.canShareClipboard(source.remote.id))throw Error('剪贴板共享未授权');
-    let data;try{data=await service.quic.rpc(source,'quicFile',{...args,offset});}catch(error){if(/QUIC (连接|响应|connection|request)|QUIC 已关闭/.test(error.message)){service.quic.drop(source);await receiveBulk(service,source.remote.id,{...args,offset},end,write,progress);return;}throw error;}
-    service.allow('clipboard');if(!service.canShareClipboard(source.remote.id))throw Error('剪贴板共享未授权');
+  const lease=receiverLease(service);let offset=args.offset;
+  try{while(offset<end){
+    if(!source.quicConn||source.fastLink){await receiveBulk(service,source.remote.id,{...args,offset},end,write,progress,lease.ticket);return;}
+    service.allow('clipboard');if(!service.canShareClipboard(source.remote.id)||service.group?.excluded(source.remote.id))throw Error('剪贴板共享未授权');
+    const rate=receiveRate(service),maxBytes=bulkSlice(rate),started=performance.now();
+    let data;try{data=await service.quic.rpc(source,'quicFile',{...args,offset,end,maxBytes,maxRate:rate});}catch(error){if(/QUIC (连接|响应|connection|request)|QUIC 已关闭/.test(error.message)){service.quic.drop(source);await receiveBulk(service,source.remote.id,{...args,offset},end,write,progress,lease.ticket);return;}throw error;}
+    service.allow('clipboard');if(!service.canShareClipboard(source.remote.id)||service.group?.excluded(source.remote.id))throw Error('剪贴板共享未授权');
     if(!data.length||data.length>BULK_CHUNK||offset+data.length>end)throw Error('文件传输校验失败');await write(data);offset+=data.length;progress(offset);
-    const busy=service.videoHost.sessions.size||service.videoViewer.sessions.size;
-    if(busy){const rates=[...service.videoHost.sessions.values(),...service.videoViewer.sessions.values()].map(s=>s.adaptive?.rate||s.bitrate||4000000);const rate=Math.max(8192,Math.min(128*1024,Math.min(...rates)*.15/8));await new Promise(r=>setTimeout(r,data.length*1000/rate));}
-  }
+    // Count request and disk time toward the receiver's budget, avoiding double
+    // throttling while protecting its other active remote-control connections.
+    if(offset<end){const wait=data.length*1000/rate-(performance.now()-started);if(wait>0)await sleep(Math.min(data.length>maxBytes?250:1000,wait));}
+  }}finally{lease.close();}
 }
 export class BulkHost{
-  constructor(service){this.service=service;this.sessions=new Set();}
+  constructor(service){this.service=service;this.sessions=new Set();this.quicSessions=new Map();}
+  rate(){const now=performance.now();for(const [key,session] of this.quicSessions)if(session.until<now)this.quicSessions.delete(key);return bulkBudget(this.service)/Math.max(1,this.sessions.size+this.quicSessions.size);}
+  async quicBytes(peer,args){
+    const s=this.service;s.authorize(peer,'clipboard');requestedRate(args.maxRate);requestedBytes(args.maxBytes);
+    const key=peer.remote.id+':'+args.offerId+':'+args.fileId,now=performance.now();this.rate();
+    let session=this.quicSessions.get(key);if(!session){if(this.quicSessions.size>=16)throw Error('文件传输会话已满');session={nextAt:now,until:now+10000};this.quicSessions.set(key,session);}
+    const rate=Math.min(this.rate(),requestedRate(args.maxRate)),maxBytes=bulkSlice(rate,requestedBytes(args.maxBytes)),start=Math.max(now,session.nextAt);session.nextAt=start+maxBytes*1000/rate;session.until=session.nextAt+10000;
+    try{if(start>now)await sleep(start-now);s.authorize(peer,'clipboard');if(s.getPeer(peer.remote.id)!==peer)throw Error('文件连接已结束');const data=await s.fileBytes({...args,maxBytes},peer.remote.id);if(args.end!==undefined&&args.offset+data.length>=args.end)this.quicSessions.delete(key);return data;}
+    catch(error){this.quicSessions.delete(key);throw error;}
+  }
   async open(peer,args){
-    const s=this.service;s.authorize(peer,'clipboard');
+    const s=this.service;s.authorize(peer,'clipboard');requestedRate(args.maxRate);requestedBytes(args.maxBytes);
     if(this.sessions.size>=4)throw Error('文件传输会话已满');
     // Validate expiry and range before opening any listener.
-    await s.fileBytes({...args,offset:args.offset},peer.remote.id);
+    await s.fileBytes({...args,offset:args.offset,maxBytes:1},peer.remote.id);
     s.authorize(peer,'clipboard');if(this.sessions.size>=4)throw Error('文件传输会话已满');
     const secret=randomBytes(32),session={peer,sockets:new Set()},server=net.createServer();session.server=server;this.sessions.add(session);
     const close=()=>{clearTimeout(session.timer);peer.off('closed',close);for(const socket of session.sockets)socket.destroy();server.close();this.sessions.delete(session);};session.close=close;peer.once('closed',close);
@@ -63,13 +93,12 @@ export class BulkHost{
       try{const {key,reader}=await serverHandshake(socket,secret,true);s.authorize(peer,'clipboard');clearTimeout(session.timer);server.close();
         let offset=args.offset,seq=0;const end=args.end;let nextAt=performance.now();
         while(offset<end){s.authorize(peer,'clipboard');if(s.getPeer(peer.remote.id)!==peer)throw Error('文件连接已结束');
-          const data=(await s.fileBytes({...args,offset},peer.remote.id)).subarray(0,Math.min(BULK_CHUNK,end-offset));if(!data.length)throw Error('源文件已经变化');
-          if(!socket.write(packBulk(key,seq++,data)))await once(socket,'drain');offset+=data.length;
+          const rate=Math.min(this.rate(),requestedRate(args.maxRate)),maxBytes=bulkSlice(rate,requestedBytes(args.maxBytes));
+          const data=(await s.fileBytes({...args,offset,maxBytes},peer.remote.id)).subarray(0,Math.min(maxBytes,end-offset));if(!data.length)throw Error('源文件已经变化');
+          if(!socket.write(packBulk(key,seq++,data)))await drain(socket);offset+=data.length;
           // Pace background files; active control retains network headroom.
-          const media=[...s.videoHost.sessions.values(),...s.videoViewer.sessions.values()];
-          const budget=media.length?Math.max(8192,Math.min(128*1024,Math.min(...media.map(v=>v.adaptive?.rate||v.bitrate||4000000))/8*.15)):s.active||s.owner?1024*1024:32*1024*1024;
-          const rate=budget/Math.max(1,this.sessions.size);nextAt+=data.length*1000/rate;
-          if(offset<end)await new Promise(resolve=>setTimeout(resolve,Math.max(1,nextAt-performance.now())));
+          nextAt=Math.max(nextAt,performance.now())+data.length*1000/rate;
+          if(offset<end)await sleep(nextAt-performance.now());
         }
         if(args.completeAck&&!timingSafeEqual(await reader.read(32),hmac(key,'bulk-complete:'+end)))throw Error('文件接收确认无效');
         await new Promise((resolve,reject)=>{socket.once('error',reject);socket.end(resolve);});
@@ -77,5 +106,5 @@ export class BulkHost{
     });server.on('error',close);
     try{await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,s.options.host||'0.0.0.0',resolve);});return {protocol:1,port:server.address().port,key:secret.toString('hex'),completeAck:args.completeAck===true};}catch(error){close();throw error;}
   }
-  closeAll(){for(const session of [...this.sessions])session.close();}
+  closeAll(){for(const session of [...this.sessions])session.close();this.quicSessions.clear();}
 }

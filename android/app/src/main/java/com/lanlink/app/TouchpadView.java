@@ -17,11 +17,16 @@ final class TouchpadView extends View implements AutoCloseable {
   long errorAt;
   final ScheduledExecutorService worker = Executors.newSingleThreadScheduledExecutor();
   final Paint paint = new Paint(3);
-  float x, y, startX, startY, scrollY;
+  final android.util.SparseArray<PointF> starts = new android.util.SparseArray<>();
+  float x, y, startX, startY, scrollX, scrollY, scrollStartX, scrollStartY;
   double dx, dy;
   int wheel;
+  float scrollRemainder;
   long downAt;
-  boolean multi, drag, moved, closed, touching;
+  int primaryId = -1, maxFingers;
+  boolean multi, drag, moved, touching, compactDark;
+  float surfaceOpacity = 1f;
+  volatile boolean closed;
   final Runnable hold =
       () -> {
         if (touching && !multi && !moved && !closed) {
@@ -54,9 +59,21 @@ final class TouchpadView extends View implements AutoCloseable {
         TimeUnit.MILLISECONDS);
   }
 
+  /** Compact inset surface used by the full-screen controller's side pads. */
+  void setCompactDark(boolean compact) {
+    compactDark = compact;
+    invalidate();
+  }
+
+  /** Changes only the compact pad's fill; its outline and grip marks remain legible. */
+  void setSurfaceOpacity(float opacity) {
+    surfaceOpacity = Float.isNaN(opacity) ? 1f : Math.max(0f, Math.min(1f, opacity));
+    invalidate();
+  }
+
   void report(Exception error) {
     long now = android.os.SystemClock.elapsedRealtime();
-    if (now - errorAt >= 2000) {
+    if (errorAt == 0 || now - errorAt >= 2000) {
       errorAt = now;
       onError.accept(error);
     }
@@ -79,15 +96,19 @@ final class TouchpadView extends View implements AutoCloseable {
 
   void event(JSONObject event) {
     if (closed) return;
-    worker.execute(
-        () -> {
-          try {
-            flush();
-            sender.send(event);
-          } catch (Exception error) {
-            report(error);
-          }
-        });
+    try {
+      worker.execute(
+          () -> {
+            try {
+              flush();
+              sender.send(event);
+            } catch (Exception error) {
+              report(error);
+            }
+          });
+    } catch (RejectedExecutionException ignored) {
+      // A detached window may deliver its final cancel after close().
+    }
   }
 
   void button(int b, boolean down) {
@@ -95,73 +116,176 @@ final class TouchpadView extends View implements AutoCloseable {
   }
 
   protected void onDraw(Canvas canvas) {
+    super.onDraw(canvas);
     float density = getResources().getDisplayMetrics().density;
-    paint.setColor(touching ? 0xffe8e5fb : 0xffefedf8);
-    canvas.drawRoundRect(0, 0, getWidth(), getHeight(), 24 * density, 24 * density, paint);
-    paint.setColor(0xff77758c);
-    paint.setTextAlign(Paint.Align.CENTER);
-    paint.setTextSize(14 * density);
-    canvas.drawText(drag ? "正在拖动" : "触控板", getWidth() / 2f, getHeight() / 2f - 5 * density, paint);
-    paint.setTextSize(11 * density);
-    canvas.drawText("轻点单击 · 双指滚动 · 长按拖动", getWidth() / 2f, getHeight() / 2f + 20 * density, paint);
+    float inset = density, radius = (compactDark ? 26 : 24) * density;
+    paint.setStyle(Paint.Style.FILL);
+    paint.setColor(compactDark ? touching ? 0xff343b50 : 0xff252c3c : touching ? Ui.LILAC : Ui.BG);
+    if (compactDark) paint.setAlpha(Math.round(255 * Math.min(1f, surfaceOpacity + (touching ? .08f : 0f))));
+    canvas.drawRoundRect(inset, inset, getWidth() - inset, getHeight() - inset, radius, radius, paint);
+    paint.setStyle(Paint.Style.STROKE);
+    paint.setStrokeWidth(density);
+    paint.setColor(compactDark ? touching ? 0xffb5a6ff : 0xff566078 : Ui.LINE);
+    canvas.drawRoundRect(inset, inset, getWidth() - inset, getHeight() - inset, radius, radius, paint);
+    paint.setStyle(Paint.Style.FILL);
+    if (compactDark) {
+      paint.setColor(touching ? 0xffa69ccf : 0xff69728a);
+      for (int row = -1; row <= 1; row++)
+        for (int col = -1; col <= 1; col++)
+          canvas.drawCircle(getWidth() / 2f + col * 10 * density,
+              getHeight() / 2f + row * 10 * density, 1.4f * density, paint);
+      if (drag) {
+        paint.setTextSize(11 * density);
+        paint.setTextAlign(Paint.Align.CENTER);
+        canvas.drawText("拖动中", getWidth() / 2f, getHeight() - 17 * density, paint);
+      }
+    } else {
+      paint.setColor(Ui.MUTED);
+      paint.setTextAlign(Paint.Align.CENTER);
+      paint.setTextSize(14 * density);
+      canvas.drawText(drag ? "正在拖动" : "触控板", getWidth() / 2f, getHeight() / 2f - 5 * density, paint);
+      paint.setTextSize(11 * density);
+      canvas.drawText("轻点单击 · 双指滚动 · 长按拖动", getWidth() / 2f, getHeight() / 2f + 20 * density, paint);
+    }
+  }
+
+  private void intercept(boolean disallow) {
+    if (getParent() != null) getParent().requestDisallowInterceptTouchEvent(disallow);
+  }
+
+  private void checkMovement(MotionEvent event, float density) {
+    for (int i = 0; i < event.getPointerCount(); i++) {
+      PointF start = starts.get(event.getPointerId(i));
+      if (start != null && Math.hypot(event.getX(i) - start.x, event.getY(i) - start.y) > 8 * density) {
+        moved = true;
+        removeCallbacks(hold);
+      }
+    }
   }
 
   public boolean onTouchEvent(MotionEvent e) {
+    if (closed || !isEnabled()) return false;
     int action = e.getActionMasked();
     float density = getResources().getDisplayMetrics().density;
+    if (touching && action != MotionEvent.ACTION_DOWN) checkMovement(e, density);
     if (action == MotionEvent.ACTION_DOWN) {
+      cancelGesture();
       touching = true;
       multi = false;
       moved = false;
-      drag = false;
+      maxFingers = 1;
+      primaryId = e.getPointerId(0);
+      starts.put(primaryId, new PointF(e.getX(), e.getY()));
       downAt = e.getEventTime();
       x = startX = e.getX();
       y = startY = e.getY();
       postDelayed(hold, 400);
-      getParent().requestDisallowInterceptTouchEvent(true);
+      intercept(true);
+    } else if (!touching) {
+      return true;
     } else if (action == MotionEvent.ACTION_POINTER_DOWN) {
+      int index = e.getActionIndex();
+      starts.put(e.getPointerId(index), new PointF(e.getX(index), e.getY(index)));
       multi = true;
+      maxFingers = Math.max(maxFingers, e.getPointerCount());
       removeCallbacks(hold);
       if (drag) {
         button(0, false);
         drag = false;
-      }
-      scrollY = (e.getY(0) + e.getY(1)) / 2;
-    } else if (action == MotionEvent.ACTION_MOVE) {
-      if (Math.hypot(e.getX() - startX, e.getY() - startY) > 8 * density) {
         moved = true;
-        removeCallbacks(hold);
       }
-      if (multi && e.getPointerCount() >= 2) {
+      if (e.getPointerCount() == 2) {
+        scrollX = scrollStartX = (e.getX(0) + e.getX(1)) / 2;
+        scrollY = scrollStartY = (e.getY(0) + e.getY(1)) / 2;
+        scrollRemainder = 0;
+      } else {
+        // Three fingers belong to the surrounding controller, never to a mouse click.
+        moved = true;
+      }
+    } else if (action == MotionEvent.ACTION_MOVE) {
+      if (multi && e.getPointerCount() == 2 && maxFingers == 2) {
+        float cx = (e.getX(0) + e.getX(1)) / 2;
         float cy = (e.getY(0) + e.getY(1)) / 2;
-        int delta = Math.round((cy - scrollY) * 3 / density);
+        if (Math.hypot(cx - scrollStartX, cy - scrollStartY) > 4 * density) moved = true;
+        scrollRemainder += (cy - scrollY) * 3 / density;
+        int delta = Math.round(scrollRemainder);
+        scrollRemainder -= delta;
+        scrollX = cx;
         scrollY = cy;
-        if (delta != 0)
+        if (delta != 0) {
+          moved = true;
           synchronized (this) {
             wheel = Math.max(-2400, Math.min(2400, wheel + delta));
           }
-      } else if (!multi)
+        }
+      } else if (!multi) {
+        int index = e.findPointerIndex(primaryId);
+        if (index < 0) {
+          cancelGesture();
+          return true;
+        }
+        float currentX = e.getX(index), currentY = e.getY(index);
+        if (Math.hypot(currentX - startX, currentY - startY) > 8 * density) {
+          moved = true;
+          removeCallbacks(hold);
+        }
+        synchronized (this) {
+          dx += (currentX - x) * 1.5 / density;
+          dy += (currentY - y) * 1.5 / density;
+        }
+        x = currentX;
+        y = currentY;
+      }
+    } else if (action == MotionEvent.ACTION_POINTER_UP) {
+      // Keep multi set until the last finger lifts; resuming a single pointer jumps the cursor.
+      removeCallbacks(hold);
+    } else if (action == MotionEvent.ACTION_CANCEL) {
+      cancelGesture();
+    } else if (action == MotionEvent.ACTION_UP) {
+      removeCallbacks(hold);
+      touching = false;
+      if (!multi) {
         synchronized (this) {
           dx += (e.getX() - x) * 1.5 / density;
           dy += (e.getY() - y) * 1.5 / density;
         }
-      x = e.getX();
-      y = e.getY();
-    } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-      removeCallbacks(hold);
-      touching = false;
+      }
       if (drag) {
         button(0, false);
         drag = false;
-      } else if (action == MotionEvent.ACTION_UP && !moved && e.getEventTime() - downAt < 400) {
+      } else if (!moved && maxFingers <= 2 && e.getEventTime() - downAt < 400) {
         button(multi ? 2 : 0, true);
         button(multi ? 2 : 0, false);
         performClick();
       }
-      getParent().requestDisallowInterceptTouchEvent(false);
+      primaryId = -1;
+      starts.clear();
+      intercept(false);
     }
     invalidate();
     return true;
+  }
+
+  /** End an interrupted gesture without synthesizing a click or keeping a drag held. */
+  void cancelGesture() {
+    removeCallbacks(hold);
+    touching = false;
+    multi = false;
+    moved = true;
+    primaryId = -1;
+    maxFingers = 0;
+    starts.clear();
+    scrollRemainder = 0;
+    synchronized (this) {
+      dx = dy = 0;
+      wheel = 0;
+    }
+    if (drag) {
+      button(0, false);
+      drag = false;
+    }
+    intercept(false);
+    invalidate();
   }
 
   public boolean performClick() {
@@ -169,9 +293,19 @@ final class TouchpadView extends View implements AutoCloseable {
     return true;
   }
 
+  public void onWindowFocusChanged(boolean hasWindowFocus) {
+    super.onWindowFocusChanged(hasWindowFocus);
+    if (!hasWindowFocus) cancelGesture();
+  }
+
+  protected void onDetachedFromWindow() {
+    cancelGesture();
+    super.onDetachedFromWindow();
+  }
+
   public void close() {
-    removeCallbacks(hold);
-    if (drag) button(0, false);
+    if (closed) return;
+    cancelGesture();
     closed = true;
     worker.shutdown();
   }

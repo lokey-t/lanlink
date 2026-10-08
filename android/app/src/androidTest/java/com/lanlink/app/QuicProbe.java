@@ -57,7 +57,7 @@ final class QuicProbe {
     public void destroy(){alive=false;}
     public boolean isAlive(){return alive;}
     int distance(String axis)throws Exception {
-      int total=0;for(String line:output.toString("UTF-8").split("\n")){JSONObject m=new JSONObject(line);if(!m.optString("command").equals("inject"))continue;JSONArray events=m.getJSONArray("events");for(int i=0;i<events.length();i+=3)if(events.getString(i).equals("EV_REL")&&events.getString(i+1).equals(axis))total+=events.getInt(i+2);}return total;
+      int total=0;for(String line:output.toString("UTF-8").split("\n")){JSONObject m=new JSONObject(line);if(!m.optString("command").equals("inject"))continue;JSONArray events=m.getJSONArray("events");for(int i=0;i<events.length();i+=3)if(events.getInt(i)==VirtualHid.eventCode("EV_REL")&&events.getInt(i+1)==VirtualHid.eventCode(axis))total+=events.getInt(i+2);}return total;
     }
   }
 }

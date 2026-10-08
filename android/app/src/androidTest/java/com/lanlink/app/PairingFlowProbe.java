@@ -140,13 +140,15 @@ final class PairingFlowProbe {
           field(activity, "pairDialog") == null && "devices".equals(field(activity, "page")),
           "connected UI returns home");
       check(field(activity,"consentDialog")==null,"pairing alone never asks control consent");
+      check(service.consent.allowed(peerId,"input"),"paired group members are allowed by default");
+      service.revokeConsent(peerId);
       service.consent.request(peerId,"配对测试电脑");
       java.lang.reflect.Method update=MainActivity.class.getDeclaredMethod("update");update.setAccessible(true);
       test.runOnMainSync(()->{try{update.invoke(activity);}catch(Exception e){throw new RuntimeException(e);}});
       Dialog consent = (Dialog) field(activity, "consentDialog");
       check(
           consent != null && consent.isShowing(),
-          "first connected device consent is visible before control");
+          "explicit request to restore revoked access is visible before control");
       check(field(service, "owner") == null, "connecting never acquires input");
       test.waitForIdleSync();
       Thread.sleep(700);
@@ -165,11 +167,11 @@ final class PairingFlowProbe {
       test.runOnMainSync(() -> find(consent.getWindow().getDecorView(), "同意并记住").performClick());
       check(
           service.consent.allowed(peerId, "input"),
-          "first connection permission decision persists");
+          "explicit restoration decision persists");
       service.offerInitialConsent(service.peers.get(peerId));
       check(service.consent.peek() == null, "saved consent never re-prompts");
       return "PASS: scanned invitation auto-submits, real SRP exchange + encrypted connection,"
-          + " return home, visible first-device consent before input, remembered approval.";
+          + " return home, group access allowed by default, explicit revoked-access restoration and remembered decision.";
     } finally {
       for (Socket socket : sockets)
         try {

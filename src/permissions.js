@@ -5,7 +5,7 @@ export function permissionReport(service, requester = service.config.id) {
   return { version: 1, requestPending: service.consent.pending?.has(requester) === true, requestRejected: service.consent.denied?.has(requester) === true, permissions: Object.fromEntries(Object.keys(labels).map(key => [key, {
     supported: true, appEnabled: service.config.permissions[key] === true,
     systemGranted: caps.simulated ? null : typeof caps[key] === 'boolean' ? caps[key] : null,
-    peerAllowed: local ? true : key === 'clipboard' ? service.canShareClipboard(requester) : Object.hasOwn(service.config.deviceGrants, requester) ? service.consent.allowed(requester, key) : null,
+    peerAllowed: local ? true : key === 'clipboard' ? service.canShareClipboard(requester) : service.consent.allowed(requester, key),
   }])) };
 }
 

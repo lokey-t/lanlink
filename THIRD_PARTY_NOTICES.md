@@ -87,6 +87,12 @@ archive hash, build configuration and source/build links are under `vendor/ffmpe
 and copied to `runtime/ffmpeg-notices/`; the binary license is also at
 `runtime/FFMPEG-LICENSE.txt`. FFmpeg is invoked as a separate process.
 
+macOS packages include an unmodified FFmpeg 8.0.3 build under LGPL 2.1 or later,
+with GPL and nonfree components disabled. The license is included at
+`runtime/FFMPEG-LICENSE.txt`; the exact upstream source archive, build script
+and build configuration are included in `runtime/video/notices/`. This separate
+executable provides H.264 decoding, JPEG conversion and VideoToolbox encoding.
+
 Windows uses system WPF / .NET Framework. macOS uses AppKit / SwiftUI.
 These UI frameworks are supplied by the operating system. No Electron runtime is included.
 The packaged Node.js runtime includes its distribution license at runtime/NODE-LICENSE

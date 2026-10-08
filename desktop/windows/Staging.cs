@@ -1,4 +1,4 @@
-﻿﻿﻿using System;
+﻿﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
@@ -25,7 +25,7 @@ namespace LanLink.Desktop {
         var drag=MainWindow.Text("拖到文件夹以保存",12,"#7163C8");drag.Margin=new Thickness(16,0,14,0);drag.Cursor=Cursors.Hand;Point down=new Point();bool pressed=false;drag.MouseLeftButtonDown+=(s,e)=>{down=e.GetPosition(drag);pressed=true;};drag.MouseLeftButtonUp+=(s,e)=>pressed=false;
         drag.MouseMove+=async(s,e)=>{if(!pressed||e.LeftButton!=MouseButtonState.Pressed||(e.GetPosition(drag)-down).Length<6)return;pressed=false;try{var ready=await main.Client.Call("stage-ready",new{id=id});var dataObject=new DataObject(DataFormats.FileDrop,new[]{Json.Text(ready,"path")});var effect=DragDrop.DoDragDrop(drag,dataObject,DragDropEffects.Copy);if(effect==DragDropEffects.Copy){await main.Client.Call("stage-remove",new{id=id});main.Notify("已保存到目标位置并移出暂存区");await Refresh();}}catch(Exception ex){main.Notify(ex.Message);}};actions.Children.Add(drag);
       }else if(state!="receiving"&&state!="queued")actions.Children.Add(MainWindow.Button(state=="pending"?"开始传输":"重新传输",()=>main.Run(async()=>{await main.Client.Call("stage-start",new{id=id});await Refresh();})));
-      if(state!="receiving"){var remove=MainWindow.Button("移除",()=>main.Run(async()=>{await main.Client.Call("stage-remove",new{id=id});await Refresh();}));remove.Margin=new Thickness(10,0,0,0);actions.Children.Add(remove);}content.Children.Add(actions);if(Json.Text(row,"error")!=""){var error=MainWindow.Text(Json.Text(row,"error"),12,"#B76370");error.TextWrapping=TextWrapping.Wrap;error.Margin=new Thickness(0,12,0,0);content.Children.Add(error);}list.Children.Add(new Border{Child=content,Background=Brushes.White,CornerRadius=new CornerRadius(20),Padding=new Thickness(22),Margin=new Thickness(0,0,0,14),BorderBrush=MainWindow.Brush("#E5EAF4"),BorderThickness=new Thickness(1)});
+      if(state!="receiving"){var remove=MainWindow.Button("移除",()=>main.Run(async()=>{await main.Client.Call("stage-remove",new{id=id});await Refresh();}));remove.Margin=new Thickness(10,0,0,0);actions.Children.Add(remove);}content.Children.Add(actions);if(Json.Text(row,"error")!=""){var error=MainWindow.Text(Json.Text(row,"error"),12,"#B76370");error.TextWrapping=TextWrapping.Wrap;error.Margin=new Thickness(0,12,0,0);content.Children.Add(error);}list.Children.Add(new Border{Child=content,Background=MainWindow.Brush("#FFFFFF"),CornerRadius=new CornerRadius(20),Padding=new Thickness(22),Margin=new Thickness(0,0,0,14),BorderBrush=MainWindow.Brush("#E5EAF4"),BorderThickness=new Thickness(1)});
     }if(list.Children.Count==0){list.Children.Add(MainWindow.Text("暂存区是空的",18));var hint=MainWindow.Text("其他设备发送的文件会出现在这里。保存到文件夹后，文件会移出暂存区。",14,"#788195");hint.TextWrapping=TextWrapping.Wrap;hint.Margin=new Thickness(0,12,0,0);list.Children.Add(hint);}}
   }
   public sealed class FileShareWindow : Window {

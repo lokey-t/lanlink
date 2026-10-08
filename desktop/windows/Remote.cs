@@ -11,10 +11,15 @@ using System.Runtime.InteropServices;
 
 namespace LanLink.Desktop {
   public sealed class RemoteWindow : Window {
+    static Brush VideoBrush(string color) { return (Brush)new BrushConverter().ConvertFromString(color); }
+    static TextBlock VideoText(string text, double size=14, string color="#D7DCE5") {
+      var block=MainWindow.Text(text,size);block.Foreground=VideoBrush(color);return block;
+    }
+
     readonly MainWindow main; readonly Device device;
     readonly Image image = new Image { Stretch = Stretch.Uniform, Focusable = true };
-    readonly TextBlock status = MainWindow.Text("正在获取屏幕…", 12);
-    readonly TextBlock modeStat=MainWindow.Text("仅查看",11,"#D7DCE5"),codecStat=MainWindow.Text("--",11,"#A9B2C2"),fpsStat=MainWindow.Text("-- fps",11,"#A9B2C2"),bitrateStat=MainWindow.Text("-- Mbps",11,"#A9B2C2");
+    readonly TextBlock status = VideoText("正在获取屏幕…", 12);
+    readonly TextBlock modeStat=VideoText("仅查看",11,"#D7DCE5"),codecStat=VideoText("--",11,"#A9B2C2"),fpsStat=VideoText("-- fps",11,"#A9B2C2"),bitrateStat=VideoText("-- Mbps",11,"#A9B2C2");
     readonly System.Diagnostics.Stopwatch frameClock=System.Diagnostics.Stopwatch.StartNew();
     readonly Queue<double> displayedFrames=new Queue<double>();bool picturePending;
     readonly System.Windows.Threading.DispatcherTimer fpsTimer=new System.Windows.Threading.DispatcherTimer{Interval=TimeSpan.FromMilliseconds(250)};
@@ -37,8 +42,11 @@ namespace LanLink.Desktop {
       if(loadingGeometry)ApplySidebarExtent(SidebarCollapsed?0:64);else{sidebarClock.Restart();sidebarTimer.Start();}
       navigationExpand.ToolTip=SidebarCollapsed?"展开侧栏":"收起侧栏";
       System.Windows.Automation.AutomationProperties.SetName(navigationExpand,(string)navigationExpand.ToolTip);
-      navigationExpand.Content=WindowShell.Glyph(SidebarCollapsed?"expand-right":"collapse-left",18);((System.Windows.Shapes.Path)((Viewbox)navigationExpand.Content).Child).Stroke=MainWindow.Brush("#C7CDD8");
+      navigationExpand.Content=WindowShell.Glyph(SidebarCollapsed?"expand-right":"collapse-left",18);((System.Windows.Shapes.Path)((Viewbox)navigationExpand.Content).Child).Stroke=VideoBrush("#C7CDD8");
     }
+    readonly TaskCompletionSource<object> closeCompletion = new TaskCompletionSource<object>();
+    Task frameTask = Task.FromResult(0), releaseTask = Task.FromResult(0); TaskCompletionSource<object> prepareCompletion;
+    public Task Completion { get { return closeCompletion.Task; } }
     bool closed, controlling, moveBusy, wantsControl = true, fitted, fallbackAccepted, showingModeDialog, conflict; int sessionVersion; object pendingMove; Task inputs = Task.FromResult(0); DateTime retryAt;
     readonly double openedAt = (DateTime.UtcNow-new DateTime(1970,1,1)).TotalMilliseconds;
     public bool ControlRequested { get; private set; }
@@ -100,7 +108,7 @@ namespace LanLink.Desktop {
     static bool Terminal(string error) { return error.StartsWith("CONSENT_DENIED:") || error.StartsWith("CONTROL_ENDED:") || (error.StartsWith("CONTROL_CONFLICT:") && !error.Contains("正在切换控制") && !error.Contains("正在连接该设备的画面")); }
     public RemoteWindow(MainWindow owner, Device d) {
       CompositionTarget.Rendering+=PicturePresented;fpsTimer.Tick+=delegate{UpdateFPS();};fpsTimer.Start();Closed+=delegate{fpsTimer.Stop();CompositionTarget.Rendering-=PicturePresented;};
-      SidebarCollapsed=true;main = owner; device = d; Owner = owner; Title = "桌面控制 · " + d.Name; MinWidth = d.Platform=="android"?270:320; MinHeight = 360; Resources = owner.Resources; FontFamily = owner.FontFamily; Background = MainWindow.Brush("#F5F8FE"); WindowStartupLocation = WindowStartupLocation.CenterScreen; FitScreen(d.Width, d.Height);
+      SidebarCollapsed=true;main = owner; device = d; Owner = owner; Title = "桌面控制 · " + d.Name; MinWidth = d.Platform=="android"?270:320; MinHeight = 360; Resources = owner.Resources; FontFamily = owner.FontFamily; Background = VideoBrush("#F5F8FE"); WindowStartupLocation = WindowStartupLocation.CenterScreen; FitScreen(d.Width, d.Height);
       bool phone = device.Platform == "android";
       // The phone viewport is already constrained to the encoded pixel aspect.
       // Ignore JPEG DPI/SAR metadata, which otherwise adds false letterboxing.
@@ -127,7 +135,7 @@ namespace LanLink.Desktop {
         footer.Children.Add(keys);
         foreach (var key in new[] { new[] { "back", "‹", "返回" }, new[] { "home", "○", "主页" }, new[] { "recents", "□", "最近任务" } }) {
           string action = key[0]; var button=MainWindow.Button(key[1],()=>Run(async()=>{await Send(new {kind="navigation",action=action});image.Focus();}));
-          var icon = new System.Windows.Shapes.Path { Width=26, Height=26, Stretch=Stretch.Uniform, Stroke=MainWindow.Brush("#C7CDD8"), StrokeThickness=2.4, StrokeLineJoin=PenLineJoin.Round, StrokeStartLineCap=PenLineCap.Round, StrokeEndLineCap=PenLineCap.Round };
+          var icon = new System.Windows.Shapes.Path { Width=26, Height=26, Stretch=Stretch.Uniform, Stroke=VideoBrush("#C7CDD8"), StrokeThickness=2.4, StrokeLineJoin=PenLineJoin.Round, StrokeStartLineCap=PenLineCap.Round, StrokeEndLineCap=PenLineCap.Round };
           icon.Data = action=="back" ? Geometry.Parse("M 20,2 L 6,14 L 20,26") : action=="home" ? (Geometry)new EllipseGeometry(new Point(14,14),11,11) : new RectangleGeometry(new Rect(3,3,22,22),3,3);
           button.Content=icon;button.Width=64;button.Height=46;button.Padding=new Thickness(0);button.Margin=new Thickness(2,0,2,0);button.Background=Brushes.Transparent;button.BorderThickness=new Thickness(0);button.ToolTip=key[2];
           System.Windows.Automation.AutomationProperties.SetName(button,key[2]);keys.Children.Add(button);NavigationKeyCount++;
@@ -138,13 +146,13 @@ namespace LanLink.Desktop {
       var frame = new Border { Background = Brushes.Black, CornerRadius = new CornerRadius(phone ? 6 : 12), Child = image, ClipToBounds = true }; screenFrame=frame; screen.Children.Add(frame); dock.Children.Add(screen);
       sidebarTimer.Tick+=delegate{double t=Math.Min(1,sidebarClock.Elapsed.TotalMilliseconds/220);double eased=t*t*(3-2*t);ApplySidebarExtent(Math.Round(sidebarFrom+((SidebarCollapsed?0:64)-sidebarFrom)*eased));if(sidebarAnimationProbe!=null)sidebarAnimationProbe();if(t>=1){sidebarTimer.Stop();WindowSize.SaveRemote(this,WindowSize.RemoteFile(MainWindow.DataDir,device.Id));}};
       Closing+=delegate{FinishSidebarAnimation();};
-      Loaded += async delegate { UpdateLayout();FitScreen(d.Width,d.Height);string file=WindowSize.RemoteFile(MainWindow.DataDir,device.Id);if(!WindowSize.RemoteCollapsed(file))ToggleSidebar();restoredGeometry=WindowSize.RestoreRemote(this,file);loadingGeometry=false;WindowSize.AttachRemote(this,file); await Frames(); };
-      Closed += async delegate { closed = true; try { await main.Client.Call("adb-guide-cancel",new {id=device.Id}); await main.Client.Call("access-cancel",new {id=device.Id}); } catch {} try { await main.Client.Call("stream-close", new { id = device.Id }); } catch { } await Release(); };
+      Loaded += async delegate { UpdateLayout();FitScreen(d.Width,d.Height);string file=WindowSize.RemoteFile(MainWindow.DataDir,device.Id);if(!WindowSize.RemoteCollapsed(file))ToggleSidebar();restoredGeometry=WindowSize.RestoreRemote(this,file);loadingGeometry=false;WindowSize.AttachRemote(this,file); frameTask=Frames(); await frameTask; };
+      Closed += async delegate { main.RemoteClosing(Completion);closed = true; wantsControl=false;sessionVersion++;pendingMove=null;try { try { await main.Client.Call("adb-guide-cancel",new {id=device.Id}); await main.Client.Call("access-cancel",new {id=device.Id}); } catch {} try { await main.Client.Call("stream-close", new { id = device.Id }); } catch { } if(prepareCompletion!=null)await prepareCompletion.Task;try{await frameTask;}catch{}await inputs;await Release(); } finally { closeCompletion.TrySetResult(null); } };
       Deactivated += async delegate { if (controlling && !showingModeDialog) { bool resume=wantsControl;await Release();resumeOnActivate=resume;if(IsActive)await ResumeAfterFocus(); } };
       Activated += async delegate { await ResumeAfterFocus(); };
       image.MouseMove += delegate(object sender, MouseEventArgs e) { if (controlling) { pendingMove = Coordinates(e.GetPosition(image)); FlushMove(); } };
-      image.MouseDown += async delegate(object sender, MouseButtonEventArgs e) { if (!controlling) return; var position = Coordinates(e.GetPosition(image)); if (position == null) return; e.Handled = true; image.Focus(); image.CaptureMouse(); await Send(position); await Send(new { kind = "button", button = MouseButton(e.ChangedButton), down = true }); };
-      image.MouseUp += async delegate(object sender, MouseButtonEventArgs e) { if (!controlling) return; e.Handled = true; await Send(new { kind = "button", button = MouseButton(e.ChangedButton), down = false }); image.ReleaseMouseCapture(); };
+      image.MouseDown += async delegate(object sender, MouseButtonEventArgs e) { if (!controlling) return; var position = Coordinates(e.GetPosition(image)); if (position == null) return; e.Handled = true; image.Focus(); image.CaptureMouse(); await SendButton(position, MouseButton(e.ChangedButton), true); };
+      image.MouseUp += async delegate(object sender, MouseButtonEventArgs e) { if (!controlling) return; e.Handled = true; await SendButton(Coordinates(e.GetPosition(image)), MouseButton(e.ChangedButton), false); image.ReleaseMouseCapture(); };
       image.MouseWheel += async delegate(object sender, MouseWheelEventArgs e) { if (!controlling) return; e.Handled = true; await Send(new { kind = "wheel", delta = Math.Max(-2400, Math.Min(2400, e.Delta)) }); };
       image.PreviewKeyDown += async delegate(object sender, KeyEventArgs e) {
         if (!controlling) return; e.Handled = true; var key = PhysicalKey(e);
@@ -158,7 +166,7 @@ namespace LanLink.Desktop {
     void AddTool(StackPanel panel, bool compact, string label, string tooltip, Action action) {
       var button = MainWindow.Button(compact ? label : tooltip == "输入文本" ? tooltip : label == "开始" ? "重新控制" : label == "暂停" ? "停止控制" : "粘贴", action);
       button.ToolTip = tooltip; button.Padding = compact ? new Thickness(0) : new Thickness(14, 8, 14, 8); button.Margin = compact ? new Thickness(0, 0, 0, 4) : new Thickness(0, 0, 8, 0);
-      button.Foreground=MainWindow.Brush("#CDD3DE");button.Background=MainWindow.Brush("#171A20");
+      button.Foreground=VideoBrush("#CDD3DE");button.Background=VideoBrush("#171A20");
       if (compact) { button.Width = 44; button.Height = 40; button.FontSize = label.Length == 1 ? 23 : 11; button.Background = Brushes.Transparent; button.BorderThickness = new Thickness(0); }
       System.Windows.Automation.AutomationProperties.SetName(button, tooltip); panel.Children.Add(button);
     }
@@ -191,24 +199,24 @@ namespace LanLink.Desktop {
       Width = Math.Max(MinWidth, width * scale + horizontal); Height = Math.Max(320, height * scale + chrome);
     }
     async Task BeginControl() {
-      if (closed || preparing || !inputs.IsCompleted || controlling || !wantsControl || main.HandlingFallback || DateTime.UtcNow < retryAt) return;
+      if (closed || preparing || !inputs.IsCompleted || !releaseTask.IsCompleted || controlling || !wantsControl || main.HandlingFallback || DateTime.UtcNow < retryAt) return;
       if (device.Platform == "android" && main.InputMode(device.Id) == "accessibility-limited" && !fallbackAccepted) {
         showingModeDialog = true; try { fallbackAccepted = main.ConfirmInputMode(device, this); } finally { showingModeDialog = false; }
         if (!fallbackAccepted) { wantsControl = false; status.Text = "备用控制未启用 · 可从右侧 ADB 开启增强控制"; return; }
       }
       int version = sessionVersion; retryAt = DateTime.UtcNow.AddMilliseconds(500);
       bool fresh = freshRequest; ControlRequested = true;
-      preparing=true;
-      try { await main.Client.Call("control", new { id = device.Id, capture = false, screen = true, newSession = fresh, fallbackAccepted = fallbackAccepted }); if (closed || !wantsControl || version != sessionVersion) { await main.Client.Call("release"); return; } freshRequest=false; controlling = true; acquiredAt=DateTime.UtcNow; prepared=true; inputFailure=null; status.Text = "正在控制 · 点击画面后输入"; image.Focus(); }
+      preparing=true;prepareCompletion=new TaskCompletionSource<object>();
+      try { await main.Client.Call("control", new { id = device.Id, capture = false, screen = true, newSession = fresh, fallbackAccepted = fallbackAccepted }); if (closed || !wantsControl || version != sessionVersion) { await main.Client.Call("release", new {id=device.Id}); return; } freshRequest=false; controlling = true; acquiredAt=DateTime.UtcNow; prepared=true; inputFailure=null; status.Text = "正在控制 · 点击画面后输入"; image.Focus(); }
       catch (Exception ex) { if(ex.Message.StartsWith("CONSENT_") || ex.Message.StartsWith("PERMISSION_")) freshRequest=false; prepared=false; status.Text = MainWindow.DisplayError(ex.Message); if(!Terminal(ex.Message) && !ex.Message.StartsWith("CONSENT_") && !ex.Message.StartsWith("PERMISSION_") && !ex.Message.StartsWith("ADB_SETUP_REQUIRED:")) status.Text="正在重新连接 · "+status.Text; if (Terminal(ex.Message)) { conflict = true; wantsControl = false; } }
-      finally { preparing=false; }
+      finally { preparing=false;prepareCompletion.TrySetResult(null); }
     }
     async Task Frames() {
       bool streaming = false, legacy = false, jpegOnly = false, h264Only = false;
       while (!closed) {
         var ended=Json.Get(main.State,"controlEnded"); if(Json.Text(ended,"id")==device.Id && Json.Number(ended,"at",0)>=openedAt) { main.Notify(string.IsNullOrEmpty(Json.Text(ended,"message"))?"对方已结束控制":Json.Text(ended,"message")); Close(); break; }
         if(controlling && (DateTime.UtcNow-acquiredAt).TotalSeconds>2 && Json.Text(main.State,"active") != device.Id) controlling=false;
-        await BeginControl();
+        await BeginControl(); if(closed)break;
         if (conflict || !prepared || (wantsControl && !controlling)) { await Task.Delay(500); continue; }
         bool retry = false;
         try {
@@ -237,19 +245,22 @@ namespace LanLink.Desktop {
         if (retry) { if (streaming) { try { await main.Client.Call("stream-close", new { id = device.Id }); } catch { } streaming = false; } await Task.Delay(1500); }
       }
     }
-    async Task Release() {
+    Task Release() { var previous=releaseTask;releaseTask=ReleaseAfter(previous);return releaseTask; }
+    async Task ReleaseAfter(Task previous) {
+      try{await previous;}catch{}
       resumeOnActivate=false;
       wantsControl = false; fallbackAccepted = false; sessionVersion++; forwardedKeys.Clear(); if (!controlling) return; controlling = false; pendingMove = null; image.ReleaseMouseCapture();
-      try { await inputs; var state = await main.Client.Call("state"); if (Json.Text(state, "active") == device.Id) await main.Client.Call("release"); } catch { }
+      try { await inputs; var state = await main.Client.Call("state"); if (Json.Text(state, "active") == device.Id) await main.Client.Call("release", new {id=device.Id}); } catch { }
       status.Text = "已返回本机 · 查看模式";
     }
     async Task Send(object input) {
-      if (!controlling || input == null) return;
+      if (closed || !controlling || input == null) return;
       var before = inputs; var completion = new TaskCompletionSource<object>(); inputs = completion.Task; Task recovery=Task.FromResult(0);
-      try { await before; if (controlling) await main.Client.Call("input", new { id = device.Id, input = input }); }
-      catch (Exception ex) { controlling = false; prepared=false; pendingMove=null; image.ReleaseMouseCapture(); if(Terminal(ex.Message)) {wantsControl=false;conflict=true;} inputFailure=MainWindow.DisplayError(ex.Message); status.Text=inputFailure;status.ToolTip=inputFailure; recovery=main.Client.Call("release").ContinueWith(t => { }); }
+      try { await before; if (!closed && controlling) await main.Client.Call("input", new { id = device.Id, input = input }); }
+      catch (Exception ex) { controlling = false; prepared=false; pendingMove=null; image.ReleaseMouseCapture(); if(Terminal(ex.Message)) {wantsControl=false;conflict=true;} inputFailure=MainWindow.DisplayError(ex.Message); status.Text=inputFailure;status.ToolTip=inputFailure; recovery=main.Client.Call("release", new {id=device.Id}).ContinueWith(t => { }); }
       await recovery; completion.TrySetResult(null);
     }
+    async Task SendButton(object position, int button, bool down) { pendingMove=null;var moved=Send(position);await Send(new {kind="button",button=button,down=down});await moved; }
     async void FlushMove() { if (moveBusy) return; moveBusy = true; try { while (pendingMove != null && controlling) { var next = pendingMove; pendingMove = null; await Send(next); } } finally { moveBusy = false; } }
     void TextDialog() {
       if (!controlling) { status.Text = "请先开始控制"; return; }

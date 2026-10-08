@@ -25,10 +25,6 @@ async function pair(t) {
     services.push(s); await s.start();
   }
   const [a, b] = services; a.connect('127.0.0.1', b.port); await until(() => a.peers.size && b.peers.size && a.peers.values().next().value.info && b.peers.values().next().value.info);
-  for (const [source, target] of [[a, b], [b, a]]) {
-    await assert.rejects(source.getPeer(target.config.id).request('acquire'), /CONSENT_PENDING/);
-    await target.decideConsent({ ...target.state().consentRequests[0], accepted: true, permissions: { input: true, screen: true, clipboard: true } });
-  }
   return { a, b };
 }
 

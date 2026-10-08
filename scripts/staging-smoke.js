@@ -3,7 +3,7 @@ import {execFile} from 'node:child_process';import {promisify} from 'node:util';
 import {EventEmitter} from 'node:events';import {mkdtemp,rm,mkdir,writeFile,readFile} from 'node:fs/promises';
 import {randomUUID,createHash} from 'node:crypto';import os from 'node:os';import path from 'node:path';import assert from 'node:assert/strict';
 import {Service} from '../src/service.js';import {loadConfig} from '../src/identity.js';import {findAdb} from '../src/adb.js';
-const exec=promisify(execFile),adb=await findAdb(),serial='emulator-5580';
+const exec=promisify(execFile),adb=await findAdb(),serial=process.env.LANLINK_SERIAL||'emulator-5580';
 const run=(args,timeout=15000)=>exec(adb,['-s',serial,...args],{windowsHide:true,timeout,maxBuffer:2*1024*1024});
 assert.match((await run(['shell','getprop','ro.hardware'])).stdout,/ranchu|goldfish/);
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));async function until(fn){const deadline=Date.now()+20000;while(!await fn()){if(Date.now()>deadline)throw Error('staging integration timed out');await sleep(100);}}
