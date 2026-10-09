@@ -46,18 +46,20 @@ final class TouchpadView extends View implements AutoCloseable {
     this.onError = onError;
     setContentDescription("触控板：单指移动，轻点单击，长按拖动，双指滚动，双指轻点右键");
     setFocusable(true);
-    worker.scheduleWithFixedDelay(
-        () -> {
-          try {
-            flush();
-          } catch (Exception error) {
-            report(error);
-          }
-        },
-        0,
-        16,
-        TimeUnit.MILLISECONDS);
+    worker.execute(this::pump);
   }
+
+  /** One task at a time; an RPC already taking 8ms must not add another delay. */
+  void pump() {
+    if (closed) return;
+    long started = android.os.SystemClock.elapsedRealtime();
+    try { flush(); } catch (Exception error) { report(error); }
+    if (!closed) try {
+      worker.schedule(this::pump, nextPollDelay(android.os.SystemClock.elapsedRealtime() - started), TimeUnit.MILLISECONDS);
+    } catch (RejectedExecutionException ignored) {}
+  }
+
+  static long nextPollDelay(long spent) { return Math.max(0, QuicMotion.Pacing.MIN - spent); }
 
   /** Compact inset surface used by the full-screen controller's side pads. */
   void setCompactDark(boolean compact) {

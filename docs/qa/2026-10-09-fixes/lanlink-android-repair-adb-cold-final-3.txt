@@ -1,0 +1,2 @@
+PASS: first-time ADB setup without redundant app approval, truthful helper readiness, visible explicit-revocation restoration and independent device grants
+

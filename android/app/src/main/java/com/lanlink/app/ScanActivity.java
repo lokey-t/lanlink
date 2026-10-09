@@ -38,22 +38,22 @@ public final class ScanActivity extends Activity {
     LinearLayout page = ui.column();
     page.setPadding(ui.dp(20), ui.dp(24), ui.dp(20), ui.dp(20));
     page.setBackgroundColor(Ui.BG);
-    page.addView(ui.button("返回添加设备", false, this::finish));
+    page.addView(ui.button(Language.t("返回添加设备"), false, this::finish));
     ui.gap(page, 18);
-    page.addView(ui.title("扫描组邀请二维码", 22));
+    page.addView(ui.title(Language.t("扫描组邀请二维码"), 22));
     ui.gap(page, 10);
-    status = ui.text("将另一台设备的二维码放入画面", 14, Ui.MUTED);
+    status = ui.text(Language.t("将另一台设备的二维码放入画面"), 14, Ui.MUTED);
     page.addView(status);
     ui.gap(page, 16);
     preview = new TextureView(this);
-    preview.setContentDescription("二维码扫描取景框");
+    preview.setContentDescription(Language.t("二维码扫描取景框"));
     FrameLayout frame = new FrameLayout(this);
     frame.setBackground(ui.shape(0xff202637, 24));
     frame.setClipToOutline(true);
     frame.addView(preview, new FrameLayout.LayoutParams(-1, -1));
     page.addView(frame, new LinearLayout.LayoutParams(-1, 0, 1));
     ui.gap(page, 16);
-    page.addView(ui.text("二维码只在本机识别。识别后仍需确认加入，不会自动解散组。", 12, Ui.MUTED));
+    page.addView(ui.text(Language.t("二维码只在本机识别。未建组时识别成功将直接加入；已有组时需先确认解散。加入后同组设备可使用已开启的协作功能，可在设置中管理授权。"), 12, Ui.MUTED));
     setContentView(page);
     page.setOnApplyWindowInsetsListener(
         (v, insets) -> {
@@ -95,7 +95,7 @@ public final class ScanActivity extends Activity {
     super.onRequestPermissionsResult(request, permissions, grants);
     if (request == 1 && grants.length > 0 && grants[0] == PackageManager.PERMISSION_GRANTED)
       startCamera();
-    else status.setText("未开启相机权限，可返回使用手动输入或从图片选择。");
+    else status.setText(Language.t("未开启相机权限，可返回使用手动输入或从图片选择。"));
   }
 
   private void startCamera() {
@@ -118,7 +118,7 @@ public final class ScanActivity extends Activity {
           break;
         }
       }
-      if (selected == null) throw new IllegalStateException("没有可用相机");
+      if (selected == null) throw new IllegalStateException(Language.t("没有可用相机"));
       Size[] sizes =
           manager
               .getCameraCharacteristics(selected)
@@ -228,7 +228,7 @@ public final class ScanActivity extends Activity {
           y[row * w + col] = buffer.get(row * plane.getRowStride() + col * plane.getPixelStride());
       String value = decodeLuma(y, w, h);
       if (!value.startsWith("lanlink://pair?")) {
-        runOnUiThread(() -> status.setText("请扫描 LanLink 的组邀请二维码"));
+        runOnUiThread(() -> status.setText(Language.t("请扫描 LanLink 的组邀请二维码")));
         return;
       }
       finished = true;
@@ -244,7 +244,7 @@ public final class ScanActivity extends Activity {
   private void fail() {
     runOnUiThread(
         () -> {
-          status.setText("相机暂不可用，请返回手动输入或从图片选择。");
+          status.setText(Language.t("相机暂不可用，请返回手动输入或从图片选择。"));
           stopCamera();
         });
   }

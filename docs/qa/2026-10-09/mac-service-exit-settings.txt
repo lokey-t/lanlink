@@ -1,0 +1,2 @@
+There has been no change in the accessibility tree for Window: "LanLink".
+The focused UI element is 18 text field (settable) Value: QA Mac 深度测试T, Placeholder: 设备名称

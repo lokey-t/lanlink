@@ -1,0 +1,4 @@
+STEP1: A user-copy X -> B = X
+STEP2: B user-copy Y -> A = Y
+STEP3: A user-copy X again -> A = X, B = Y; A shared latest = Y: another device text
+CONFIRMED: automatic repeated-content synchronization fails using native clipboardChanged events and encrypted TCP peers; no real clipboard read/write occurred.

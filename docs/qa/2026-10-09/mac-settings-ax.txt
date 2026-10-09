@@ -1,0 +1,53 @@
+Window: "LanLink", App: LanLink.
+0 standard window LanLink, Secondary Actions: Raise
+	1 container
+		2 button Description: 关闭窗口, ID: xmark
+		3 button Description: 最小化, ID: minus
+		4 button Description: 切换全屏, ID: arrow.up.left.and.arrow.down.right
+		5 text LanLink LanLink 设置
+		6 button 保存设置
+		7 button 设备
+		8 text 管理设备名称、主设备与启动选项
+		9 button 暂存文件
+		10 button 本组设备权限
+		11 button 安卓授权
+		12 button 剪贴板
+		13 button 设置
+		14 scroll area Secondary Actions: Scroll Up, Scroll Down
+			15 text 通用
+			16 pop up button 外观, Value: 跟随系统
+			17 text 仅对本设备生效，切换后立即应用。
+			18 text field (settable) Value: QA Mac 深度测试, Placeholder: 设备名称
+			19 switch 登录 Mac 后自动启动 LanLink, Value: off
+			20 text 无界鼠标
+			21 pop up button 键鼠主设备, Value: 尚未选择
+			22 switch 键鼠切换时显示边缘光效, Value: on
+			23 switch 鼠标移走后隐藏光效, Value: off
+			24 text 以下切换设置仅对本机生效
+			25 键鼠切换设备方式
+				26 radio button Description: 边缘停留, Value: 1
+				27 radio button Description: 快捷键 + 边缘, Value: 0
+			28 text 边缘停留时间 · 100 毫秒
+			29 slider Value: 100, Secondary Actions: Increment, Decrement
+				30 value indicator 100
+			31 text 共享剪贴板
+			32 switch 允许自动上传剪贴板信息到组, Value: on
+			33 switch 允许自动获取组剪贴板到本机, Value: on
+			34 text 同步到组内在线设备，保留单独设置的设备授权限制。 其他
+			35 button 运行日志
+			36 button 退出应用
+			37 scroll bar (settable, float) 0
+				38 value indicator (settable, float) 0
+				39 increment arrow button
+				40 decrement arrow button
+				41 increment page button
+				42 decrement page button
+		43 button 我的信息
+		44 text 有未保存的更改 · 切换页面会保留草稿
+45 menu bar
+	46 LanLink
+	47 View
+	48 Window
+	49 Help
+
+The focused UI element is 18 text field (settable) Value: QA Mac 深度测试, Placeholder: 设备名称

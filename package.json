@@ -1,6 +1,6 @@
 {
   "name": "lanlink",
-  "version": "0.3.45",
+  "version": "0.3.46",
   "private": true,
   "type": "module",
   "description": "Offline LAN keyboard, clipboard and remote desktop sharing",

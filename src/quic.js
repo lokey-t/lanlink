@@ -4,7 +4,7 @@ import {QuicNative,quicPath} from './quic-native.js';
 import {MotionSender,MotionReceiver} from './quic-motion.js';
 import {RtcFrameQueue} from './rtc-video.js';
 import {controlMethods} from './links.js';
-import {InputQueue} from './input-queue.js';
+import {InputQueue,motionRttSample} from './input-queue.js';
 const notifyTypes=new Set(['clipboard','clipboard-record','clipboard-inventory','cursor','group-members','group-dissolved','group-removed','control-ended','master-selection','edge-glow']);
 const wire=v=>Buffer.from(JSON.stringify(v)).toString('base64');
 export class QuicManager {
@@ -34,7 +34,7 @@ export class QuicManager {
     if(method==='acquire'||method==='inputReset'||method==='release'){p.quicTx.reset();args={...args,__motionEpoch:p.quicTx.epoch};}
     if(method==='input'&&['move','relative'].includes(args.kind)){const data=p.quicTx.move(args);try{const result=await this.native.call('datagram',{conn,data:wire(data)},timeout);if(p.quicConn===conn)p.inputScheduler?.feedback({queued:result.queued||0});return {};}catch(e){if(/\bDone\b|datagram.*(?:full|congest)/i.test(e.message)){p.inputScheduler?.feedback({queued:131072});return {};}this.drop(p);throw e;}}
     if(method==='input'&&p.quicTx.snapshot)args={...args,__motion:p.quicTx.barrier()};
-    const started=performance.now(),r=await this.native.call('request',{conn,data:wire({method,args})},timeout+250);if(p.quicConn===conn)p.inputScheduler?.feedback({rttMs:performance.now()-started});const data=Buffer.from(r.data,'base64');
+    const started=performance.now(),r=await this.native.call('request',{conn,data:wire({method,args})},timeout+250);if(p.quicConn===conn&&motionRttSample(method,args))p.inputScheduler?.feedback({rttMs:performance.now()-started});const data=Buffer.from(r.data,'base64');
     if(method==='quicFile'){if(data[0]!==0)throw Error(data.subarray(1).toString()||'QUIC 文件传输失败');if(data.length<33||!createHash('sha256').update(data.subarray(33)).digest().equals(data.subarray(1,33)))throw Error('QUIC 文件校验失败');return data.subarray(33);}const result=JSON.parse(data);if(result.error)throw Error(result.error);return result.result;
   }
   inputQueue(p){return p.quicInputs ||= new InputQueue(async(method,a)=>a.motion?(p.quicConn===a.conn?this.applyMotion(p,a.motion):undefined):a.run());}
@@ -52,7 +52,9 @@ export class QuicManager {
       if(m.method==='__notify'){if(!notifyTypes.has(a.type))throw Error('QUIC 消息无效');p.emit('message',a);return {};}
       return await this.service.handle(p,m.method,a);
     };
-    try{const result=controlMethods.has(m.method)?await this.ordered(p,run):await run();bytes=m.method==='quicFile'?Buffer.concat([Buffer.from([0]),createHash('sha256').update(result).digest(),result]):Buffer.from(JSON.stringify({result}));}
+    // Heartbeats only renew the existing owner; a slow native acknowledgement
+    // must not hold the position/button ordering queue on the receiving side.
+    try{const result=controlMethods.has(m.method)&&m.method!=='keepControl'?await this.ordered(p,run):await run();bytes=m.method==='quicFile'?Buffer.concat([Buffer.from([0]),createHash('sha256').update(result).digest(),result]):Buffer.from(JSON.stringify({result}));}
     catch(error){bytes=m.method==='quicFile'?Buffer.concat([Buffer.from([1]),Buffer.from(error.message)]):Buffer.from(JSON.stringify({error:error.message}));}
     if(this.valid(p))await this.native.call('reply',{conn:e.conn,stream:e.stream,data:bytes.toString('base64')});
   }

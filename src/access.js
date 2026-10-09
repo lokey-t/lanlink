@@ -16,6 +16,7 @@ export class Access {
     peer.access=accessState(report,peer.info?.platform);peer.accessAt=Date.now();return report;
   }
   async poll() {
+    this.expire();
     if(this.polling)return;this.polling=true;
     try { await Promise.all([...this.service.peers.values()].map(async p=>{if(Date.now()-(p.accessAt||0)<3000)return;try{await this.read(p);}catch{p.access=accessState(null,p.info?.platform);p.accessAt=Date.now();}})); }
     finally {this.polling=false;}
@@ -38,6 +39,7 @@ export class Access {
     return {ready:true,allowed:keys.every(k=>report.permissions[k]?.peerAllowed===true)};
   }
   async request(id, keys, intent=null) {
+    this.expire();
     keys=(Array.isArray(keys)?keys:[]).filter(k=>['input','screen','clipboard','shutdown'].includes(k));
     if(!keys.length)throw Error('请选择需要的权限');
     const p=this.service.getPeer(id),generation=this.generation;
@@ -64,12 +66,17 @@ export class Access {
   }
   async status(requestId) {
     const n=this.notice;if(!n || n.requestId!==requestId)return {ended:true};
+    if(this.expire())return {ready:false,ended:true,message:'授权请求已过期，请重新发起'};
     const p=this.service.peers.get(n.id);if(!p || p.closed)return {ready:false,message:'设备已离线，等待重新连接'};
-    const report=await this.read(p);if(this.notice!==n)return {ended:true};
+    let report;try{report=await this.read(p);}catch(error){if(this.expire())return {ready:false,ended:true,message:'授权请求已过期，请重新发起'};return {ready:false,message:p.closed?'设备已离线，等待重新连接':'暂时无法读取授权状态，正在重试'};}if(this.notice!==n)return {ended:true};
+    if(this.expire())return {ready:false,ended:true,message:'授权请求已过期，请重新发起'};
     const ready=n.keys.every(k=>report.permissions?.[k]?.peerAllowed===true);
     const decided=report.requestPending===false && Object.entries(report.permissions||{}).some(([key,p])=>key!=='clipboard' && typeof p.peerAllowed==='boolean');
-    return {ready,ended:!ready && (Date.now()>n.expires || report.requestRejected===true || decided),message:ready?'授权已完成':'请在被控设备允许本设备控制'};
+    const ended=!ready && (report.requestRejected===true || decided);
+    if(ended)this.cancel(requestId);
+    return {ready,ended,message:ready?'授权已完成':ended?'对方未允许所需权限，请重新发起':'请在被控设备允许本设备控制'};
   }
+  expire(){if(this.notice && Date.now()>=this.notice.expires){this.cancel(this.notice.requestId);return true;}return false;}
   async complete(requestId) {
     const n=this.notice,s=await this.status(requestId);
     if(!n || this.notice!==n || !s.ready)throw Error('授权尚未完成');

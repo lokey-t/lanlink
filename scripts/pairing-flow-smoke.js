@@ -8,7 +8,7 @@ import os from 'node:os';
 import { loadConfig } from '../src/identity.js';
 import { Service } from '../src/service.js';
 import { findAdb } from '../src/adb.js';
-const exec=promisify(execFile),adb=await findAdb(),serial='emulator-5580';
+const exec=promisify(execFile),adb=await findAdb(),serial=process.env.LANLINK_SERIAL||'emulator-5580';
 if(!adb||!/ranchu|goldfish/.test((await exec(adb,['-s',serial,'shell','getprop','ro.hardware'],{windowsHide:true})).stdout))throw Error('Disposable emulator required');
 class FixtureNative extends EventEmitter{capabilities={host:false,input:false,clipboard:false,screen:false};async start(){}async call(){return {text:'',files:[]};}close(){}}
 const dir=await mkdtemp(path.join(os.tmpdir(),'lanlink-pair-flow-')),config=await loadConfig(dir);

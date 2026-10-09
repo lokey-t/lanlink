@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { Peer } from './wire.js';
 import { parseToken } from './identity.js';
 import { parseDevices } from './adb.js';
-import {InputQueue} from './input-queue.js';
+import {InputQueue,motionRttSample} from './input-queue.js';
 
 export const controlMethods = new Set(['input', 'text', 'acquire', 'release', 'keepControl', 'inputReset']);
 const validPort = n => Number.isInteger(n) && n > 0 && n < 65536;
@@ -19,7 +19,7 @@ export class LinkManager {
   wrap(primary) {
     if (primary.lanRequest) return;
     primary.lanRequest = primary.request.bind(primary);
-    primary.inputScheduler=new InputQueue(async(method,args,timeout)=>{
+    const send=async(method,args,timeout)=>{
         const link = primary.fastLink;
         if (!link || link.peer.closed) return primary.lanRequest(method, args, timeout);
         try { return await link.peer.request(method, args, Math.min(timeout || 15000, 1500)); }
@@ -30,8 +30,25 @@ export class LinkManager {
           }
           throw error; // Never repeat a possibly delivered key/click/text operation.
         }
-    }, {adaptive:true,measure:(method,args)=>!primary.quicConn||!!primary.fastLink||method!=='input'||!['move','relative'].includes(args.kind)});
-    primary.request = (method,args={},timeout)=>controlMethods.has(method)?primary.inputScheduler.request(method,args,timeout):primary.lanRequest(method,args,timeout);
+    };
+    const measure=(method,args)=>motionRttSample(method,args)&&(!primary.quicConn||!!primary.fastLink);
+    primary.inputScheduler=new InputQueue(send,{adaptive:true,measure});
+    let heartbeat;
+    primary.request = (method,args={},timeout)=>{
+      // Renewal has no input ordering semantics. Waiting for its network reply
+      // must not pause Datagram movement or clicks on a high-latency connection.
+      if(method==='keepControl') {
+        if(!heartbeat) {
+          const start=performance.now(),measureRtt=measure(method,args);
+          heartbeat=send(method,args,timeout).then(result=>{
+            if(measureRtt)primary.inputScheduler.feedback({rttMs:performance.now()-start});
+            return result;
+          }).finally(()=>{heartbeat=null;});
+        }
+        return heartbeat;
+      }
+      return controlMethods.has(method)?primary.inputScheduler.request(method,args,timeout):primary.lanRequest(method,args,timeout);
+    };
   }
   valid(primary) {
     return !this.closed && !this.service.closing && !this.service.changingGroup && !primary.closed

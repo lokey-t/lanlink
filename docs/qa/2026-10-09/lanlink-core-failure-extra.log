@@ -1,0 +1,2 @@
+{"id":"two-denied-100-file-attempts-lock-sender","confirmed":true,"attempts":2,"selectedPerAttempt":100,"remoteRequests":2,"outgoingAfterFailure":200,"outgoingAfterReload":200,"thirdError":"发送记录已满，请先移除旧的分享记录或稍后重试","remainingOriginalFiles":100}
+{"id":"offline-access-never-times-out","confirmed":true,"expiresInPast":true,"status":{"ready":false,"message":"设备已离线，等待重新连接"}}

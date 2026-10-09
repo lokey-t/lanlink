@@ -1,4 +1,5 @@
 import net from 'node:net';
+import {withAbort} from './abort.js';
 import {randomBytes,createHash,createCipheriv,createDecipheriv,timingSafeEqual} from 'node:crypto';
 import {BinaryReader,serverHandshake,hmac} from './video-wire.js';
 
@@ -29,20 +30,20 @@ export function unpackBulk(key,seq,body){
   const plain=Buffer.concat([c.update(body.subarray(0,-16)),c.final()]),data=plain.subarray(32);
   if(!createHash('sha256').update(data).digest().equals(plain.subarray(0,32)))throw Error('文件校验失败');return data;
 }
-export async function connectBulk(host,info){
+export async function connectBulk(host,info,signal){
   if(info.protocol!==1 || !Number.isInteger(info.port) || info.port<1 || info.port>65535 || !/^[a-f0-9]{64}$/.test(info.key))throw Error('文件连接无效');
-  const socket=net.connect({host,port:info.port});socket.setNoDelay(true);socket.setTimeout(6000,()=>socket.destroy());socket.on('error',()=>{});
+  signal?.throwIfAborted();const socket=net.connect({host,port:info.port});const aborted=()=>socket.destroy();signal?.addEventListener('abort',aborted,{once:true});socket.once('close',()=>signal?.removeEventListener('abort',aborted));socket.setNoDelay(true);socket.setTimeout(6000,()=>socket.destroy());socket.on('error',()=>{});
   try{const reader=new BinaryReader(socket),secret=Buffer.from(info.key,'hex'),sn=await reader.read(32),cn=randomBytes(32);
     socket.write(Buffer.concat([cn,hmac(secret,'auth',sn,cn)]));if(!(await reader.read(32)).equals(hmac(secret,'ack',sn,cn)))throw Error('文件连接认证失败');
     const key=hmac(secret,'media',sn,cn);let seq=0,finished=false;
     return {socket,async next(){const size=(await reader.read(4)).readUInt32BE();return unpackBulk(key,seq++,await reader.read(size));},complete(end){finished=true;if(info.completeAck)socket.write(hmac(key,'bulk-complete:'+end));},close(){if(finished)socket.end();else socket.destroy();}};
   }catch(error){socket.destroy();throw error;}
 }
-export async function receiveBulk(service,sourceId,args,end,write,progress,reservation){
+export async function receiveBulk(service,sourceId,args,end,write,progress,reservation,signal){
   const lease=receiverLease(service,reservation);let offset=args.offset,retries=0;
-  try{while(offset<end){let connection,route;
-    try{const peer=service.getPeer(sourceId),maxRate=receiveRate(service),info=await peer.request('bulkOpen',{...args,offset,end,completeAck:true,maxRate});route=await service.links?.videoEndpoint(peer,info);connection=await connectBulk(route?.host||peer.socket.remoteAddress,route?.info||info);
-      while(offset<end){service.allow('clipboard');if(!service.canShareClipboard(sourceId)||service.group.excluded(sourceId))throw Error('剪贴板共享未授权');
+  try{while(offset<end){signal?.throwIfAborted();let connection,route;
+    try{const peer=service.getPeer(sourceId),maxRate=receiveRate(service),info=await withAbort(peer.request('bulkOpen',{...args,offset,end,completeAck:true,maxRate}),signal);signal?.throwIfAborted();route=await service.links?.videoEndpoint(peer,info);signal?.throwIfAborted();connection=await connectBulk(route?.host||peer.socket.remoteAddress,route?.info||info,signal);
+      while(offset<end){signal?.throwIfAborted();service.allow('clipboard');if(!service.canShareClipboard(sourceId)||service.group.excluded(sourceId))throw Error('剪贴板共享未授权');
         const rate=receiveRate(service);
         // Re-negotiate a bounded record size when remote control starts/stops on
         // another device; keep the verified offset and never count this as failure.
@@ -50,17 +51,17 @@ export async function receiveBulk(service,sourceId,args,end,write,progress,reser
         const started=performance.now(),data=await connection.next();service.allow('clipboard');if(!service.canShareClipboard(sourceId)||service.group.excluded(sourceId))throw Error('剪贴板共享未授权');if(!data.length||offset+data.length>end)throw Error('文件传输校验失败');await write(data);offset+=data.length;progress(offset);
         if(offset<end){const wait=data.length*1000/rate-(performance.now()-started);if(wait>0)await sleep(Math.min(data.length>bulkSlice(rate)?250:1000,wait));}
       }if(offset===end)connection.complete(end);
-    }catch(error){const transient=['ECONNRESET','ETIMEDOUT','ECONNREFUSED','EPIPE'].includes(error.code)||/连接已断开|设备不在线|串流连接已结束|响应超时|文件连接已结束/.test(error.message);if(!transient||retries++>=2)throw error;await sleep(500);}
+    }catch(error){signal?.throwIfAborted();const transient=['ECONNRESET','ETIMEDOUT','ECONNREFUSED','EPIPE'].includes(error.code)||/连接已断开|设备不在线|串流连接已结束|响应超时|文件连接已结束/.test(error.message);if(!transient||retries++>=2)throw error;await sleep(500);}
     finally{connection?.close();await route?.close();}
   }}finally{lease.close();}
 }
-export async function receiveQuicFile(service,source,args,end,write,progress){
+export async function receiveQuicFile(service,source,args,end,write,progress,signal){
   const lease=receiverLease(service);let offset=args.offset;
   try{while(offset<end){
-    if(!source.quicConn||source.fastLink){await receiveBulk(service,source.remote.id,{...args,offset},end,write,progress,lease.ticket);return;}
+    signal?.throwIfAborted();if(!source.quicConn||source.fastLink){await receiveBulk(service,source.remote.id,{...args,offset},end,write,progress,lease.ticket,signal);return;}
     service.allow('clipboard');if(!service.canShareClipboard(source.remote.id)||service.group?.excluded(source.remote.id))throw Error('剪贴板共享未授权');
     const rate=receiveRate(service),maxBytes=bulkSlice(rate),started=performance.now();
-    let data;try{data=await service.quic.rpc(source,'quicFile',{...args,offset,end,maxBytes,maxRate:rate});}catch(error){if(/QUIC (连接|响应|connection|request)|QUIC 已关闭/.test(error.message)){service.quic.drop(source);await receiveBulk(service,source.remote.id,{...args,offset},end,write,progress,lease.ticket);return;}throw error;}
+    let data;try{data=await withAbort(service.quic.rpc(source,'quicFile',{...args,offset,end,maxBytes,maxRate:rate}),signal);signal?.throwIfAborted();}catch(error){if(/QUIC (连接|响应|connection|request)|QUIC 已关闭/.test(error.message)){service.quic.drop(source);await receiveBulk(service,source.remote.id,{...args,offset},end,write,progress,lease.ticket,signal);return;}throw error;}
     service.allow('clipboard');if(!service.canShareClipboard(source.remote.id)||service.group?.excluded(source.remote.id))throw Error('剪贴板共享未授权');
     if(!data.length||data.length>BULK_CHUNK||offset+data.length>end)throw Error('文件传输校验失败');await write(data);offset+=data.length;progress(offset);
     // Count request and disk time toward the receiver's budget, avoiding double
@@ -85,7 +86,7 @@ export class BulkHost{
     // Validate expiry and range before opening any listener.
     await s.fileBytes({...args,offset:args.offset,maxBytes:1},peer.remote.id);
     s.authorize(peer,'clipboard');if(this.sessions.size>=4)throw Error('文件传输会话已满');
-    const secret=randomBytes(32),session={peer,sockets:new Set()},server=net.createServer();session.server=server;this.sessions.add(session);
+    const secret=randomBytes(32),session={peer,offerId:args.offerId,sockets:new Set()},server=net.createServer();session.server=server;this.sessions.add(session);
     const close=()=>{clearTimeout(session.timer);peer.off('closed',close);for(const socket of session.sockets)socket.destroy();server.close();this.sessions.delete(session);};session.close=close;peer.once('closed',close);
     session.timer=setTimeout(close,6000);session.timer.unref();
     server.on('connection',async socket=>{
@@ -106,5 +107,6 @@ export class BulkHost{
     });server.on('error',close);
     try{await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,s.options.host||'0.0.0.0',resolve);});return {protocol:1,port:server.address().port,key:secret.toString('hex'),completeAck:args.completeAck===true};}catch(error){close();throw error;}
   }
+  closeOffer(id,offerId){for(const session of [...this.sessions])if(session.peer.remote.id===id&&session.offerId===offerId)session.close();for(const key of this.quicSessions.keys())if(key.startsWith(id+':'+offerId+':'))this.quicSessions.delete(key);}
   closeAll(){for(const session of [...this.sessions])session.close();this.quicSessions.clear();}
 }

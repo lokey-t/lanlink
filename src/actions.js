@@ -11,7 +11,13 @@ export function createActions(service) {
   const adb = service.adb || new AdbManager(service);
   const actions = {
     state: () => service.state(),
-    'stage-list':()=>({files:service.staging.list()}),
+    'stage-list':()=>({files:service.staging.list(),outgoing:service.staging.outgoingList()}),
+    'stage-outgoing-list':()=>({files:service.staging.outgoingList()}),
+    'stage-outgoing-retry':a=>service.staging.retryOutgoing(a.id),
+    'stage-outgoing-cancel':a=>service.staging.cancelOutgoing(a.id),
+    'stage-outgoing-remove':a=>service.staging.removeOutgoing(a.id),
+    'stage-cancel':a=>service.staging.cancel(a.id),
+    'stage-save':a=>service.staging.saveTo(a.id,a.destination),
     'stage-share':a=>service.staging.share(a.id,a.files,a.start!==false,a.session),
     'stage-drag-end':a=>{service.staging.end(a.session);return {};},
     'stage-edge':async a=>{if(!service.config.master||service.config.edges?.[a.edge]!==a.id)throw Error('设备已不在此边缘');if(service.config.switchMode==='hotkey'&&!service.edgeHotkeyHeld())throw Error('请按住设置的切换快捷键');const deadline=Date.now()+8000;while(service.switching&&Date.now()<deadline)await new Promise(r=>setTimeout(r,30));if(service.active!==a.id)await service.switchTo(a.id,a.edge,true,false,false,false,true);await service.native.call('file-drag-cancel');return service.staging.share(a.id,a.files,false);},
@@ -45,6 +51,7 @@ export function createActions(service) {
     'fallback-dismiss': () => { service.fallbackNotice = null; service.edge.reset(); },
     'consent-decide': a => service.decideConsent(a),
     'consent-revoke': a => service.revokeConsent(a.id),
+    'consent-set': a => service.setConsent(a.id,a.permissions),
     'permission-dismiss': () => { service.permissionNotice = null; },
     pairing: a => {
       const info = { ...service.pairing.show(), groupId: service.group.data.id, groupEstablished: service.group.established };

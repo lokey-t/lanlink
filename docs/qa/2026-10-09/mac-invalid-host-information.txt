@@ -1,0 +1,4 @@
+The following is a diff from the previous accessibility tree for Window: "LanLink" with ~ and + representing changed and added elements, respectively. Removed elements are summarized by ID range.
+~			52 progress indicator 0.7225000003973643
+~			53 text 44 秒后刷新 · 每分钟自动更换 让新设备扫码，或在「加入其他组」中输入上方八位数字。
+The focused UI element is 64 text field (settable) Value: bad host!, Placeholder: 已配对设备的局域网 IP

@@ -263,12 +263,12 @@ public class LinkService extends Service implements Wire.Listener {
   private void needPermission(Wire peer, String need) {
     // Only an authenticated, currently connected peer can produce a local prompt.
     if (peers.get(peer.id) != peer) return;
-    String label = peer.info.optString("name", "已配对设备");
+    String label = peer.info.optString("name", Language.t("已配对设备"));
     label = label.replaceAll("[\\p{Cntrl}]", " ");
     if (label.length() > 60) label = label.substring(0, 60);
     final String device = label;
     if (!permissionNotice.offer(peer.id, device, need, System.currentTimeMillis())) return;
-    status = device + (need.equals("consent") ? " 请求首次控制，请在手机确认" : " 请求协作，请在手机上开启所需权限");
+    status = device + (need.equals("consent") ? Language.t(" 请求首次控制，请在手机确认") : Language.t(" 请求协作，请在手机上开启所需权限"));
     main.post(
         () -> {
           if (uiVisible || permissionNotice.peek(System.currentTimeMillis()) == null) return;
@@ -282,21 +282,21 @@ public class LinkService extends Service implements Wire.Listener {
           Notification n =
               new Notification.Builder(this, "lanlink-permissions")
                   .setSmallIcon(R.drawable.lanlink_notification)
-                  .setContentTitle(device + " 请求协作")
+                  .setContentTitle(device + Language.t(" 请求协作"))
                   .setContentText(
-                      need.equals("consent") ? "首次控制需要你同意，点击选择允许的功能" : "需要开启手机权限，点击查看并设置")
+                      need.equals("consent") ? Language.t("首次控制需要你同意，点击选择允许的功能") : Language.t("需要开启手机权限，点击查看并设置"))
                   .setStyle(
                       new Notification.BigTextStyle()
                           .bigText(
                               need.equals("consent")
-                                  ? "首次控制需要你同意。点击选择允许的功能，同意后记住此设备。"
-                                  : "点击查看缺少的权限和设置入口，已具备的权限会显示已授权。"))
+                                  ? Language.t("首次控制需要你同意。点击选择允许的功能，同意后记住此设备。")
+                                  : Language.t("点击查看缺少的权限和设置入口，已具备的权限会显示已授权。")))
                   .setContentIntent(target)
                   .setAutoCancel(true)
                   .setOnlyAlertOnce(true)
                   .setVisibility(Notification.VISIBILITY_PRIVATE)
                   .setTimeoutAfter(PermissionNotice.TTL)
-                  .addAction(new Notification.Action.Builder(null, "查看权限", target).build())
+                  .addAction(new Notification.Action.Builder(null, Language.t("查看权限"), target).build())
                   .build();
           // Notification denial must not break the protocol error response; the in-app card
           // remains.
@@ -442,6 +442,7 @@ public class LinkService extends Service implements Wire.Listener {
 
   public void onCreate() {
     super.onCreate();
+    Language.initialize(this);
     captureThread.start();
     captureHandler = new Handler(captureThread.getLooper());
     instance = this;
@@ -457,12 +458,7 @@ public class LinkService extends Service implements Wire.Listener {
         .putString("token", token)
         .putString("name", name)
         .apply();
-    NotificationManager nm = getSystemService(NotificationManager.class);
-    nm.createNotificationChannel(
-        new NotificationChannel("lanlink", "局域网协作", NotificationManager.IMPORTANCE_LOW));
-    nm.createNotificationChannel(
-        new NotificationChannel(
-            "lanlink-permissions", "协作权限提醒", NotificationManager.IMPORTANCE_DEFAULT));
+    createNotificationChannels();
     startForeground(1, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
     clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
     clipboard.addPrimaryClipChangedListener(clipListener);
@@ -490,13 +486,34 @@ public class LinkService extends Service implements Wire.Listener {
         .registerDefaultNetworkCallback(networkCallback);
   }
 
+  private void createNotificationChannels() {
+    NotificationManager nm = getSystemService(NotificationManager.class);
+    nm.createNotificationChannel(
+        new NotificationChannel("lanlink", Language.t("局域网协作"), NotificationManager.IMPORTANCE_LOW));
+    nm.createNotificationChannel(
+        new NotificationChannel(
+            "lanlink-permissions", Language.t("协作权限提醒"), NotificationManager.IMPORTANCE_DEFAULT));
+  }
+
+  void refreshLanguage() {
+    Language.refresh(this);
+    createNotificationChannels();
+    try { getSystemService(NotificationManager.class).notify(1, notification()); }
+    catch (SecurityException ignored) { /* Language changes also work with notifications disabled. */ }
+  }
+
+  @Override public void onConfigurationChanged(android.content.res.Configuration configuration) {
+    super.onConfigurationChanged(configuration);
+    refreshLanguage();
+  }
+
   private Notification notification() {
     String controller = controlledBy();
     Intent stop =
         new Intent(this, LinkService.class).setAction(controller == null ? "stop" : "stop-control");
     return new Notification.Builder(this, "lanlink")
-        .setContentTitle(controller == null ? "LanLink 正在运行" : "正在被 " + controller + " 控制 / 共享屏幕")
-        .setContentText(controller == null ? "同组设备可使用你已开启的功能" : "可随时结束本次控制")
+        .setContentTitle(controller == null ? Language.t("LanLink 正在运行") : Language.t("正在被 ") + controller + Language.t(" 控制 / 共享屏幕"))
+        .setContentText(controller == null ? Language.t("同组设备可使用你已开启的功能") : Language.t("可随时结束本次控制"))
         .setSmallIcon(R.drawable.lanlink_notification)
         .setContentIntent(
             PendingIntent.getActivity(
@@ -504,7 +521,7 @@ public class LinkService extends Service implements Wire.Listener {
         .addAction(
             new Notification.Action.Builder(
                     null,
-                    controller == null ? "停止协作" : "结束控制",
+                    controller == null ? Language.t("停止协作") : Language.t("结束控制"),
                     PendingIntent.getService(
                         this, controller == null ? 1 : 3, stop, PendingIntent.FLAG_IMMUTABLE))
                 .build())
@@ -867,6 +884,7 @@ public class LinkService extends Service implements Wire.Listener {
       }
     }
     if (removed) {
+      if (staging != null) staging.disconnected(p.id);
       permissionNotice.removePeer(p.id);
       consent.disconnect(p.id);
       if (permissionNotice.peek(System.currentTimeMillis()) == null)
@@ -1024,11 +1042,13 @@ public class LinkService extends Service implements Wire.Listener {
     if (p.id == null || peers.get(p.id) != p) throw new IOException("设备连接已结束");
     if (group != null && group.excluded(p.id)) throw new IOException("设备已移出组");
     if(method.equals("quicOpen"))return quic.offer(p);
+    if(method.equals("stage-cancel"))return staging.remoteStopped(p,a.optString("id"),false,"");
+    if(method.equals("stage-failed"))return staging.remoteStopped(p,a.optString("id"),true,a.optString("error","接收失败，请重试"));
     if(method.equals("stage-complete"))return staging.complete(p,a.optString("id"));
     if(method.equals("stage-offer"))return staging.accept(p,a);
     if(method.equals("stage-retract"))return staging.retract(p,a.optString("session"));
     if(method.equals("stage-status")){requireClipboardPermission(p);return staging.available(p,a.optString("id"));}
-    if(method.equals("stage-begin")){requireClipboardPermission(p);return staging.begin(p,a.optString("id"));}
+    if(method.equals("stage-begin")){requireClipboardPermission(p);return staging.begin(p,a.optString("id"),a.optBoolean("resume"));}
     if (method.equals("adb-permission-request")) {
       if (peers.get(p.id) != p) throw new IOException("设备连接已结束");
       if (!rootEnabled() && adbRevoked()) needPermission(p, "adb");
@@ -1644,21 +1664,23 @@ public class LinkService extends Service implements Wire.Listener {
               uris.put(id, uri);
             } else if (i == 0 && item.getText() != null) text = item.getText().toString();
           }
+          JSONObject previous = groupClipboard.reusable(c.toString(), files);
+          if (previous != null) { clip = previous; return previous; }
           String id = UUID.randomUUID().toString();
           JSONObject offer = obj("id", id, "text", text, "files", files, "source", deviceId,"_fingerprint",c.toString());
           validateOffer(offer);
-          if (offers.size() >= 20) {
+          if (files.length() > 0 && offers.size() >= 20) {
             String first = offers.keySet().iterator().next();
             offers.remove(first);
             offerExpiry.remove(first);
           }
-          offers.put(id, uris);
-          offerExpiry.put(id, System.currentTimeMillis() + 3600000);
+          if (files.length() > 0) { offers.put(id, uris); offerExpiry.put(id, System.currentTimeMillis() + 3600000); }
           clip = offer;
           return offer;
         });
   }
 
+  boolean clipboardOfferAvailable(String id){return offers.containsKey(id)&&offerExpiry.getOrDefault(id,0L)>System.currentTimeMillis();}
   public void publishClipboard() throws Exception {publishClipboard(true);}
   public void publishClipboard(boolean manual) throws Exception {allow("clipboard");groupClipboard.publish(snapshotClipboard(),manual);}
   void writeClipboardText(String text)throws Exception{

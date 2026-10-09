@@ -1,14 +1,17 @@
+import {buildInfo} from './build-info.js';
+import {applySettings} from './settings.js';
+import {languagePreference} from './language.js';
 import { ClipboardSync } from './clipboard-sync.js';
 import {Staging} from './staging.js';
 import {BulkHost,receiveBulk,receiveQuicFile} from './bulk.js';
-import { masterChoices, masterSelection, applyMaster, chooseMaster } from './master.js';
+import { masterChoices, masterSelection, applyMaster } from './master.js';
 import net from 'node:net';
 import { EventEmitter } from 'node:events';
 import { randomUUID, createHash } from 'node:crypto';
 import { mkdir, open, stat, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { Peer } from './wire.js';
-import { parseToken, saveConfig, accountId } from './identity.js';
+import { parseToken, saveConfig, commitConfig, accountId } from './identity.js';
 import { startDiscovery } from './discovery.js';
 import { EdgeSwitch } from './edge.js';
 import { Pairing } from './pairing.js';
@@ -38,7 +41,7 @@ export function validateInput(a) {
 }
 export class Service extends EventEmitter {
   constructor(config, dir, native, options = {}) {
-    super(); Object.assign(this, { config, dir, native, options }); this.peers = new Map(); this.sockets = new Set(); this.connecting = new Set(); this.edge = new EdgeSwitch(); this.offers = new Map(); this.position = { x: .5, y: .5 }; this.keys = new Set(); this.logs = []; this.owner = null; this.active = null;
+    super(); Object.assign(this, { config, dir, native, options }); this.peers = new Map(); this.sockets = new Set(); this.connecting = new Map(); this.edge = new EdgeSwitch(); this.offers = new Map(); this.position = { x: .5, y: .5 }; this.keys = new Set(); this.logs = []; this.owner = null; this.active = null;
     this.config.deviceGrants ||= {}; this.consent = new Consent(this.config.deviceGrants); this.permissionNotice = null;
     this.group = new Group(this);this.clipboardSync=new ClipboardSync(this);this.staging=new Staging(this); this.config.pausedPeers ||= {};
     this.adb = new AdbManager(this); this.links = new LinkManager(this);this.quic=new QuicManager(this); this.adbGuide = new AdbGuide(this); this.access = new Access(this);
@@ -94,7 +97,7 @@ export class Service extends EventEmitter {
     peer.on('closed', () => {
       this.sockets.delete(peer);
       if (this.peers.get(peer.remote?.id) !== peer) return;
-      this.peers.delete(peer.remote.id);
+      this.peers.delete(peer.remote.id);this.staging.disconnected(peer.remote.id);
       this.screenViewers.delete(peer.remote.id); this.screenTargets.delete(peer.remote.id);
       for (const intent of this.outgoingIntents) if (intent.id === peer.remote.id) intent.cancelled = true;
       if (this.controlIntent?.id === peer.remote.id) this.controlIntent.cancelled = true;
@@ -108,9 +111,19 @@ export class Service extends EventEmitter {
   }
   connect(host, port = 45831) {
     if (typeof host !== 'string' || !/^[a-zA-Z0-9.:_-]{1,253}$/.test(host) || !Number.isInteger(port) || port < 1 || port > 65535) throw new Error('设备地址或端口无效');
-    const key = host + ':' + port; if (this.connecting.has(key)) return;
-    this.connecting.add(key); const s = net.connect({ host, port }); s.setTimeout(6000, () => s.destroy());
-    s.once('connect', () => { s.setTimeout(0); this.attach(s, true); }); s.on('error', () => {}); s.once('close', () => this.connecting.delete(key));
+    if(this.closing)return Promise.reject(Error('服务正在退出'));
+    const key=host+':'+port,existing=this.connecting.get(key);if(existing)return existing.promise;
+    const socket=net.connect({host,port});let peer,timer;
+    const promise=new Promise((resolve,reject)=>{
+      let settled=false;
+      const finish=(error,result)=>{if(settled)return;settled=true;clearTimeout(timer);this.connecting.delete(key);if(error){socket.destroy();reject(error);}else resolve(result);};
+      const connected=()=>{const active=peer?.remote && this.peers.get(peer.remote.id);if(active&&!active.closed)finish(null,{id:peer.remote.id,message:'已建立加密连接'});};
+      timer=setTimeout(()=>finish(Error('连接超时，请确认地址、端口及对方已启动 LanLink')),6500);
+      socket.once('connect',()=>{peer=this.attach(socket,true);if(!peer){finish(Error('连接数量已满，请稍后重试'));return;}peer.once('ready',connected);peer.once('closed',()=>{connected();finish(Error(peer.failure==='Unauthorized'?'配对认证失败，请确认两台设备属于同一组':'设备连接已结束，请确认配对状态'));});});
+      socket.once('error',error=>finish(Error(error.code==='ECONNREFUSED'?'连接被拒绝，请确认对方已启动 LanLink 且端口正确':error.code==='ENOTFOUND'?'找不到此设备地址，请检查输入':'连接失败：'+error.message)));
+      socket.once('close',()=>{connected();finish(Error('连接已结束，请检查设备地址及配对状态'));});
+    });
+    this.connecting.set(key,{promise,socket});promise.catch(()=>{});return promise;
   }
   getPeer(id) { const p = this.peers.get(id); if (!p || p.closed) throw new Error('设备不在线'); return p; }
   allow(name) { if (!this.config.permissions[name]) throw new Error('目标设备尚未允许此功能：' + name); }
@@ -151,7 +164,8 @@ export class Service extends EventEmitter {
       throw new Error('PERMISSION_REQUIRED: 被控设备尚未允许此功能或缺少系统权限，请在被控设备开启');
     }
   }
-  async decideConsent(a) {
+  decideConsent(a){return this.configure(()=>this.applyConsentDecision(a));}
+  async applyConsentDecision(a) {
     this.getPeer(a.id); const priorGrant = this.config.deviceGrants[a.id]; this.consent.decide(a.id, a.requestId, a.accepted === true, a.permissions);
     const previous = { ...this.config.permissions };
     if (a.accepted === true) delete this.config.pausedPeers[a.id];
@@ -159,15 +173,24 @@ export class Service extends EventEmitter {
     try { await saveConfig(this.dir, this.config); } catch (e) { this.config.permissions = previous; if (priorGrant === undefined) delete this.config.deviceGrants[a.id]; else this.config.deviceGrants[a.id] = priorGrant; throw e; } this.emit('change');
   }
   async revokeConsent(id) {
-    if (typeof id !== 'string' || !Object.hasOwn(this.config.deviceGrants, id) && !this.peers.has(id) && !this.group.data.members[id] && !this.config.knownDevices?.[id]) return;
-    this.config.deviceGrants[id] = Object.fromEntries(permissionNames.map(key => [key, false])); this.consent.disconnect(id);
-    this.consent.denied.delete(id);
-    try { this.peers.get(id)?.send({ type: 'control-ended' }); } catch {}
-    this.screenViewers.delete(id);
-    this.videoHost.closePeer(id);
-    if (this.owner?.id === id) { this.clearInboundEdge();this.owner = null; await this.native.call('release'); }
-    if (this.clipboard?.source === id) this.clipboard = null;
-    this.cancelShutdown(); await saveConfig(this.dir, this.config); this.emit('change');
+    if (typeof id !== 'string' || !Object.hasOwn(this.config.deviceGrants,id) && !this.peers.has(id) && !this.group.data.members[id] && !this.config.knownDevices?.[id]) return;
+    return this.setConsent(id,Object.fromEntries(permissionNames.map(key=>[key,false])));
+  }
+  setConsent(id,permissions){return this.configure(()=>this.applyConsent(id,permissions));}
+  async applyConsent(id,permissions) {
+    if(typeof id!=='string'||id===this.config.id||this.group.excluded(id)||!this.peers.has(id)&&!this.group.data.members[id]&&!this.config.knownDevices?.[id])throw Error('请选择本组的其他设备');
+    if(!permissions||typeof permissions!=='object'||Array.isArray(permissions)||!Object.keys(permissions).length||Object.entries(permissions).some(([key,value])=>!permissionNames.includes(key)||typeof value!=='boolean'))throw Error('设备权限无效');
+    const grant=Object.fromEntries(permissionNames.map(key=>[key,Object.hasOwn(permissions,key)?permissions[key]:this.consent.allowed(id,key)]));
+    const pausedPeers={...this.config.pausedPeers};if(Object.values(grant).some(Boolean))delete pausedPeers[id];
+    await commitConfig(this.dir,this.config,current=>({deviceGrants:{...current.deviceGrants,[id]:grant},pausedPeers}));
+    this.consent.grants=this.config.deviceGrants;this.consent.disconnect(id);this.consent.denied.delete(id);
+    if(Object.values(grant).some(Boolean))delete this.config.pausedPeers[id];
+    const warnings=[];const effect=async work=>{try{await work();}catch(error){warnings.push(error.message);this.log('授权已保存，运行状态恢复失败：'+error.message);}};
+    if(!grant.input||!grant.screen)try{this.peers.get(id)?.send({type:'control-ended'});}catch{}
+    if(!grant.screen){this.screenViewers.delete(id);this.videoHost.closePeer(id);}
+    if(!grant.input&&this.owner?.id===id){this.clearInboundEdge();this.owner=null;await effect(()=>this.native.call('release'));}
+    if(!grant.clipboard){if(this.clipboard?.source===id)this.clipboard=null;await effect(()=>this.staging.cancelPeer(id));}
+    if(!grant.shutdown)this.cancelShutdown();this.emit('change');return warnings.length?{message:'授权已保存，部分运行状态未能恢复，请重启服务',warning:warnings.join('；')}:{};
   }
   requireOwner(peer) { this.authorize(peer, 'input'); if (this.owner?.id !== peer.remote.id || this.owner.until < Date.now()) throw new Error('请先取得控制权'); this.owner.until = Date.now() + 4000; }
   async message(peer, m) {
@@ -249,8 +272,11 @@ export class Service extends EventEmitter {
     if (method === 'clipboardGet') { this.authorize(peer, 'clipboard'); return this.snapshotClipboard(false); }
     if (method === 'stage-offer') return this.staging.accept(peer,a);
     if (method === 'stage-status') {this.authorize(peer,'clipboard');return this.staging.available(peer,a.id);}
-    if (method === 'stage-begin') {this.authorize(peer,'clipboard');return this.staging.begin(peer,a.id);}
+    if (method === 'stage-begin') {this.authorize(peer,'clipboard');return this.staging.begin(peer,a.id,a.resume===true);}
     if (method === 'stage-complete') return this.staging.complete(peer,a.id);
+    if (method === 'stage-cancel') return this.staging.remoteCancel(peer,a.id);
+    if (method === 'stage-failed') return this.staging.failed(peer,a.id,a.error);
+    if (method === 'stage-receipt') return this.staging.receipt(peer,a.id);
     if (method === 'stage-retract') return this.staging.retract(peer,a.session);
     if (method === 'fileChunk') { this.authorize(peer, 'clipboard'); return this.fileChunk(a,peer.remote.id); }
     if (method === 'paste') { this.requireOwner(peer); this.authorize(peer, 'clipboard'); if (this.pasting) throw new Error('正在准备粘贴'); this.pasting = true; try { await this.materialize({ ...this.validateOffer(a.offer), source: a.offer.source }); this.requireOwner(peer); this.authorize(peer, 'clipboard'); await this.native.call('paste'); return {}; } finally { this.pasting = false; } }
@@ -272,16 +298,18 @@ export class Service extends EventEmitter {
     return { id: o.id, text: o.text, files: o.files.map(f => ({ id: f.id, name: f.name, size: f.size })) };
   }
   async snapshotClipboard(broadcast = true,manual = false) {
-    this.allow('clipboard'); const clip = await this.native.call('clipboardGet'); const id = randomUUID(), files = [], entries = new Map();
-    if ((clip.files || []).length > 100) throw new Error('每次最多复制 100 个文件');
-    for (const location of clip.files || []) {
-      const s = await stat(location); if (!s.isFile()) throw new Error('目录请先压缩为 ZIP，再复制');
-      const file = { id: randomUUID(), name: safeName(path.basename(location)), size: s.size }; files.push(file); entries.set(file.id, { location, size: s.size, mtime: s.mtimeMs });
-    }
-    const offer = this.validateOffer({ id, text: clip.text || '', files });
-    this.offers.set(id, { entries, until: Date.now() + 3600000 });const ordinary=[...this.offers].filter(([,o])=>!o.target);for(const [key]of ordinary.slice(0,Math.max(0,ordinary.length-20)))this.offers.delete(key);
-    this.clipboard = { ...offer, source: this.config.id };
-    if(broadcast)await this.clipboardSync.publish(this.clipboard,clip,manual);
+    this.allow('clipboard');const clip=await this.native.call('clipboardGet'),files=[],entries=new Map();
+    if((clip.files||[]).length>100)throw Error('每次最多复制 100 个文件');
+    for(const location of clip.files||[]){const s=await stat(location);if(!s.isFile())throw Error('目录请先压缩为 ZIP，再复制');const file={id:randomUUID(),name:safeName(path.basename(location)),size:s.size};files.push(file);entries.set(file.id,{location,size:s.size,mtime:s.mtimeMs});}
+    const latest=this.clipboardSync.latest,previous=latest?.source===this.config.id?this.offers.get(latest.id):null;
+    const reusable=previous&&previous.until>Date.now()&&latest.text===(clip.text||'')&&JSON.stringify([...previous.entries.values()])===JSON.stringify([...entries.values()]);
+    const candidate=reusable?latest:{...this.validateOffer({id:randomUUID(),text:clip.text||'',files}),source:this.config.id};
+    // Only allocate an offer that will actually be advertised. Suppressed file
+    // notifications must never evict the source of the currently advertised item.
+    if(broadcast&&!manual&&this.clipboardSync.suppress(clip)&&!reusable&&files.length&&this.clipboardSync.lastLocal===this.clipboardSync.fingerprint(clip))this.clipboardSync.lastLocal=null;
+    this.clipboard=candidate;
+    const published=!broadcast||await this.clipboardSync.publish(candidate,clip,manual);
+    if(published){this.offers.set(candidate.id,reusable?previous:{entries,until:Date.now()+3600000});const ordinary=[...this.offers].filter(([key,o])=>!o.target&&key!==this.clipboardSync.latest?.id&&key!==candidate.id);for(const [key]of ordinary.slice(0,Math.max(0,ordinary.length-18)))this.offers.delete(key);}
     return this.clipboard;
   }
   async fileChunk(a,requester=null) {
@@ -290,7 +318,7 @@ export class Service extends EventEmitter {
   async fileBytes(a,requester=null) {
     const offer = this.offers.get(a.offerId), file = offer?.entries.get(a.fileId);
     if(offer?.target && offer.target!==requester)throw Error('此文件仅分享给指定设备');
-    if (!file || offer.until < Date.now() || !Number.isSafeInteger(a.offset) || a.offset < 0 || a.offset > file.size || a.end!==undefined && (!Number.isSafeInteger(a.end)||a.end>file.size||a.end<a.offset) || a.maxBytes!==undefined && (!Number.isSafeInteger(a.maxBytes)||a.maxBytes<1||a.maxBytes>CHUNK)) throw new Error('文件分享已过期或范围无效，请重新复制');
+    if (!file || offer.cancelled || offer.until < Date.now() || !Number.isSafeInteger(a.offset) || a.offset < 0 || a.offset > file.size || a.end!==undefined && (!Number.isSafeInteger(a.end)||a.end>file.size||a.end<a.offset) || a.maxBytes!==undefined && (!Number.isSafeInteger(a.maxBytes)||a.maxBytes<1||a.maxBytes>CHUNK)) throw new Error('文件分享已过期或范围无效，请重新复制');
     const s = await stat(file.location); if (s.size !== file.size || s.mtimeMs !== file.mtime) throw new Error('源文件已经变化，请重新复制');
     const h = await open(file.location, 'r'); try { const buffer = Buffer.alloc(Math.min(a.maxBytes ?? CHUNK, file.size - a.offset, a.end===undefined ? CHUNK : a.end-a.offset)); const { bytesRead } = await h.read(buffer, 0, buffer.length, a.offset);return buffer.subarray(0,bytesRead); } finally { await h.close(); }
   }
@@ -496,31 +524,9 @@ export class Service extends EventEmitter {
     if (this.owner && this.owner.until < Date.now()) { this.clearInboundEdge();this.owner = null; await this.native.call('release'); }
     for (const [id, offer] of this.offers) if (offer.until < Date.now()) this.offers.delete(id);
   }
-  async settings(a) {
-    if (a.theme !== undefined) {
-      if (!['system', 'dark', 'light'].includes(a.theme)) throw new Error('请选择跟随系统、深色或浅色主题');
-      this.config.theme = a.theme;
-    }
-    for(const key of ["clipboardUpload","clipboardDownload","clipboardShortcuts"])if(typeof a[key]==="boolean")this.config[key]=a[key];
-    if(a.masterId!==undefined)await chooseMaster(this,a.masterId);
-    if (a.name !== undefined) { if (typeof a.name !== 'string' || !a.name.trim() || a.name.length > 80) throw new Error('设备名称应为 1–80 字符'); this.config.name = a.name.trim(); }
-    if (a.dwell !== undefined) { if (!Number.isInteger(a.dwell) || a.dwell < 0 || a.dwell > 3000) throw new Error('边缘等待时间范围为 0–3000 毫秒'); this.config.dwell = a.dwell; }
-    if (a.edges) for (const edge of ['left', 'right', 'top', 'bottom']) { if (typeof a.edges[edge] === 'string' && a.edges[edge].length <= 64) this.config.edges[edge] = a.edges[edge]; }
-    if (a.switchMode!==undefined){if(!['dwell','hotkey'].includes(a.switchMode))throw Error('请选择有效的切换方式');this.config.switchMode=a.switchMode;}
-    if (a.edgeHotkey!==undefined){if(!['ctrl-alt','ctrl-shift','alt-shift','meta-shift'].includes(a.edgeHotkey))throw Error('请选择有效的快捷键');this.config.edgeHotkey=a.edgeHotkey;}
-    if(a.switchMode!==undefined || a.dwell!==undefined || a.edgeHotkey!==undefined || a.edgeGlow!==undefined){this.edge.reset();this.cancelEdgeFeedback();}
-    if (typeof a.edgeGlow === 'boolean') this.config.edgeGlow = a.edgeGlow;
-    if (typeof a.edgeGlowHideAway === 'boolean') this.config.edgeGlowHideAway = a.edgeGlowHideAway;
-    if(a.edgeGlow!==undefined || a.edgeGlowHideAway!==undefined){this.emit('edge-feedback',{phase:'clear'});if(this.active && this.capture && this.config.edgeGlow!==false)this.emit('edge-feedback',{phase:'hold',edge:this.enteredEdge,hideAway:!!this.config.edgeGlowHideAway});}
-    if (a.permissions) for (const name of ['input', 'screen', 'clipboard', 'shutdown']) if (typeof a.permissions[name] === 'boolean') this.config.permissions[name] = a.permissions[name];
-    if (typeof a.master === 'boolean' && !masterSelection(this)) this.config.master = a.master;
-    if (!this.config.permissions.input && this.owner) { this.clearInboundEdge();this.owner = null; await this.native.call('release'); }
-    if (!this.config.permissions.screen) { this.videoHost.closeAll(); this.screenViewers.clear(); }
-    if (!this.config.permissions.shutdown) this.cancelShutdown();
-    if (!this.config.master && this.capture) await this.returnLocal();
-    await saveConfig(this.dir, this.config); return {};
-  }
-  state() { return { theme:['system','dark','light'].includes(this.config.theme)?this.config.theme:'system', clipboardSettings:this.clipboardSync.state(), masterId:masterSelection(this)?.id||(this.config.master?this.config.id:""), masterDevices:masterChoices(this), edgeGlowHideAway:!!this.config.edgeGlowHideAway, switchMode:this.config.switchMode||"dwell", edgeHotkey:this.config.edgeHotkey||"ctrl-alt", edgeGlowEnabled: this.config.edgeGlow !== false, edgeTransition: this.edgeTransition, id: this.config.id, name: this.config.name, groupId: this.group.data.id, groupEstablished: this.group.established, groupMemberCount: Object.keys(this.group.data.members).length, account: this.group.data.id, controlEnded: this.controlEnded, fallbackNotice: this.fallbackNotice, adbGuide: this.adbGuide.notice, accessNotice: this.access.notice, viewers: [...new Set([...this.videoHost.sessions.values()].map(s => s.peer.remote.id).concat(this.liveScreens(this.screenViewers)))], port: this.port, dwell: this.config.dwell ?? 100, edges: this.config.edges, consentRequests: this.consent.list(), deviceGrants: this.config.deviceGrants, permissionNotice: this.permissionNotice, permissions: this.config.permissions, master: !!this.config.master, capabilities: this.native.capabilities, knownDevices: this.config.knownDevices || {}, peers: [...this.peers].map(([id, p]) => ({ id, ...p.info, address: p.socket.remoteAddress, transport: this.links.status(p), access: p.access || {status:"未就绪",permissions:{}} })), active: this.active, pendingControl: this.controlIntent?.id, owner: this.owner?.id, shutdownAt: this.shutdownAt, transfer: this.transfer, clipboard: this.clipboard ? { source: this.clipboard.source, files: this.clipboard.files.length, textLength: this.clipboard.text.length } : null, logs: this.logs }; }
+  configure(run){const work=(this.configurationWork||Promise.resolve()).catch(()=>{}).then(run);this.configurationWork=work;return work;}
+  settings(a) {return this.configure(()=>applySettings(this,a));}
+  state() { return { buildInfo, language:languagePreference(this.config.language), theme:['system','dark','light'].includes(this.config.theme)?this.config.theme:'system', clipboardSettings:this.clipboardSync.state(), masterId:masterSelection(this)?.id||(this.config.master?this.config.id:""), masterDevices:masterChoices(this), edgeGlowHideAway:!!this.config.edgeGlowHideAway, switchMode:this.config.switchMode||"dwell", edgeHotkey:this.config.edgeHotkey||"ctrl-alt", edgeGlowEnabled: this.config.edgeGlow !== false, edgeTransition: this.edgeTransition, id: this.config.id, name: this.config.name, groupId: this.group.data.id, groupEstablished: this.group.established, groupMemberCount: Object.keys(this.group.data.members).length, account: this.group.data.id, controlEnded: this.controlEnded, fallbackNotice: this.fallbackNotice, adbGuide: this.adbGuide.notice, accessNotice: this.access.notice, viewers: [...new Set([...this.videoHost.sessions.values()].map(s => s.peer.remote.id).concat(this.liveScreens(this.screenViewers)))], port: this.port, dwell: this.config.dwell ?? 100, edges: this.config.edges, consentRequests: this.consent.list(), deviceGrants: this.config.deviceGrants, permissionNotice: this.permissionNotice, permissions: this.config.permissions, master: !!this.config.master, capabilities: this.native.capabilities, knownDevices: this.config.knownDevices || {}, peers: [...this.peers].map(([id, p]) => ({ id, ...p.info, address: p.socket.remoteAddress, transport: this.links.status(p), access: p.access || {status:"未就绪",permissions:{}} })), active: this.active, pendingControl: this.controlIntent?.id, owner: this.owner?.id, shutdownAt: this.shutdownAt, transfer: this.transfer, clipboard: this.clipboard ? { source: this.clipboard.source, files: this.clipboard.files.length, textLength: this.clipboard.text.length } : null, logs: this.logs }; }
   async stopInbound() {
     const ids = new Set([...this.videoHost.sessions.values()].map(s => s.peer.remote.id).concat(this.liveScreens(this.screenViewers))); this.screenViewers.clear(); if (this.owner) ids.add(this.owner.id);
     for (const id of ids) { this.config.pausedPeers[id] = true; try { this.peers.get(id)?.send({ type: 'control-ended' }); } catch {} }
@@ -544,5 +550,5 @@ export class Service extends EventEmitter {
   async leaveGroup() {
     this.pairing?.hide(); const { newToken } = await import('./identity.js'); this.config.token = newToken(); delete this.config.group; this.group.close(); this.group = new Group(this);this.clipboardSync=new ClipboardSync(this); this.config.knownDevices = {}; this.config.deviceGrants = {}; this.config.edges = {}; this.config.pausedPeers = {}; await saveConfig(this.dir, this.config); await this.groupChanged(); this.group.start(); this.log('本设备已移出组，需要重新配对');
   }
-  async close() { this.closing = true;this.quic.close();this.bulk.closeAll(); clearInterval(this.adbTimer); clearInterval(this.linkTimer); await this.links.close(); this.group.close(); clearInterval(this.heartbeat); clearInterval(this.edgeTimer); this.cancelShutdown(); await Promise.all([this.videoHost.closeAll(), this.videoViewer.closeAll()]); await this.returnLocal(); this.stopDiscovery?.(); await this.pairing?.close(); for (const p of this.sockets) p.close(); if (this.server) await new Promise(r => this.server.close(r)); await Promise.allSettled([...this.messageTasks]); this.native.close(); await this.staging.close(); await saveConfig(this.dir, this.config); }
+  async close() { this.closing = true;for(const item of this.connecting.values())item.socket.destroy();this.quic.close();this.bulk.closeAll(); clearInterval(this.adbTimer); clearInterval(this.linkTimer); await this.links.close(); this.group.close(); clearInterval(this.heartbeat); clearInterval(this.edgeTimer); this.cancelShutdown(); await Promise.all([this.videoHost.closeAll(), this.videoViewer.closeAll()]); await this.returnLocal(); this.stopDiscovery?.(); await this.pairing?.close(); for (const p of this.sockets) p.close(); if (this.server) await new Promise(r => this.server.close(r)); await Promise.allSettled([...this.messageTasks]); this.native.close(); await this.staging.close(); await saveConfig(this.dir, this.config); }
 }

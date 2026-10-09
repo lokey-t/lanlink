@@ -8,6 +8,17 @@
 This file preserves the original release notes in Chinese, with same-version addenda grouped together.
 Historical entries describe their version at the time. For current behavior, permission defaults, build instructions, and validation scope, use the READMEs and the latest validation reports.
 
+## 0.3.46 深度测试问题修复
+
+- macOS、Windows、Android 设置新增本机语言选择，提供「跟随系统」及 11 种语言；首次使用匹配系统语言，识别中文脚本与地区，无法匹配时回退英语。语言切换立即保存，桌面保留设置草稿；共享设置页与常用文案资源，其余提示使用英语回退。
+- 鼠标低延迟补充：自动发送间隔改为 8–24ms，稳定高 RTT 不再直接触发限速；修复连续移动妨碍恢复、视频/文件请求误判和续租阻塞输入队列。Android 触控板采用扣除发送耗时的 8ms 基础周期。详见[鼠标调节记录](docs/MOUSE-LATENCY-2026-10-09.md)。
+- 修复桌面与 Android 剪贴板 X→Y→X 回切丢同步，以及重复上传同一文件淘汰有效分享的问题；在线改名立即传播。
+- 桌面可逐项管理手机等成员访问本机的权限；并发权限修改与设置保存采用持久化事务，拒绝的设置不留下部分改动。
+- Mac 恢复标准编辑快捷键；两桌面端所有页面显示错误并可重启服务；Windows 远控状态始终可见、权限刷新保留焦点；配对码支持分组空白粘贴与纯数字复制。
+- 收发文件具有真实完成确认、取消、重试和清除记录；接收文件可选择保存位置，拒绝覆盖同名文件。取消不会复活排队项目，也不会阻塞其他任务；桌面暂存记录使用原子提交，保存失败保留可恢复记录。
+- Android 修复触控板掉线后使用旧连接、连续点击重复发送、未保存文件无确认删除；纠正扫码说明和共享设置入口。
+- 统一构建版本，随包记录源码指纹、修订和构建时间；修复 Android 探针夹具竞争并保留原 UI 断言。完整清单与验证边界见 [修复与验收记录](docs/FIXES-0.3.46-2026-10-09.md)。
+
 ## 0.3.45 多设备连接与弱网远控
 
 - macOS 在启动界面与服务前执行跨版本单实例检查；同一配置目录的重复启动会唤起已有窗口，服务启动失败显示实际原因。旧版先运行时，新版会唤起旧版；未修复的旧包后启动仍不具备新机制，建议各安装位置都替换为新版。

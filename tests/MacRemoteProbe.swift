@@ -26,6 +26,8 @@ import AppKit
             for _ in 0..<200 { if model.remoteID == "C" && model.controlling { break }; try await Task.sleep(nanoseconds: 10_000_000) }
             require(model.remoteID == "C" && model.controlling, "latest selected target must win after delayed acquire")
             require(model.remoteWindow?.title == "桌面控制 · Android C", "window must show the selected device")
+            for _ in 0..<100 { if model.remoteNotice.contains("串流") { break }; try await Task.sleep(nanoseconds: 10_000_000) }
+            require(model.remoteNotice.contains("串流") && model.notice == model.remoteNotice, "stream status must belong to the active remote session")
             let window = model.remoteWindow
             model.openRemote(c)
             require(model.remoteWindow === window, "same target must reuse its window")
@@ -35,7 +37,23 @@ import AppKit
             for _ in 0..<200 { if model.remoteID == "D" && model.controlling { break }; try await Task.sleep(nanoseconds: 10_000_000) }
             require(model.remoteID == "D" && model.controlling, "old input error must not release the new target")
             require(!model.controlConflict, "old device error must not mark the new session conflicted")
-            model.closeRemote(); await model.remoteTeardown?.value
+            require(!model.notice.contains("previous device disconnected"), "old input errors must not replace the current session notice")
+            for _ in 0..<100 { if model.remoteNotice.contains("串流") { break }; try await Task.sleep(nanoseconds: 10_000_000) }
+            require(model.remoteNotice.contains("串流"), "the new stream must publish its own status")
+            model.perform("paste", ["id": "D"], remoteSession: true)
+            try await Task.sleep(nanoseconds: 40_000_000)
+            model.release(); await model.controlReleaseTask?.value
+            try await Task.sleep(nanoseconds: 250_000_000)
+            require(!model.notice.contains("previous device disconnected"), "late paste errors must not revive control notices after returning to view mode")
+            model.autoControl = true; await model.beginRemoteControl()
+            require(model.controlling, "view mode must still allow a new control session")
+            model.perform("paste", ["id": "D"], remoteSession: true)
+            try await Task.sleep(nanoseconds: 40_000_000)
+            model.closeRemote()
+            require(model.notice.isEmpty && model.remoteNotice.isEmpty, "closing must immediately dismiss the remote status")
+            await model.remoteTeardown?.value
+            try await Task.sleep(nanoseconds: 250_000_000)
+            require(model.notice.isEmpty && model.remoteNotice.isEmpty, "late stream, input, and paste replies must not revive a dismissed notice")
             require(model.remoteID == nil && model.remoteWindow == nil, "closing must clear the current target")
             try model.input.fileHandleForWriting.close()
             for _ in 0..<100 { if !process.isRunning { break }; try await Task.sleep(nanoseconds: 10_000_000) }

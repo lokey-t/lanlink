@@ -13,10 +13,11 @@ DEST="${LANLINK_PACKAGE_DIR:-$(pwd)/dist/LanLink-$VERSION-macos-$ARCH}"
 BUNDLE="$DEST/LanLink.app"
 if [ -e "$DEST" ]; then echo 'Build already exists'; exit 1; fi
 node scripts/icon.js
+node scripts/build-info.js
 sh native/macos/build.sh
 sh scripts/build-quic-macos.sh
 mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Resources/runtime"
-xcrun swiftc -O -swift-version 5 -target "$(uname -m)-apple-macos14.0" -framework AppKit -framework SwiftUI -framework ServiceManagement desktop/macos/LanLink.swift desktop/macos/SingleInstance.swift desktop/macos/Remote.swift desktop/macos/AdbGuide.swift desktop/macos/Staging.swift -o "$BUNDLE/Contents/MacOS/LanLink"
+xcrun swiftc -O -swift-version 5 -target "$(uname -m)-apple-macos14.0" -framework AppKit -framework SwiftUI -framework ServiceManagement desktop/macos/LanLink.swift desktop/macos/Localization.swift desktop/macos/SingleInstance.swift desktop/macos/Remote.swift desktop/macos/AdbGuide.swift desktop/macos/Staging.swift -o "$BUNDLE/Contents/MacOS/LanLink"
 for name in src vendor node_modules; do cp -R "$name" "$BUNDLE/Contents/Resources/"; done
 cp assets/icons/LanLink.icns assets/icons/MenuBarTemplate.png assets/icons/MenuBarTemplate@2x.png "$BUNDLE/Contents/Resources/"
 mkdir -p "$BUNDLE/Contents/Resources/native/quic"
@@ -24,7 +25,7 @@ cp -R native/macos native/windows "$BUNDLE/Contents/Resources/native/"
 cp -R native/quic/src native/quic/Cargo.toml native/quic/Cargo.lock "$BUNDLE/Contents/Resources/native/quic/"
 cp runtime/liblanlink_quic.dylib "$BUNDLE/Contents/Resources/runtime/"
 codesign --force --sign - "$BUNDLE/Contents/Resources/runtime/liblanlink_quic.dylib"
-cp package.json package-lock.json "$BUNDLE/Contents/Resources/"
+cp build-info.json package.json package-lock.json "$BUNDLE/Contents/Resources/"
 cp "$LANLINK_NODE_DIST/bin/node" "$BUNDLE/Contents/Resources/runtime/node"
 cp "$LANLINK_NODE_DIST/LICENSE" "$BUNDLE/Contents/Resources/runtime/NODE-LICENSE"
 # Every Mac build includes the decoder required by Android H.264 video.
@@ -49,11 +50,14 @@ cat > "$BUNDLE/Contents/Info.plist" <<EOF
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>CFBundleIdentifier</key><string>com.lanlink.native</string>
+<key>CFBundleDevelopmentRegion</key><string>en</string>
+<key>CFBundleLocalizations</key><array><string>zh-Hans</string><string>zh-Hant</string><string>en</string><string>ja</string><string>ko</string><string>de</string><string>fr</string><string>es</string><string>pt</string><string>it</string><string>ru</string></array>
 <key>LanLinkInstanceProtocol</key><integer>1</integer>
 <key>CFBundleName</key><string>LanLink</string>
 <key>CFBundleExecutable</key><string>LanLink</string>
 <key>CFBundleIconFile</key><string>LanLink</string>
 <key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleVersion</key><string>$VERSION</string>
 <key>CFBundleShortVersionString</key><string>$VERSION</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>NSServices</key><array><dict>

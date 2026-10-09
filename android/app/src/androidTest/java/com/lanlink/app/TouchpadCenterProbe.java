@@ -308,8 +308,22 @@ final class TouchpadCenterProbe {
       }
       test.runOnMainSync(session[0]::dismiss);
       await(() -> released.get() > 0 && !ONLINE.equals(service.active), "dismiss releases the native control lease");
+      // Reopen, drop the actual encrypted connection, then exercise the visible recovery action.
+      test.runOnMainSync(() -> { session[0] = new TouchpadDialog(activity, service, phone); session[0].show(); });
+      await(() -> ONLINE.equals(service.active) && acquired.get() > 1, "second touchpad session acquired");
+      phone.close();desktop.close();
+      Thread.sleep(850);test.waitForIdleSync();capture("touchpad-offline");
+      test.runOnMainSync(() -> {
+        View back = find(session[0].getWindow().getDecorView(), "返回设备列表");
+        check(back != null && back.isEnabled(), "offline session offers an effective return action");
+        check(back.performClick() && !session[0].isShowing(), "offline return action closes the stale session");
+      });
+      connectFixture();
+      test.runOnMainSync(() -> { session[0] = new TouchpadDialog(activity, service, phone); session[0].show(); });
+      await(() -> ONLINE.equals(service.active) && acquired.get() > 2, "fresh connection works after returning to list");
+      test.runOnMainSync(session[0]::dismiss);
       return "PASS touchpad center: three aligned outlined tiles, capability/offline/permission filtering, "
-          + "input-only loopback claim, native relative input, keyboard entry, and clean release; "
+          + "input-only loopback claim, native relative input, keyboard entry, clean release, offline recovery and new-connection reuse; "
           + "screenshots: ui-check/control-center-touchpad.png, ui-check/touchpad-session.png";
     } finally {
       if (session[0] != null) test.runOnMainSync(session[0]::dismiss);

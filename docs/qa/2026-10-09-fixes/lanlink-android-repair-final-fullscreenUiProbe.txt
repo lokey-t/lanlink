@@ -1,0 +1,2 @@
+PASS: fullscreen entry, left preview/right menu, Back navigation, saved switches, no menu overlay button, maximum uncropped aspect-ratio fit, responsive layout, stable render surfaces and viewer restoration
+

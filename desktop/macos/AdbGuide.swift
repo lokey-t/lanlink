@@ -6,13 +6,13 @@ struct LocalAdbAuthorizationView:View {
     func refresh() async{guard !busy else{return};busy=true;defer{busy=false};do{let r=try await model.call("adb-local-devices");devices=r["devices"] as? [[String:Any]] ?? [];serial="";message=r["message"] as? String ?? ""}catch{message=error.localizedDescription}}
     func authorize() async{guard !busy,!serial.isEmpty else{return};busy=true;defer{busy=false};do{let r=try await model.call("adb-local-authorize",["serial":serial]);message=r["message"] as? String ?? "已就绪";serial=""}catch{message=error.localizedDescription}}
     var body:some View{VStack(alignment:.leading,spacing:20){
-        HStack{Text("安卓设备ADB授权").font(.title2.bold());Spacer();Button("返回设备"){model.adbDevice=nil}}
-        Text("帮助其他组的设备完成 ADB 配置，无需加入本组。请在手机打开新版 LanLink，开启 USB 调试并信任此电脑。").foregroundStyle(.secondary)
+        HStack{Text(L("安卓设备ADB授权")).font(.title2.bold());Spacer();Button(L("返回设备")){model.adbDevice=nil}}
+        Text(L("帮助其他组的设备完成 ADB 配置，无需加入本组。请在手机打开新版 LanLink，开启 USB 调试并信任此电脑。")).foregroundStyle(.secondary)
         ScrollView{VStack(alignment:.leading,spacing:14){ForEach(devices.indices,id:\.self){i in let d=devices[i];let id=d["serial"] as? String ?? "";let ready=d["authorized"] as? Bool == true
-            Button{serial=id}label:{HStack{Image(systemName:serial==id ? "largecircle.fill.circle":"circle");Text((d["model"] as? String ?? "Android")+" · "+id);Spacer();Text(ready ? "已就绪":d["status"] as? String == "device" ? "可授权":"等待 USB 调试")}}.disabled(ready || d["status"] as? String != "device" || busy)
+            Button{serial=id}label:{HStack{Image(systemName:serial==id ? "largecircle.fill.circle":"circle");Text((d["model"] as? String ?? "Android")+" · "+id);Spacer();Text(L(ready ? "已就绪":d["status"] as? String == "device" ? "可授权":"等待 USB 调试"))}}.disabled(ready || d["status"] as? String != "device" || busy)
         }}}
-        Text(message).font(.callout).foregroundStyle(.secondary)
-        HStack{Button("刷新设备"){Task{await refresh()}}.disabled(busy);Spacer();Button("为选中的手机授权"){Task{await authorize()}}.disabled(serial.isEmpty || busy)}
+        Text(Model.displayMessage(message)).font(.callout).foregroundStyle(.secondary)
+        HStack{Button(L("刷新设备")){Task{await refresh()}}.disabled(busy);Spacer();Button(L("为选中的手机授权")){Task{await authorize()}}.disabled(serial.isEmpty || busy)}
     }.buttonStyle(FlatButtonStyle()).task{await refresh()}}
 }
 
@@ -23,16 +23,16 @@ struct AdbAuthorizationView: View {
     func scan() async {guard !busy,!id.isEmpty else{return};busy=true;defer{busy=false};do{let r=try await model.call("adb-match",["id":id]);connected=r["connected"] as? Bool == true;message=r["message"] as? String ?? "等待连接"}catch{connected=false;message=error.localizedDescription}}
     func connect() async {guard connected,!busy else{return};busy=true;defer{busy=false};do{let r=try await model.call("adb-connect",["id":id]);message=r["message"] as? String ?? "ADB 已就绪"}catch{message=error.localizedDescription}}
     var body:some View {VStack(alignment:.leading,spacing:20){
-        HStack {Text(guide ? "连接一次，自由控制":"ADB 键鼠授权").font(.title2.bold());Spacer();if !guide{Button("返回设备"){model.adbDevice=nil;model.sidebarPage="adb"}}}
-        if device.id.isEmpty {Picker("本组手机",selection:$targetId){Text("请选择组内手机").tag("");ForEach(model.devices.filter{$0.platform=="android" && $0.online}){Text($0.name).tag($0.id)}}.onChange(of:targetId){_,_ in connected=false;Task{await scan()}}}
+        HStack {Text(L(guide ? "连接一次，自由控制":"ADB 键鼠授权")).font(.title2.bold());Spacer();if !guide{Button(L("返回设备")){model.adbDevice=nil;model.sidebarPage="adb"}}}
+        if device.id.isEmpty {Picker(L("本组手机"),selection:$targetId){Text(L("请选择组内手机")).tag("");ForEach(model.devices.filter{$0.platform=="android" && $0.online}){Text($0.name).tag($0.id)}}.onChange(of:targetId){_,_ in connected=false;Task{await scan()}}}
         ScrollView {VStack(alignment:.leading,spacing:18){
-            Text("为「"+device.name+"」准备 ADB 连接").font(.headline)
-            Text("01  开启 USB 调试\n手机设置 → 关于手机，连续点击系统版本开启开发者选项，再打开 USB 调试。\n\n02  用数据线连接电脑\n解锁手机，允许 USB 调试并勾选始终允许此电脑，保持手机 LanLink 在线。\n\n03  自动匹配，点击连接\n核对组内设备身份后，点击连接自动配置 ADB，无需选择调试设备。").lineSpacing(7)
-            Text("小米等机型如出现系统输入失败，还需开启 USB 调试（安全设置）。").font(.caption).foregroundStyle(.secondary)
-            Text("助手就绪后，同组其他电脑可直接使用，无需重复连接数据线。手机重启后，连接已信任的电脑恢复助手即可。系统 USB 调试信任按电脑分别保存，新电脑恢复助手时仍需手机确认。").font(.callout).padding(16).background(Color.blue.opacity(0.06),in:RoundedRectangle(cornerRadius:14))
+            Text(LF("为「{0}」准备 ADB 连接", device.name)).font(.headline)
+            Text(L("01  开启 USB 调试\n手机设置 → 关于手机，连续点击系统版本开启开发者选项，再打开 USB 调试。\n\n02  用数据线连接电脑\n解锁手机，允许 USB 调试并勾选始终允许此电脑，保持手机 LanLink 在线。\n\n03  自动匹配，点击连接\n核对组内设备身份后，点击连接自动配置 ADB，无需选择调试设备。")).lineSpacing(7)
+            Text(L("小米等机型如出现系统输入失败，还需开启 USB 调试（安全设置）。")).font(.caption).foregroundStyle(.secondary)
+            Text(L("助手就绪后，同组其他电脑可直接使用，无需重复连接数据线。手机重启后，连接已信任的电脑恢复助手即可。系统 USB 调试信任按电脑分别保存，新电脑恢复助手时仍需手机确认。")).font(.callout).padding(16).background(Color.blue.opacity(0.06),in:RoundedRectangle(cornerRadius:14))
         }.frame(maxWidth:.infinity,alignment:.leading)}
-        Text(message).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal:false,vertical:true)
-        HStack {if guide{Button("取消"){model.adbGuide?.window.close()}};Spacer();Button("检测连接"){Task{await scan()}}.disabled(busy);Button(busy ? "正在处理…":"连接"){Task{await connect()}}.disabled(busy || !connected)}
+        Text(Model.displayMessage(message)).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal:false,vertical:true)
+        HStack {if guide{Button(L("取消")){model.adbGuide?.window.close()}};Spacer();Button(L("检测连接")){Task{await scan()}}.disabled(busy);Button(L(busy ? "正在处理…":"连接")){Task{await connect()}}.disabled(busy || !connected)}
     }.buttonStyle(FlatButtonStyle()).task {while !Task.isCancelled {await scan();try? await Task.sleep(for:.seconds(6))}}}
 }
 
@@ -55,22 +55,107 @@ extension Model {
             let result=try await call("feature-prepare",["id":device.id,"permissions":keys])
             guard result["ready"] as? Bool == true else{await refresh();return}
             if result["allowed"] as? Bool == true{cancelFeature(device.id);action();return}
-            let alert=NSAlert();alert.messageText="需要设备授权";alert.informativeText="请在「"+device.name+"」上授权此功能。";alert.addButton(withTitle:"发起授权");alert.addButton(withTitle:"取消")
+            let alert=NSAlert();alert.messageText=L("需要设备授权");alert.informativeText=LF("请在「{0}」上授权此功能。", device.name);alert.addButton(withTitle:L("发起授权"));alert.addButton(withTitle:L("取消"))
             if alert.runModal() == .alertFirstButtonReturn{_ = try await call("access-request",["id":device.id,"permissions":keys]);await refresh()}else{cancelFeature(device.id)}
         }catch{cancelFeature(device.id);notice=error.localizedDescription}}
     }
 }
 
-@MainActor final class AccessController:NSObject,NSWindowDelegate {
-    let model:Model;let request:[String:Any];let window:NSWindow;var task:Task<Void,Never>?;var done=false;var closed=false
-    var requestID:String{request["requestId"] as? String ?? ""}
-    init(model:Model,request:[String:Any]){self.model=model;self.request=request;window=NSWindow(contentRect:NSRect(x:0,y:0,width:420,height:220),styleMask:[.titled,.closable],backing:.buffered,defer:false);super.init();window.title="等待设备授权";window.delegate=self;window.isReleasedWhenClosed=false
-        window.contentView=NSHostingView(rootView:VStack(alignment:.leading,spacing:24){Text("请在被控设备允许本设备控制").font(.title3.bold());Text("请打开「"+(request["name"] as? String ?? "设备")+"」上的 LanLink，确认授权请求。");Button("取消"){self.window.close()}}.padding(24).background(Palette.surface));window.center();window.makeKeyAndOrderFront(nil)
-        task=Task{[weak self] in while !Task.isCancelled{guard let self,!self.closed else{return};await self.check();try? await Task.sleep(for:.seconds(1))}}
+@MainActor final class AccessController: NSObject, NSWindowDelegate, ObservableObject {
+    let model: Model; let request: [String: Any]; let window: NSWindow
+    var task: Task<Void, Never>?; var done = false; var closed = false; var completing = false
+    let retryFeature: (() -> Void)?
+    @Published var message: String
+    @Published var ended = false
+    @Published var retrying = false
+    var requestID: String { request["requestId"] as? String ?? "" }
+    var deviceID: String { request["id"] as? String ?? "" }
+    init(model: Model, request: [String: Any]) {
+        self.model = model; self.request = request; retryFeature = model.pendingFeature
+        message = LF("请打开“{0}”上的 LanLink，确认授权请求。", request["name"] as? String ?? L("设备"))
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 260), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        super.init(); window.title = L("等待设备授权"); window.delegate = self; window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: AccessWaitingView(controller: self))
+        window.center(); window.makeKeyAndOrderFront(nil)
+        task = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self, !self.closed, !self.ended else { return }
+                await self.check()
+                do { try await Task.sleep(for: .seconds(1)) } catch { return }
+            }
+        }
     }
-    func check() async {do{let s=try await model.call("access-status",["requestId":requestID]);guard !closed else{return};if s["ended"] as? Bool == true{window.close();return};if s["ready"] as? Bool == true{let intent=try await model.call("access-complete",["requestId":requestID]);guard !closed || done else{return};end();if intent["capture"] as? Bool == true{_ = try await model.call("control",["id":intent["id"] ?? "","capture":true,"edge":intent["edge"] ?? "right","newSession":true])}else{model.resumeFeature(request["id"] as? String ?? "")}}}catch{model.notice=error.localizedDescription}}
-    func end(){done=true;window.close()}
-    func windowWillClose(_ notification:Notification){closed=true;task?.cancel();task=nil;if !done{model.cancelFeature(request["id"] as? String ?? "");if model.remoteID == request["id"] as? String{model.autoControl=false;model.remotePrepared=false;model.controlling=false;model.resumeRemote=false;model.controlVersion+=1};model.perform("access-cancel",["requestId":requestID])};if model.accessController === self{model.accessController=nil};window.contentView=nil}
+    func showEnded(_ reason: String) {
+        guard !closed else { return }
+        ended = true; message = Model.readableMessage(reason); task?.cancel(); task = nil
+        model.cancelFeature(deviceID)
+        if model.remoteID == deviceID { model.autoControl = false; model.remotePrepared = false; model.controlling = false; model.resumeRemote = false; model.controlVersion += 1; model.controlConflict = false; model.clearRemoteNotice() }
+        model.showSuccessToast(message, symbol: "info.circle")
+    }
+    func check() async {
+        if let expires = request["expires"] as? Double, Date().timeIntervalSince1970 * 1000 >= expires {
+            showEnded("授权请求已超时。请确认对方在线后重新请求。")
+            _ = try? await model.call("access-cancel", ["requestId": requestID]); return
+        }
+        do {
+            let status = try await model.call("access-status", ["requestId": requestID])
+            guard !closed, !ended else { return }
+            if let text = status["message"] as? String, !text.isEmpty { message = Model.readableMessage(text) }
+            if status["ended"] as? Bool == true { showEnded(status["message"] as? String ?? "授权请求已结束，请重新请求。"); return }
+            if status["ready"] as? Bool == true {
+                completing = true; defer { completing = false }
+                let intent = try await model.call("access-complete", ["requestId": requestID])
+                guard !closed else { return }; end()
+                if intent["capture"] as? Bool == true { _ = try await model.call("control", ["id": intent["id"] ?? "", "capture": true, "edge": intent["edge"] ?? "right", "newSession": true]) }
+                else { model.resumeFeature(deviceID) }
+            }
+        } catch { if !closed { message = Model.readableMessage(error.localizedDescription) } }
+    }
+    func retry() async {
+        guard !retrying else { return }; retrying = true; defer { retrying = false }
+        do {
+            _ = try await model.call("access-cancel", ["requestId": requestID])
+            _ = try await model.call("access-request", ["id": deviceID, "permissions": request["keys"] ?? ["input", "screen"]])
+            model.pendingFeatureID = deviceID
+            if let retryFeature { model.pendingFeature = retryFeature }
+            else if let intent = request["intent"] as? [String: Any] {
+                let deviceID = self.deviceID
+                model.pendingFeature = { [weak model] in
+                    guard let model else { return }; model.cancelFeature(deviceID)
+                    if model.remoteID == deviceID {
+                        model.autoControl = true; model.freshControl = true; model.controlConflict = false
+                        Task { await model.beginRemoteControl() }
+                    } else { var values = intent; values["newSession"] = true; model.perform("control", values) }
+                }
+            }
+            end(); await model.refresh()
+        } catch { message = Model.readableMessage(error.localizedDescription) + "。请确认对方在线后重试。" }
+    }
+    func end() { done = true; window.close() }
+    func windowWillClose(_ notification: Notification) {
+        closed = true; task?.cancel(); task = nil
+        if !done {
+            model.cancelFeature(deviceID)
+            if model.remoteID == deviceID { model.autoControl = false; model.remotePrepared = false; model.controlling = false; model.resumeRemote = false; model.controlVersion += 1; model.controlConflict = false; model.clearRemoteNotice() }
+            model.perform("access-cancel", ["requestId": requestID])
+        }
+        if model.accessController === self { model.accessController = nil }
+        window.contentView = nil
+    }
+}
+struct AccessWaitingView: View {
+    @ObservedObject var controller: AccessController
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text(L(controller.ended ? "授权请求已结束" : "等待设备授权")).font(.title3.bold())
+            Text(Model.displayMessage(controller.message)).fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("accessRequestStatus")
+            HStack {
+                Button(L(controller.ended ? "返回设备列表" : "取消请求")) { controller.model.appDelegate?.showMain(); controller.model.sidebarPage = "devices"; controller.window.close() }
+                Spacer()
+                if controller.ended { Button(L(controller.retrying ? "正在请求…" : "重新请求")) { Task { await controller.retry() } }.disabled(controller.retrying) }
+            }
+        }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).background(Palette.surface).buttonStyle(FlatButtonStyle())
+    }
 }
 
 // Render the same restricted SVG paths as Windows with native SwiftUI vectors.
@@ -124,7 +209,7 @@ struct AdbMotion: View {
     init(model:Model,request:[String:Any]) {
         self.model=model; self.request=request
         window=NSWindow(contentRect:NSRect(x:0,y:0,width:620,height:740),styleMask:[.titled,.closable],backing:.buffered,defer:false)
-        super.init(); window.title="连接手机 · ADB 引导"; window.isReleasedWhenClosed=false; window.delegate=self
+        super.init(); window.title=L("连接手机 · ADB 引导"); window.isReleasedWhenClosed=false; window.delegate=self
         showStage(request["revoked"] as? Bool == true)
         window.center(); window.makeKeyAndOrderFront(nil)
         task=Task { [weak self] in
@@ -137,7 +222,7 @@ struct AdbMotion: View {
     }
     func showStage(_ value:Bool){revoked=value;if value{restorePending=true}
         let device=Device(id:deviceID,name:request["name"] as? String ?? "Android 手机",platform:"android",online:true)
-        window.contentView=NSHostingView(rootView:VStack(alignment:.leading,spacing:16){if value{Text("请在手机上允许 ADB 授权").font(.title2.bold());AdbMotion(asset:"adb-allow.svg");Text("之前的 ADB 授权已被解除。请在手机 LanLink 弹窗中点击「允许 ADB 授权」，并保持数据线连接。允许后自动继续。");Button("取消"){self.window.close()}}else{AdbMotion();AdbAuthorizationView(model:model,device:device,guide:true)}}.padding(22).background(Palette.surface))
+        window.contentView=NSHostingView(rootView:VStack(alignment:.leading,spacing:16){if value{Text(L("请在手机上允许 ADB 授权")).font(.title2.bold());AdbMotion(asset:"adb-allow.svg");Text(L("之前的 ADB 授权已被解除。请在手机 LanLink 弹窗中点击「允许 ADB 授权」，并保持数据线连接。允许后自动继续。"));Button(L("取消")){self.window.close()}}else{AdbMotion();AdbAuthorizationView(model:model,device:device,guide:true)}}.padding(22).background(Palette.surface))
     }
     func check() async {
         do {
@@ -159,7 +244,7 @@ struct AdbMotion: View {
         closed=true;task?.cancel();task=nil
         if !completed {
             model.cancelFeature(deviceID)
-            if model.remoteID == deviceID { model.autoControl=false;model.remotePrepared=false;model.controlling=false;model.resumeRemote=false;model.controlVersion += 1 }
+            if model.remoteID == deviceID { model.autoControl=false;model.remotePrepared=false;model.controlling=false;model.resumeRemote=false;model.controlVersion += 1;model.controlConflict=false;model.clearRemoteNotice() }
             model.perform("adb-guide-cancel",["requestId":requestID])
         }
         if model.adbGuide === self { model.adbGuide=nil }

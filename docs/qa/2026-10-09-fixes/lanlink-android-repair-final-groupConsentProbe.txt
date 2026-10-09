@@ -1,0 +1,2 @@
+PASS: four independent group peers, first-use defaults, explicit per-device/app restrictions, persistent revoke, restored access, live system-helper readiness and shared multi-viewer encoder lifecycle
+

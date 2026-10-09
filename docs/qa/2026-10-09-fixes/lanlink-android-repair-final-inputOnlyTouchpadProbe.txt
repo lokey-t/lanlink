@@ -1,0 +1,2 @@
+PASS: encrypted input-only touchpad acquire/release, no screen permission or stream, input consent/readiness, cancellation, active/pending remote termination and native-capability gate
+

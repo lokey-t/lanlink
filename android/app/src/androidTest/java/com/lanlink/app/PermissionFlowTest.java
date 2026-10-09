@@ -129,12 +129,28 @@ public final class PermissionFlowTest extends Instrumentation {
     Bundle result = new Bundle();
     Activity activity = null;
     Wire peer = null;
+    android.content.SharedPreferences languagePrefs = getTargetContext().getSharedPreferences("identity", 0);
+    String previousLanguage = languagePrefs.getString("language", null);
+    boolean pinnedLanguage = false;
     if (!Build.HARDWARE.equals("ranchu") && !Build.HARDWARE.equals("goldfish")) {
       result.putString("stream", "This test only runs on a disposable Android emulator.\n");
       finish(Activity.RESULT_CANCELED, result);
       return;
     }
     try {
+      // All probes require a resumed Activity. The first-launch notification dialog
+      // otherwise pauses it, racing the standalone ADB confirmation assertion.
+      // This runner is explicitly restricted above to disposable emulators.
+      if (Build.VERSION.SDK_INT >= 33) getUiAutomation().grantRuntimePermission(
+          getTargetContext().getPackageName(), android.Manifest.permission.POST_NOTIFICATIONS);
+      if (options != null && options.containsKey("languageProbe")) {
+        result.putString("stream", LanguageProbe.run(this) + "\n");
+        finish(Activity.RESULT_OK, result);
+        return;
+      }
+      // Existing permission/UI probes use Chinese labels; make their locale explicit.
+      Language.setMode(getTargetContext(), "zh-Hans");
+      pinnedLanguage = true;
       activity =
           startActivitySync(
               new Intent(getTargetContext(), MainActivity.class)
@@ -505,6 +521,11 @@ public final class PermissionFlowTest extends Instrumentation {
       result.putString("stream", "\nFAIL: " + android.util.Log.getStackTraceString(failure) + "\n");
       finish(Activity.RESULT_CANCELED, result);
     } finally {
+      if (pinnedLanguage) {
+        if (previousLanguage == null) languagePrefs.edit().remove("language").commit();
+        else languagePrefs.edit().putString("language", previousLanguage).commit();
+        Language.refresh(getTargetContext());
+      }
       if (peer != null) peer.close();
       if (activity != null) {
         Activity a = activity;

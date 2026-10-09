@@ -1,0 +1,2 @@
+PASS: fullscreen coordinate mapping, letterbox exclusion, pinch/pan, gesture settings, three-finger keyboard, cancellation, native touchpad movement/scroll/click and drag release
+

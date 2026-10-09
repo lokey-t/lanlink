@@ -1,0 +1,1 @@
+PASS: scanned invitation auto-submits, real SRP exchange + encrypted connection, return home, group access allowed by default, explicit revoked-access restoration and remembered decision.

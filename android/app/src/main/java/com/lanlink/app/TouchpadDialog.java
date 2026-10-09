@@ -36,23 +36,27 @@ final class TouchpadDialog extends Dialog {
       if (closed || !isShowing()) return;
       boolean connected = peer.connected && service.peers.get(peer.id) == peer;
       boolean owned = connected && peer.id.equals(service.active);
-      if (peer.id.equals(service.endedPeer) && service.endedAt >= requestSince) {
+      if (!connected) {
         retryAutomatically = false;
         setReady(false);
-        status.setText("对方已结束控制，点击重新请求可再次连接");
+        status.setText(Language.t("设备已离线，请返回列表并等待设备上线"));
+      } else if (peer.id.equals(service.endedPeer) && service.endedAt >= requestSince) {
+        retryAutomatically = false;
+        setReady(false);
+        status.setText(Language.t("对方已结束控制，点击重新请求可再次连接"));
       } else if (owned) {
         wasConnected = true;
         setReady(true);
-        status.setText("已连接 · 原生触控板");
+        status.setText(Language.t("已连接 · 原生触控板"));
       } else {
         setReady(false);
         if (!connected) {
           retryAutomatically = false;
-          status.setText("设备已离线，请返回列表并等待设备上线");
+          status.setText(Language.t("设备已离线，请返回列表并等待设备上线"));
         } else if (wasConnected) {
           retryAutomatically = false;
           wasConnected = false;
-          status.setText("控制已中断，点击重新请求");
+          status.setText(Language.t("控制已中断，点击重新请求"));
         } else if (retryAutomatically && !requesting && System.currentTimeMillis() >= nextAttempt) {
           requestControl();
         }
@@ -72,19 +76,19 @@ final class TouchpadDialog extends Dialog {
     content.setPadding(ui.dp(18), ui.dp(12), ui.dp(18), ui.dp(18));
     outer.addView(content, new LinearLayout.LayoutParams(-1, -1));
     LinearLayout header = ui.row();
-    header.addView(tool("back", "关闭并释放触控板", this::dismiss),
+    header.addView(tool("back", Language.t("关闭并释放触控板"), this::dismiss),
         new LinearLayout.LayoutParams(ui.dp(48), ui.dp(48)));
     LinearLayout labels = ui.column();
     labels.setPadding(ui.dp(12), 0, ui.dp(8), 0);
-    TextView title = ui.text(peer.info.optString("name", "触控板"), 19, 0xfff0f2fa);
+    TextView title = ui.text(peer.info.optString("name", Language.t("触控板")), 19, 0xfff0f2fa);
     title.setMaxLines(1);
     title.setEllipsize(android.text.TextUtils.TruncateAt.END);
     labels.addView(title);
     ui.gap(labels, 5);
-    status = ui.text("正在请求控制…", 12, 0xffaeb8cb);
+    status = ui.text(Language.t("正在请求控制…"), 12, 0xffaeb8cb);
     labels.addView(status);
     header.addView(labels, new LinearLayout.LayoutParams(0, -2, 1));
-    header.addView(tool("keyboard", "打开远程键盘", this::showKeyboard),
+    header.addView(tool("keyboard", Language.t("打开远程键盘"), this::showKeyboard),
         new LinearLayout.LayoutParams(ui.dp(48), ui.dp(48)));
     content.addView(header);
     ui.gap(content, 12);
@@ -97,11 +101,12 @@ final class TouchpadDialog extends Dialog {
     ui.gap(content, 14);
     LinearLayout footer = ui.row();
     LinearLayout hints = ui.column();
-    hints.addView(ui.text("单指移动 · 轻点单击 · 长按拖动", 12, 0xffc9d0df));
+    hints.addView(ui.text(Language.t("单指移动 · 轻点单击 · 长按拖动"), 12, 0xffc9d0df));
     ui.gap(hints, 5);
-    hints.addView(ui.text("双指滚动 · 双指轻点右键", 11, 0xff8e9ab0));
+    hints.addView(ui.text(Language.t("双指滚动 · 双指轻点右键"), 11, 0xff8e9ab0));
     footer.addView(hints, new LinearLayout.LayoutParams(0, -2, 1));
-    connect = ui.button("重新请求", false, () -> {
+    connect = ui.button(Language.t("重新请求"), false, () -> {
+      if (!currentPeerConnected()) { dismiss(); return; }
       if (requesting) return;
       freshRequest = true;
       requestSince = Math.max(System.currentTimeMillis(), service.endedAt + 1);
@@ -150,27 +155,32 @@ final class TouchpadDialog extends Dialog {
     });
   }
 
+  private boolean currentPeerConnected() {
+    return peer.connected && service.peers.get(peer.id) == peer;
+  }
+
   private void setReady(boolean ready) {
     if (!ready && pad.isEnabled()) pad.cancelGesture();
     pad.setEnabled(ready);
     pad.setAlpha(ready ? 1f : .5f);
     connect.setVisibility(ready ? View.GONE : View.VISIBLE);
-    connect.setEnabled(!requesting);
-    connect.setText(requesting ? "请求中…" : "重新请求");
+    connect.setEnabled(!currentPeerConnected() || !requesting);
+    connect.setText(!currentPeerConnected() ? Language.t("返回设备列表") : requesting ? Language.t("请求中…") : Language.t("重新请求"));
   }
 
   private void failed(Exception failure) {
     if (closed) return;
     setReady(false);
-    String message = failure.getMessage() == null ? "连接失败，请重新请求" : failure.getMessage();
+    String message = failure.getMessage() == null ? Language.t("连接失败，请重新请求") : failure.getMessage();
     status.setText(message.replaceFirst("^[A-Z_]+: ?", ""));
   }
 
   private void requestControl() {
-    if (closed || requesting || !peer.connected) return;
+    if (closed || requesting) return;
+    if (!currentPeerConnected()) { setReady(false); status.setText(Language.t("设备已离线，请返回列表并等待设备上线")); return; }
     requesting = true;
     setReady(false);
-    status.setText("正在请求控制…");
+    status.setText(Language.t("正在请求控制…"));
     final boolean fresh = freshRequest;
     commands.execute(() -> {
       try {
@@ -185,7 +195,7 @@ final class TouchpadDialog extends Dialog {
           freshRequest = false;
           wasConnected = true;
           setReady(true);
-          status.setText("已连接 · 原生触控板");
+          status.setText(Language.t("已连接 · 原生触控板"));
         });
       } catch (Exception failure) {
         main.post(() -> {

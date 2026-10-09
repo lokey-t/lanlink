@@ -34,6 +34,6 @@ export async function groupPermissions(service) {
       if (online && report?.version !== 1) message = '请升级此设备以查看权限';
     } catch { message = '暂时无法读取，请确认设备在线并已升级'; }
     return { id, name: local ? service.config.name : peer?.info?.name || info.name || '设备', platform: local ? process.platform : peer?.info?.platform || info.platform,
-      local, online, message, permissions: permissionRows(report), engine: report?.engine || null };
+      local, online, message, permissions: permissionRows(report), inboundPermissions:local?[]:Object.entries(labels).map(([key,label])=>({key,label,allowed:service.consent.allowed(id,key)})), engine: report?.engine || null };
   })) };
 }

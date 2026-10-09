@@ -4,6 +4,8 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $version = (Get-Content (Join-Path $root 'package.json') -Raw | ConvertFrom-Json).version
 if (-not $NodeRuntime) { $NodeRuntime = Split-Path (Get-Command node).Source }
 $runtime = (Resolve-Path $NodeRuntime).Path
+& node (Join-Path $root 'scripts/build-info.js')
+if ($LASTEXITCODE -ne 0) { throw 'Build identity generation failed' }
 if (-not (Test-Path -LiteralPath (Join-Path $runtime 'node.exe'))) { throw 'Node runtime missing' }
 if (-not (Test-Path -LiteralPath (Join-Path $root 'node_modules/werift/package.json'))) {throw 'Run npm ci --ignore-scripts before packaging the WebRTC dependencies.'}
 $output = Join-Path $root "dist/LanLink-$version-windows-x64"
@@ -29,7 +31,7 @@ if(!(Test-Path -LiteralPath $quicDll)){throw 'Build the QUIC native library befo
 Copy-Item -LiteralPath $quicDll -Destination (Join-Path $output 'runtime/lanlink_quic.dll')
 New-Item -ItemType Directory -Force (Join-Path $output 'desktop/windows') | Out-Null
 Copy-Item -LiteralPath (Join-Path $root 'desktop/windows/Theme.xaml') -Destination (Join-Path $output 'desktop/windows/Theme.xaml')
-foreach ($name in @('package.json','package-lock.json','README.md','README.en.md','CHANGELOG.md','THIRD_PARTY_NOTICES.md')) { Copy-Item -LiteralPath (Join-Path $root $name) -Destination $output }
+foreach ($name in @('build-info.json','package.json','package-lock.json','README.md','README.en.md','CHANGELOG.md','THIRD_PARTY_NOTICES.md')) { Copy-Item -LiteralPath (Join-Path $root $name) -Destination $output }
 & (Join-Path $root 'desktop/windows/build.ps1') -Output "dist/LanLink-$version-windows-x64/LanLink.exe"
 if (-not $NoZip) {
     Add-Type -AssemblyName System.IO.Compression.FileSystem

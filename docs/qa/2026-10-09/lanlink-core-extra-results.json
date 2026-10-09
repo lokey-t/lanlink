@@ -1,0 +1,58 @@
+[
+  {
+    "id": "clipboard-return-to-prior-content",
+    "confirmed": true,
+    "expected": "B receives fresh X",
+    "actual": {
+      "aSystem": "same-text-X",
+      "bSystem": "intermediate-Y",
+      "aLatest": "intermediate-Y"
+    },
+    "repro": "A copies X → B copies Y → A copies X again"
+  },
+  {
+    "id": "online-rename-stale",
+    "confirmed": true,
+    "actual": {
+      "local": "A-Renamed",
+      "remote": "A",
+      "remoteSaved": "A"
+    },
+    "repro": "Rename online A, refresh/tick both sides"
+  },
+  {
+    "id": "unchanged-file-upload-evicts-live-offer",
+    "confirmed": true,
+    "actual": {
+      "offerCount": 20,
+      "latestOfferPresent": false,
+      "transferError": "文件分享已过期或范围无效，请重新复制"
+    },
+    "repro": "Copy file, upload original plus 20 unchanged repeated uploads, receiver then fetches latest file"
+  },
+  {
+    "id": "rejected-settings-partially-apply",
+    "confirmed": true,
+    "actual": {
+      "settingsError": "设备名称应为 1–80 字符",
+      "inMemoryTheme": "light",
+      "persistedTheme": "dark"
+    },
+    "repro": "settings(theme:light,name:empty) after theme dark"
+  },
+  {
+    "id": "failed-file-send-retains-outgoing-slots",
+    "confirmed": true,
+    "actual": {
+      "failedAttempts": 3,
+      "outgoingSlots": 3,
+      "sourceOffers": 3
+    },
+    "repro": "Receiver stage-offer rejects; retry same file three times"
+  },
+  {
+    "id": "clipboard-explicit-denial",
+    "passed": true,
+    "actual": "No native call after revoked source attempted text write"
+  }
+]

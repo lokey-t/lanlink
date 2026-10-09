@@ -1,0 +1,16 @@
+Foreground editing run 1: 10 complete shortcut/reactivation sequences
+MAC_EDITING_PROBE_OK
+
+Foreground editing run 2: 10 complete shortcut/reactivation sequences
+MAC_EDITING_PROBE_OK
+
+Full native UX regression
+✔ macOS editing, service recovery, and offline authorization use live native models (32186.102125ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 32264.342333

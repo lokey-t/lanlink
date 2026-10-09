@@ -32,6 +32,8 @@ public final class Wire implements AutoCloseable {
   QuicMotion.Sender quicTx;QuicMotion.Receiver quicRx;
   QuicInputQueue quicInputs;
   private final Object controlOrder = new Object();
+  private final Object heartbeatOrder = new Object();
+  private FutureTask<JSONObject> heartbeat;
   private final JSONObject identity;
   private final byte[] secret;
   private final Listener listener;
@@ -233,7 +235,30 @@ public final class Wire implements AutoCloseable {
   void receiveNotify(JSONObject message){listener.message(this,message);}
 
   public JSONObject request(String method, JSONObject args) throws Exception {
+    if (method.equals("keepControl")) {
+      FutureTask<JSONObject> task;
+      synchronized (heartbeatOrder) {
+        if (heartbeat == null) heartbeat = new FutureTask<>(() -> requestControl(method, args));
+        task = heartbeat;
+      }
+      task.run(); // FutureTask executes only once, including concurrent renewals.
+      try { return task.get(); }
+      catch (ExecutionException error) {
+        Throwable cause = error.getCause();
+        if (cause instanceof Exception) throw (Exception) cause;
+        throw error;
+      } finally {
+        synchronized (heartbeatOrder) { if (task.isDone() && heartbeat == task) heartbeat = null; }
+      }
+    }
     if (AuxLink.CONTROL.contains(method)) synchronized (controlOrder) {
+      return requestControl(method, args);
+    }
+    int timeout=method.equals("paste")?120000:15000;
+    return quicConn!=0&&!method.equals("quicOpen")?quic.request(this,method,args,timeout):requestDirect(method,args,timeout);
+  }
+
+  private JSONObject requestControl(String method, JSONObject args) throws Exception {
       Wire fast = fastPath;
       if (fast != null && fast.connected) {
         try { return fast.requestDirect(method, args, 1500); }
@@ -241,15 +266,15 @@ public final class Wire implements AutoCloseable {
           if (!fast.connected || error instanceof TimeoutException) {
             fastPath = null;
             fast.close();
-            try { requestDirect("inputReset", obj(), 1500); } catch (Exception ignored) {}
+            // Transport recovery remains ordered even when a lease detected it.
+            synchronized (controlOrder) {
+              try { requestDirect("inputReset", obj(), 1500); } catch (Exception ignored) {}
+            }
           }
           throw error;
         }
       }
       return quicConn!=0?quic.request(this,method,args,15000):requestDirect(method, args, 15000);
-    }
-    int timeout=method.equals("paste")?120000:15000;
-    return quicConn!=0&&!method.equals("quicOpen")?quic.request(this,method,args,timeout):requestDirect(method,args,timeout);
   }
 
   JSONObject requestDirect(String method, JSONObject args, int timeout) throws Exception {

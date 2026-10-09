@@ -1,0 +1,4743 @@
+{
+  "languages": [
+    {
+      "id": "system",
+      "name": "跟随系统"
+    },
+    {
+      "id": "zh-Hans",
+      "name": "简体中文"
+    },
+    {
+      "id": "zh-Hant",
+      "name": "繁體中文"
+    },
+    {
+      "id": "en",
+      "name": "English"
+    },
+    {
+      "id": "ja",
+      "name": "日本語"
+    },
+    {
+      "id": "ko",
+      "name": "한국어"
+    },
+    {
+      "id": "de",
+      "name": "Deutsch"
+    },
+    {
+      "id": "fr",
+      "name": "Français"
+    },
+    {
+      "id": "es",
+      "name": "Español"
+    },
+    {
+      "id": "pt",
+      "name": "Português"
+    },
+    {
+      "id": "it",
+      "name": "Italiano"
+    },
+    {
+      "id": "ru",
+      "name": "Русский"
+    }
+  ],
+  "messages": {
+    "语言": {
+      "en": "Language",
+      "zh-Hant": "語言",
+      "ja": "言語",
+      "ko": "언어",
+      "de": "Sprache",
+      "fr": "Langue",
+      "es": "Idioma",
+      "pt": "Idioma",
+      "it": "Lingua",
+      "ru": "Язык"
+    },
+    "跟随系统": {
+      "en": "System default",
+      "zh-Hant": "跟隨系統",
+      "ja": "システム設定に従う",
+      "ko": "시스템 설정 따르기",
+      "de": "Systemeinstellung",
+      "fr": "Suivre le système",
+      "es": "Seguir al sistema",
+      "pt": "Seguir o sistema",
+      "it": "Segui il sistema",
+      "ru": "Как в системе"
+    },
+    "设置": {
+      "en": "Settings",
+      "zh-Hant": "設定",
+      "ja": "設定",
+      "ko": "설정",
+      "de": "Einstellungen",
+      "fr": "Paramètres",
+      "es": "Ajustes",
+      "pt": "Configurações",
+      "it": "Impostazioni",
+      "ru": "Настройки"
+    },
+    "设备": {
+      "en": "Devices",
+      "zh-Hant": "裝置",
+      "ja": "デバイス",
+      "ko": "기기",
+      "de": "Geräte",
+      "fr": "Appareils",
+      "es": "Dispositivos",
+      "pt": "Dispositivos",
+      "it": "Dispositivi",
+      "ru": "Устройства"
+    },
+    "控制中心": {
+      "en": "Control center",
+      "zh-Hant": "控制中心",
+      "ja": "コントロールセンター",
+      "ko": "제어 센터",
+      "de": "Steuerzentrale",
+      "fr": "Centre de contrôle",
+      "es": "Centro de control",
+      "pt": "Central de controle",
+      "it": "Centro di controllo",
+      "ru": "Центр управления"
+    },
+    "设备与布局": {
+      "en": "Devices & layout",
+      "zh-Hant": "裝置與佈局",
+      "ja": "デバイスと配置",
+      "ko": "기기 및 배치",
+      "de": "Geräte und Anordnung",
+      "fr": "Appareils et disposition",
+      "es": "Dispositivos y distribución",
+      "pt": "Dispositivos e disposição",
+      "it": "Dispositivi e disposizione",
+      "ru": "Устройства и расположение"
+    },
+    "我的信息": {
+      "en": "My information",
+      "zh-Hant": "我的資訊",
+      "ja": "自分の情報",
+      "ko": "내 정보",
+      "de": "Meine Informationen",
+      "fr": "Mes informations",
+      "es": "Mi información",
+      "pt": "Minhas informações",
+      "it": "Le mie informazioni",
+      "ru": "Мои данные"
+    },
+    "设备名称": {
+      "en": "Device name",
+      "zh-Hant": "裝置名稱",
+      "ja": "デバイス名",
+      "ko": "기기 이름",
+      "de": "Gerätename",
+      "fr": "Nom de l’appareil",
+      "es": "Nombre del dispositivo",
+      "pt": "Nome do dispositivo",
+      "it": "Nome del dispositivo",
+      "ru": "Имя устройства"
+    },
+    "通用": {
+      "en": "General",
+      "zh-Hant": "一般",
+      "ja": "一般",
+      "ko": "일반",
+      "de": "Allgemein",
+      "fr": "Général",
+      "es": "General",
+      "pt": "Geral",
+      "it": "Generali",
+      "ru": "Общие"
+    },
+    "外观": {
+      "en": "Appearance",
+      "zh-Hant": "外觀",
+      "ja": "外観",
+      "ko": "화면 모드",
+      "de": "Darstellung",
+      "fr": "Apparence",
+      "es": "Apariencia",
+      "pt": "Aparência",
+      "it": "Aspetto",
+      "ru": "Оформление"
+    },
+    "深色": {
+      "en": "Dark",
+      "zh-Hant": "深色",
+      "ja": "ダーク",
+      "ko": "어둡게",
+      "de": "Dunkel",
+      "fr": "Sombre",
+      "es": "Oscuro",
+      "pt": "Escuro",
+      "it": "Scuro",
+      "ru": "Тёмное"
+    },
+    "浅色": {
+      "en": "Light",
+      "zh-Hant": "淺色",
+      "ja": "ライト",
+      "ko": "밝게",
+      "de": "Hell",
+      "fr": "Clair",
+      "es": "Claro",
+      "pt": "Claro",
+      "it": "Chiaro",
+      "ru": "Светлое"
+    },
+    "仅对本设备生效": {
+      "en": "Only this device",
+      "zh-Hant": "僅對本裝置生效",
+      "ja": "このデバイスのみに適用",
+      "ko": "이 기기에만 적용",
+      "de": "Nur für dieses Gerät",
+      "fr": "Uniquement cet appareil",
+      "es": "Solo este dispositivo",
+      "pt": "Somente este dispositivo",
+      "it": "Solo questo dispositivo",
+      "ru": "Только это устройство"
+    },
+    "仅对本设备生效，切换后立即应用。": {
+      "en": "Applies immediately to this device only.",
+      "zh-Hant": "僅對本裝置生效，切換後立即套用。",
+      "ja": "このデバイスにのみ、すぐに適用されます。",
+      "ko": "이 기기에만 즉시 적용됩니다.",
+      "de": "Wird sofort nur auf diesem Gerät angewendet.",
+      "fr": "S’applique immédiatement à cet appareil uniquement.",
+      "es": "Se aplica de inmediato solo a este dispositivo.",
+      "pt": "Aplica-se imediatamente apenas a este dispositivo.",
+      "it": "Si applica subito solo a questo dispositivo.",
+      "ru": "Применяется сразу, только на этом устройстве."
+    },
+    "语言更改立即生效": {
+      "en": "Language changes apply immediately.",
+      "zh-Hant": "語言變更立即生效",
+      "ja": "言語の変更はすぐに適用されます。",
+      "ko": "언어 변경은 즉시 적용됩니다.",
+      "de": "Sprachänderungen gelten sofort.",
+      "fr": "Le changement de langue est immédiat.",
+      "es": "El cambio de idioma es inmediato.",
+      "pt": "A mudança de idioma é imediata.",
+      "it": "La lingua cambia immediatamente.",
+      "ru": "Язык меняется сразу."
+    },
+    "保存设置": {
+      "en": "Save settings",
+      "zh-Hant": "儲存設定",
+      "ja": "設定を保存",
+      "ko": "설정 저장",
+      "de": "Einstellungen speichern",
+      "fr": "Enregistrer les paramètres",
+      "es": "Guardar ajustes",
+      "pt": "Salvar configurações",
+      "it": "Salva impostazioni",
+      "ru": "Сохранить настройки"
+    },
+    "保存": {
+      "en": "Save",
+      "zh-Hant": "儲存",
+      "ja": "保存",
+      "ko": "저장",
+      "de": "Speichern",
+      "fr": "Enregistrer",
+      "es": "Guardar",
+      "pt": "Salvar",
+      "it": "Salva",
+      "ru": "Сохранить"
+    },
+    "取消": {
+      "en": "Cancel",
+      "zh-Hant": "取消",
+      "ja": "キャンセル",
+      "ko": "취소",
+      "de": "Abbrechen",
+      "fr": "Annuler",
+      "es": "Cancelar",
+      "pt": "Cancelar",
+      "it": "Annulla",
+      "ru": "Отмена"
+    },
+    "关闭": {
+      "en": "Close",
+      "zh-Hant": "關閉",
+      "ja": "閉じる",
+      "ko": "닫기",
+      "de": "Schließen",
+      "fr": "Fermer",
+      "es": "Cerrar",
+      "pt": "Fechar",
+      "it": "Chiudi",
+      "ru": "Закрыть"
+    },
+    "确定": {
+      "en": "OK",
+      "zh-Hant": "確定",
+      "ja": "OK",
+      "ko": "확인",
+      "de": "OK",
+      "fr": "OK",
+      "es": "Aceptar",
+      "pt": "OK",
+      "it": "OK",
+      "ru": "ОК"
+    },
+    "完成": {
+      "en": "Done",
+      "zh-Hant": "完成",
+      "ja": "完了",
+      "ko": "완료",
+      "de": "Fertig",
+      "fr": "Terminé",
+      "es": "Listo",
+      "pt": "Concluído",
+      "it": "Fine",
+      "ru": "Готово"
+    },
+    "返回": {
+      "en": "Back",
+      "zh-Hant": "返回",
+      "ja": "戻る",
+      "ko": "뒤로",
+      "de": "Zurück",
+      "fr": "Retour",
+      "es": "Volver",
+      "pt": "Voltar",
+      "it": "Indietro",
+      "ru": "Назад"
+    },
+    "继续": {
+      "en": "Continue",
+      "zh-Hant": "繼續",
+      "ja": "続ける",
+      "ko": "계속",
+      "de": "Weiter",
+      "fr": "Continuer",
+      "es": "Continuar",
+      "pt": "Continuar",
+      "it": "Continua",
+      "ru": "Продолжить"
+    },
+    "刷新": {
+      "en": "Refresh",
+      "zh-Hant": "重新整理",
+      "ja": "更新",
+      "ko": "새로 고침",
+      "de": "Aktualisieren",
+      "fr": "Actualiser",
+      "es": "Actualizar",
+      "pt": "Atualizar",
+      "it": "Aggiorna",
+      "ru": "Обновить"
+    },
+    "重试": {
+      "en": "Retry",
+      "zh-Hant": "重試",
+      "ja": "再試行",
+      "ko": "다시 시도",
+      "de": "Erneut versuchen",
+      "fr": "Réessayer",
+      "es": "Reintentar",
+      "pt": "Tentar novamente",
+      "it": "Riprova",
+      "ru": "Повторить"
+    },
+    "复制": {
+      "en": "Copy",
+      "zh-Hant": "複製",
+      "ja": "コピー",
+      "ko": "복사",
+      "de": "Kopieren",
+      "fr": "Copier",
+      "es": "Copiar",
+      "pt": "Copiar",
+      "it": "Copia",
+      "ru": "Копировать"
+    },
+    "粘贴": {
+      "en": "Paste",
+      "zh-Hant": "貼上",
+      "ja": "貼り付け",
+      "ko": "붙여넣기",
+      "de": "Einfügen",
+      "fr": "Coller",
+      "es": "Pegar",
+      "pt": "Colar",
+      "it": "Incolla",
+      "ru": "Вставить"
+    },
+    "删除": {
+      "en": "Delete",
+      "zh-Hant": "刪除",
+      "ja": "削除",
+      "ko": "삭제",
+      "de": "Löschen",
+      "fr": "Supprimer",
+      "es": "Eliminar",
+      "pt": "Excluir",
+      "it": "Elimina",
+      "ru": "Удалить"
+    },
+    "移除": {
+      "en": "Remove",
+      "zh-Hant": "移除",
+      "ja": "削除",
+      "ko": "제거",
+      "de": "Entfernen",
+      "fr": "Retirer",
+      "es": "Quitar",
+      "pt": "Remover",
+      "it": "Rimuovi",
+      "ru": "Убрать"
+    },
+    "打开": {
+      "en": "Open",
+      "zh-Hant": "開啟",
+      "ja": "開く",
+      "ko": "열기",
+      "de": "Öffnen",
+      "fr": "Ouvrir",
+      "es": "Abrir",
+      "pt": "Abrir",
+      "it": "Apri",
+      "ru": "Открыть"
+    },
+    "添加设备": {
+      "en": "Add device",
+      "zh-Hant": "新增裝置",
+      "ja": "デバイスを追加",
+      "ko": "기기 추가",
+      "de": "Gerät hinzufügen",
+      "fr": "Ajouter un appareil",
+      "es": "Añadir dispositivo",
+      "pt": "Adicionar dispositivo",
+      "it": "Aggiungi dispositivo",
+      "ru": "Добавить устройство"
+    },
+    "＋ 添加设备": {
+      "en": "Add device",
+      "zh-Hant": "新增裝置",
+      "ja": "デバイスを追加",
+      "ko": "기기 추가",
+      "de": "Gerät hinzufügen",
+      "fr": "Ajouter un appareil",
+      "es": "Añadir dispositivo",
+      "pt": "Adicionar dispositivo",
+      "it": "Aggiungi dispositivo",
+      "ru": "Добавить устройство"
+    },
+    "本机": {
+      "en": "This device",
+      "zh-Hant": "本機",
+      "ja": "このデバイス",
+      "ko": "이 기기",
+      "de": "Dieses Gerät",
+      "fr": "Cet appareil",
+      "es": "Este dispositivo",
+      "pt": "Este dispositivo",
+      "it": "Questo dispositivo",
+      "ru": "Это устройство"
+    },
+    "电脑": {
+      "en": "Computer",
+      "zh-Hant": "電腦",
+      "ja": "パソコン",
+      "ko": "컴퓨터",
+      "de": "Computer",
+      "fr": "Ordinateur",
+      "es": "Ordenador",
+      "pt": "Computador",
+      "it": "Computer",
+      "ru": "Компьютер"
+    },
+    "手机": {
+      "en": "Phone",
+      "zh-Hant": "手機",
+      "ja": "スマートフォン",
+      "ko": "휴대전화",
+      "de": "Telefon",
+      "fr": "Téléphone",
+      "es": "Teléfono",
+      "pt": "Celular",
+      "it": "Telefono",
+      "ru": "Телефон"
+    },
+    "在线": {
+      "en": "Online",
+      "zh-Hant": "上線",
+      "ja": "オンライン",
+      "ko": "온라인",
+      "de": "Online",
+      "fr": "En ligne",
+      "es": "En línea",
+      "pt": "Online",
+      "it": "Online",
+      "ru": "В сети"
+    },
+    "离线": {
+      "en": "Offline",
+      "zh-Hant": "離線",
+      "ja": "オフライン",
+      "ko": "오프라인",
+      "de": "Offline",
+      "fr": "Hors ligne",
+      "es": "Sin conexión",
+      "pt": "Offline",
+      "it": "Offline",
+      "ru": "Не в сети"
+    },
+    "连接": {
+      "en": "Connect",
+      "zh-Hant": "連線",
+      "ja": "接続",
+      "ko": "연결",
+      "de": "Verbinden",
+      "fr": "Connecter",
+      "es": "Conectar",
+      "pt": "Conectar",
+      "it": "Connetti",
+      "ru": "Подключить"
+    },
+    "断开连接": {
+      "en": "Disconnect",
+      "zh-Hant": "中斷連線",
+      "ja": "切断",
+      "ko": "연결 해제",
+      "de": "Trennen",
+      "fr": "Déconnecter",
+      "es": "Desconectar",
+      "pt": "Desconectar",
+      "it": "Disconnetti",
+      "ru": "Отключить"
+    },
+    "配对": {
+      "en": "Pair",
+      "zh-Hant": "配對",
+      "ja": "ペアリング",
+      "ko": "페어링",
+      "de": "Koppeln",
+      "fr": "Associer",
+      "es": "Vincular",
+      "pt": "Parear",
+      "it": "Associa",
+      "ru": "Сопряжение"
+    },
+    "连接中": {
+      "en": "Connecting",
+      "zh-Hant": "連線中",
+      "ja": "接続中",
+      "ko": "연결 중",
+      "de": "Verbindung wird hergestellt",
+      "fr": "Connexion en cours",
+      "es": "Conectando",
+      "pt": "Conectando",
+      "it": "Connessione in corso",
+      "ru": "Подключение"
+    },
+    "未连接": {
+      "en": "Not connected",
+      "zh-Hant": "未連線",
+      "ja": "未接続",
+      "ko": "연결되지 않음",
+      "de": "Nicht verbunden",
+      "fr": "Non connecté",
+      "es": "Sin conectar",
+      "pt": "Não conectado",
+      "it": "Non connesso",
+      "ru": "Не подключено"
+    },
+    "已连接": {
+      "en": "Connected",
+      "zh-Hant": "已連線",
+      "ja": "接続済み",
+      "ko": "연결됨",
+      "de": "Verbunden",
+      "fr": "Connecté",
+      "es": "Conectado",
+      "pt": "Conectado",
+      "it": "Connesso",
+      "ru": "Подключено"
+    },
+    "权限": {
+      "en": "Permissions",
+      "zh-Hant": "權限",
+      "ja": "権限",
+      "ko": "권한",
+      "de": "Berechtigungen",
+      "fr": "Autorisations",
+      "es": "Permisos",
+      "pt": "Permissões",
+      "it": "Autorizzazioni",
+      "ru": "Разрешения"
+    },
+    "本组设备权限": {
+      "en": "Group permissions",
+      "zh-Hant": "本組裝置權限",
+      "ja": "グループの権限",
+      "ko": "그룹 기기 권한",
+      "de": "Gruppenberechtigungen",
+      "fr": "Autorisations du groupe",
+      "es": "Permisos del grupo",
+      "pt": "Permissões do grupo",
+      "it": "Autorizzazioni del gruppo",
+      "ru": "Разрешения группы"
+    },
+    "组设备授权管理": {
+      "en": "Group permissions",
+      "zh-Hant": "群組裝置授權管理",
+      "ja": "グループの権限管理",
+      "ko": "그룹 기기 권한 관리",
+      "de": "Gruppenberechtigungen",
+      "fr": "Autorisations du groupe",
+      "es": "Permisos del grupo",
+      "pt": "Permissões do grupo",
+      "it": "Autorizzazioni del gruppo",
+      "ru": "Разрешения группы"
+    },
+    "安卓授权": {
+      "en": "Android authorization",
+      "zh-Hant": "Android 授權",
+      "ja": "Android の権限設定",
+      "ko": "Android 권한 설정",
+      "de": "Android-Autorisierung",
+      "fr": "Autorisation Android",
+      "es": "Autorización de Android",
+      "pt": "Autorização do Android",
+      "it": "Autorizzazione Android",
+      "ru": "Авторизация Android"
+    },
+    "允许": {
+      "en": "Allow",
+      "zh-Hant": "允許",
+      "ja": "許可",
+      "ko": "허용",
+      "de": "Zulassen",
+      "fr": "Autoriser",
+      "es": "Permitir",
+      "pt": "Permitir",
+      "it": "Consenti",
+      "ru": "Разрешить"
+    },
+    "拒绝": {
+      "en": "Deny",
+      "zh-Hant": "拒絕",
+      "ja": "拒否",
+      "ko": "거부",
+      "de": "Ablehnen",
+      "fr": "Refuser",
+      "es": "Denegar",
+      "pt": "Negar",
+      "it": "Nega",
+      "ru": "Отклонить"
+    },
+    "未授权": {
+      "en": "Not authorized",
+      "zh-Hant": "未授權",
+      "ja": "未許可",
+      "ko": "권한 없음",
+      "de": "Nicht autorisiert",
+      "fr": "Non autorisé",
+      "es": "Sin autorización",
+      "pt": "Não autorizado",
+      "it": "Non autorizzato",
+      "ru": "Нет разрешения"
+    },
+    "已授权": {
+      "en": "Authorized",
+      "zh-Hant": "已授權",
+      "ja": "許可済み",
+      "ko": "권한 허용됨",
+      "de": "Autorisiert",
+      "fr": "Autorisé",
+      "es": "Autorizado",
+      "pt": "Autorizado",
+      "it": "Autorizzato",
+      "ru": "Разрешено"
+    },
+    "已就绪": {
+      "en": "Ready",
+      "zh-Hant": "已就緒",
+      "ja": "準備完了",
+      "ko": "준비됨",
+      "de": "Bereit",
+      "fr": "Prêt",
+      "es": "Listo",
+      "pt": "Pronto",
+      "it": "Pronto",
+      "ru": "Готово"
+    },
+    "恢复中": {
+      "en": "Recovering",
+      "zh-Hant": "復原中",
+      "ja": "復旧中",
+      "ko": "복구 중",
+      "de": "Wiederherstellung",
+      "fr": "Récupération en cours",
+      "es": "Recuperando",
+      "pt": "Recuperando",
+      "it": "Ripristino in corso",
+      "ru": "Восстановление"
+    },
+    "待恢复": {
+      "en": "Awaiting recovery",
+      "zh-Hant": "等待復原",
+      "ja": "復旧待ち",
+      "ko": "복구 대기 중",
+      "de": "Wartet auf Wiederherstellung",
+      "fr": "En attente de récupération",
+      "es": "Esperando recuperación",
+      "pt": "Aguardando recuperação",
+      "it": "In attesa di ripristino",
+      "ru": "Ожидание восстановления"
+    },
+    "暂存文件": {
+      "en": "Staged files",
+      "zh-Hant": "暫存檔案",
+      "ja": "一時保存ファイル",
+      "ko": "임시 저장 파일",
+      "de": "Zwischengespeicherte Dateien",
+      "fr": "Fichiers temporaires",
+      "es": "Archivos temporales",
+      "pt": "Arquivos temporários",
+      "it": "File temporanei",
+      "ru": "Временные файлы"
+    },
+    "剪贴板": {
+      "en": "Clipboard",
+      "zh-Hant": "剪貼簿",
+      "ja": "クリップボード",
+      "ko": "클립보드",
+      "de": "Zwischenablage",
+      "fr": "Presse-papiers",
+      "es": "Portapapeles",
+      "pt": "Área de transferência",
+      "it": "Appunti",
+      "ru": "Буфер обмена"
+    },
+    "共享剪贴板": {
+      "en": "Shared clipboard",
+      "zh-Hant": "共用剪貼簿",
+      "ja": "共有クリップボード",
+      "ko": "공유 클립보드",
+      "de": "Gemeinsame Zwischenablage",
+      "fr": "Presse-papiers partagé",
+      "es": "Portapapeles compartido",
+      "pt": "Área de transferência compartilhada",
+      "it": "Appunti condivisi",
+      "ru": "Общий буфер обмена"
+    },
+    "上传剪贴板": {
+      "en": "Upload clipboard",
+      "zh-Hant": "上傳剪貼簿",
+      "ja": "クリップボードを送信",
+      "ko": "클립보드 업로드",
+      "de": "Zwischenablage hochladen",
+      "fr": "Envoyer le presse-papiers",
+      "es": "Subir portapapeles",
+      "pt": "Enviar área de transferência",
+      "it": "Invia appunti",
+      "ru": "Отправить буфер обмена"
+    },
+    "下载剪贴板": {
+      "en": "Download clipboard",
+      "zh-Hant": "下載剪貼簿",
+      "ja": "クリップボードを取得",
+      "ko": "클립보드 다운로드",
+      "de": "Zwischenablage herunterladen",
+      "fr": "Récupérer le presse-papiers",
+      "es": "Descargar portapapeles",
+      "pt": "Baixar área de transferência",
+      "it": "Scarica appunti",
+      "ru": "Загрузить буфер обмена"
+    },
+    "上传": {
+      "en": "Upload",
+      "zh-Hant": "上傳",
+      "ja": "送信",
+      "ko": "업로드",
+      "de": "Hochladen",
+      "fr": "Envoyer",
+      "es": "Subir",
+      "pt": "Enviar",
+      "it": "Carica",
+      "ru": "Отправить"
+    },
+    "下载": {
+      "en": "Download",
+      "zh-Hant": "下載",
+      "ja": "ダウンロード",
+      "ko": "다운로드",
+      "de": "Herunterladen",
+      "fr": "Télécharger",
+      "es": "Descargar",
+      "pt": "Baixar",
+      "it": "Scarica",
+      "ru": "Скачать"
+    },
+    "无界鼠标": {
+      "en": "Mouse sharing",
+      "zh-Hant": "無界滑鼠",
+      "ja": "マウス共有",
+      "ko": "마우스 공유",
+      "de": "Mausfreigabe",
+      "fr": "Partage de souris",
+      "es": "Ratón compartido",
+      "pt": "Mouse compartilhado",
+      "it": "Condivisione mouse",
+      "ru": "Общая мышь"
+    },
+    "键鼠主设备": {
+      "en": "Keyboard and mouse host",
+      "zh-Hant": "鍵鼠主裝置",
+      "ja": "キーボードとマウスのホスト",
+      "ko": "키보드 및 마우스 호스트",
+      "de": "Tastatur- und Maus-Host",
+      "fr": "Hôte du clavier et de la souris",
+      "es": "Equipo principal de teclado y ratón",
+      "pt": "Host de teclado e mouse",
+      "it": "Host di tastiera e mouse",
+      "ru": "Главное устройство ввода"
+    },
+    "键鼠切换设备方式": {
+      "en": "Device switching method",
+      "zh-Hant": "鍵鼠切換裝置方式",
+      "ja": "デバイスの切り替え方法",
+      "ko": "기기 전환 방식",
+      "de": "Methode zum Gerätewechsel",
+      "fr": "Méthode de changement d’appareil",
+      "es": "Método de cambio de dispositivo",
+      "pt": "Método de troca de dispositivo",
+      "it": "Metodo di cambio dispositivo",
+      "ru": "Способ переключения устройств"
+    },
+    "边缘停留": {
+      "en": "Dwell at screen edge",
+      "zh-Hant": "在邊緣停留切換",
+      "ja": "画面端に留まって切り替え",
+      "ko": "화면 가장자리에서 대기",
+      "de": "Am Bildschirmrand verweilen",
+      "fr": "Attendre au bord de l’écran",
+      "es": "Esperar en el borde",
+      "pt": "Aguardar na borda da tela",
+      "it": "Sosta sul bordo dello schermo",
+      "ru": "Задержка у края экрана"
+    },
+    "到达边缘后停留切换": {
+      "en": "Dwell at screen edge",
+      "zh-Hant": "在邊緣停留切換",
+      "ja": "画面端に留まって切り替え",
+      "ko": "화면 가장자리에서 대기",
+      "de": "Am Bildschirmrand verweilen",
+      "fr": "Attendre au bord de l’écran",
+      "es": "Esperar en el borde",
+      "pt": "Aguardar na borda da tela",
+      "it": "Sosta sul bordo dello schermo",
+      "ru": "Задержка у края экрана"
+    },
+    "快捷键 + 边缘": {
+      "en": "Hotkey + screen edge",
+      "zh-Hant": "快捷鍵 + 邊緣",
+      "ja": "ホットキー＋画面端",
+      "ko": "단축키 + 화면 가장자리",
+      "de": "Tastenkürzel + Bildschirmrand",
+      "fr": "Raccourci + bord de l’écran",
+      "es": "Atajo + borde de pantalla",
+      "pt": "Atalho + borda da tela",
+      "it": "Scorciatoia + bordo",
+      "ru": "Горячая клавиша + край"
+    },
+    "按住快捷键到达边缘切换": {
+      "en": "Hotkey + screen edge",
+      "zh-Hant": "快捷鍵 + 邊緣",
+      "ja": "ホットキー＋画面端",
+      "ko": "단축키 + 화면 가장자리",
+      "de": "Tastenkürzel + Bildschirmrand",
+      "fr": "Raccourci + bord de l’écran",
+      "es": "Atajo + borde de pantalla",
+      "pt": "Atalho + borda da tela",
+      "it": "Scorciatoia + bordo",
+      "ru": "Горячая клавиша + край"
+    },
+    "按住组合键到达边缘": {
+      "en": "Hold these keys and move to the screen edge",
+      "zh-Hant": "按住組合鍵並移到邊緣",
+      "ja": "キーを押しながら画面端へ移動",
+      "ko": "키를 누른 채 가장자리로 이동",
+      "de": "Tasten halten und zum Bildschirmrand bewegen",
+      "fr": "Maintenez ces touches et allez au bord de l’écran",
+      "es": "Mantén estas teclas y ve al borde",
+      "pt": "Segure as teclas e vá até a borda",
+      "it": "Tieni premuti i tasti e vai al bordo",
+      "ru": "Удерживайте клавиши и двигайте к краю"
+    },
+    "按住以下组合键，再将鼠标移到边缘": {
+      "en": "Hold these keys and move to the screen edge",
+      "zh-Hant": "按住組合鍵並移到邊緣",
+      "ja": "キーを押しながら画面端へ移動",
+      "ko": "키를 누른 채 가장자리로 이동",
+      "de": "Tasten halten und zum Bildschirmrand bewegen",
+      "fr": "Maintenez ces touches et allez au bord de l’écran",
+      "es": "Mantén estas teclas y ve al borde",
+      "pt": "Segure as teclas e vá até a borda",
+      "it": "Tieni premuti i tasti e vai al bordo",
+      "ru": "Удерживайте клавиши и двигайте к краю"
+    },
+    "尚未选择": {
+      "en": "Not selected",
+      "zh-Hant": "尚未選擇",
+      "ja": "未選択",
+      "ko": "선택 안 함",
+      "de": "Nicht ausgewählt",
+      "fr": "Non sélectionné",
+      "es": "Sin seleccionar",
+      "pt": "Não selecionado",
+      "it": "Non selezionato",
+      "ru": "Не выбрано"
+    },
+    "其他": {
+      "en": "Other",
+      "zh-Hant": "其他",
+      "ja": "その他",
+      "ko": "기타",
+      "de": "Sonstiges",
+      "fr": "Autres",
+      "es": "Otros",
+      "pt": "Outros",
+      "it": "Altro",
+      "ru": "Прочее"
+    },
+    "运行日志": {
+      "en": "Activity log",
+      "zh-Hant": "執行記錄",
+      "ja": "動作ログ",
+      "ko": "실행 로그",
+      "de": "Aktivitätsprotokoll",
+      "fr": "Journal d’activité",
+      "es": "Registro de actividad",
+      "pt": "Registro de atividades",
+      "it": "Registro attività",
+      "ru": "Журнал работы"
+    },
+    "暂无运行记录": {
+      "en": "No activity yet",
+      "zh-Hant": "暫無執行記錄",
+      "ja": "ログはありません",
+      "ko": "실행 기록 없음",
+      "de": "Noch keine Aktivitäten",
+      "fr": "Aucune activité",
+      "es": "Sin actividad",
+      "pt": "Sem atividades",
+      "it": "Nessuna attività",
+      "ru": "Записей пока нет"
+    },
+    "重启设备服务": {
+      "en": "Restart device service",
+      "zh-Hant": "重新啟動裝置服務",
+      "ja": "デバイスサービスを再起動",
+      "ko": "기기 서비스 재시작",
+      "de": "Gerätedienst neu starten",
+      "fr": "Redémarrer le service",
+      "es": "Reiniciar servicio",
+      "pt": "Reiniciar serviço",
+      "it": "Riavvia servizio",
+      "ru": "Перезапустить службу"
+    },
+    "退出应用": {
+      "en": "Quit application",
+      "zh-Hant": "結束應用程式",
+      "ja": "アプリを終了",
+      "ko": "앱 종료",
+      "de": "Anwendung beenden",
+      "fr": "Quitter l’application",
+      "es": "Salir de la aplicación",
+      "pt": "Sair do aplicativo",
+      "it": "Esci dall’applicazione",
+      "ru": "Выйти из приложения"
+    },
+    "退出 LanLink": {
+      "en": "Quit LanLink",
+      "zh-Hant": "結束 LanLink",
+      "ja": "LanLink を終了",
+      "ko": "LanLink 종료",
+      "de": "LanLink beenden",
+      "fr": "Quitter LanLink",
+      "es": "Salir de LanLink",
+      "pt": "Sair do LanLink",
+      "it": "Esci da LanLink",
+      "ru": "Выйти из LanLink"
+    },
+    "使用说明": {
+      "en": "Help",
+      "zh-Hant": "使用說明",
+      "ja": "使い方",
+      "ko": "사용 안내",
+      "de": "Hilfe",
+      "fr": "Aide",
+      "es": "Ayuda",
+      "pt": "Ajuda",
+      "it": "Guida",
+      "ru": "Справка"
+    },
+    "系统设置": {
+      "en": "System settings",
+      "zh-Hant": "系統設定",
+      "ja": "システム設定",
+      "ko": "시스템 설정",
+      "de": "Systemeinstellungen",
+      "fr": "Paramètres système",
+      "es": "Ajustes del sistema",
+      "pt": "Configurações do sistema",
+      "it": "Impostazioni di sistema",
+      "ru": "Системные настройки"
+    },
+    "前往设置": {
+      "en": "Open settings",
+      "zh-Hant": "前往設定",
+      "ja": "設定を開く",
+      "ko": "설정 열기",
+      "de": "Einstellungen öffnen",
+      "fr": "Ouvrir les paramètres",
+      "es": "Abrir ajustes",
+      "pt": "Abrir configurações",
+      "it": "Apri impostazioni",
+      "ru": "Открыть настройки"
+    },
+    "稍后设置": {
+      "en": "Set up later",
+      "zh-Hant": "稍後設定",
+      "ja": "後で設定",
+      "ko": "나중에 설정",
+      "de": "Später einrichten",
+      "fr": "Configurer plus tard",
+      "es": "Configurar después",
+      "pt": "Configurar depois",
+      "it": "Configura più tardi",
+      "ru": "Настроить позже"
+    },
+    "查看权限状态": {
+      "en": "View permissions",
+      "zh-Hant": "查看權限狀態",
+      "ja": "権限を確認",
+      "ko": "권한 상태 보기",
+      "de": "Berechtigungen anzeigen",
+      "fr": "Voir les autorisations",
+      "es": "Ver permisos",
+      "pt": "Ver permissões",
+      "it": "Visualizza autorizzazioni",
+      "ru": "Посмотреть разрешения"
+    },
+    "本机设置已保存": {
+      "en": "Settings saved on this device",
+      "zh-Hant": "本機設定已儲存",
+      "ja": "このデバイスの設定を保存しました",
+      "ko": "이 기기에 설정을 저장했습니다",
+      "de": "Einstellungen auf diesem Gerät gespeichert",
+      "fr": "Paramètres enregistrés sur cet appareil",
+      "es": "Ajustes guardados en este dispositivo",
+      "pt": "Configurações salvas neste dispositivo",
+      "it": "Impostazioni salvate sul dispositivo",
+      "ru": "Настройки устройства сохранены"
+    },
+    "管理设备名称、主设备与启动选项": {
+      "en": "Manage device name, host and startup options",
+      "zh-Hant": "管理裝置名稱、主裝置與啟動選項",
+      "ja": "デバイス名、ホスト、起動設定を管理",
+      "ko": "기기 이름, 호스트 및 시작 옵션 관리",
+      "de": "Gerätename, Host und Startoptionen verwalten",
+      "fr": "Gérer le nom, l’hôte et le démarrage",
+      "es": "Gestionar nombre, equipo principal e inicio",
+      "pt": "Gerenciar nome, host e inicialização",
+      "it": "Gestisci nome, host e avvio",
+      "ru": "Имя устройства, главное устройство и запуск"
+    },
+    "首次使用跟随系统语言；也可以为本设备单独选择语言。": {
+      "en": "Initially uses your system language. Choose a different language for this device at any time.",
+      "zh-Hant": "首次使用跟隨系統語言；可隨時為本裝置選擇其他語言。",
+      "ja": "初回はシステム言語を使用します。このデバイス用の言語をいつでも選択できます。",
+      "ko": "처음에는 시스템 언어를 사용합니다. 언제든 이 기기의 언어를 선택할 수 있습니다.",
+      "de": "Anfangs gilt die Systemsprache. Sie können die Sprache dieses Geräts jederzeit ändern.",
+      "fr": "La langue du système est utilisée au départ. Vous pouvez la changer pour cet appareil.",
+      "es": "Al principio se usa el idioma del sistema. Puedes cambiarlo para este dispositivo.",
+      "pt": "Inicialmente usa o idioma do sistema. Você pode alterá-lo para este dispositivo.",
+      "it": "Inizialmente usa la lingua del sistema. Puoi cambiarla per questo dispositivo.",
+      "ru": "При первом запуске используется язык системы. Его можно изменить для этого устройства."
+    },
+    "仅影响本机界面，首次使用自动匹配系统语言。": {
+      "en": "Initially uses your system language. Choose a different language for this device at any time.",
+      "zh-Hant": "首次使用跟隨系統語言；可隨時為本裝置選擇其他語言。",
+      "ja": "初回はシステム言語を使用します。このデバイス用の言語をいつでも選択できます。",
+      "ko": "처음에는 시스템 언어를 사용합니다. 언제든 이 기기의 언어를 선택할 수 있습니다.",
+      "de": "Anfangs gilt die Systemsprache. Sie können die Sprache dieses Geräts jederzeit ändern.",
+      "fr": "La langue du système est utilisée au départ. Vous pouvez la changer pour cet appareil.",
+      "es": "Al principio se usa el idioma del sistema. Puedes cambiarlo para este dispositivo.",
+      "pt": "Inicialmente usa o idioma do sistema. Você pode alterá-lo para este dispositivo.",
+      "it": "Inizialmente usa la lingua del sistema. Puoi cambiarla per questo dispositivo.",
+      "ru": "При первом запуске используется язык системы. Его можно изменить для этого устройства."
+    },
+    "名称需点击保存；语言、外观和登录启动立即保存。": {
+      "en": "Save the device name manually. Language, appearance and login startup save immediately.",
+      "zh-Hant": "名稱需點擊儲存；語言、外觀和登入啟動立即儲存。",
+      "ja": "名前は保存が必要です。言語、外観、自動起動はすぐに保存されます。",
+      "ko": "이름은 저장을 눌러야 합니다. 언어, 화면 모드, 자동 시작은 즉시 저장됩니다.",
+      "de": "Den Namen bitte speichern. Sprache, Darstellung und Autostart werden sofort gespeichert.",
+      "fr": "Enregistrez le nom manuellement. Langue, apparence et démarrage sont enregistrés immédiatement.",
+      "es": "Guarda el nombre manualmente. Idioma, apariencia e inicio se guardan al instante.",
+      "pt": "Salve o nome manualmente. Idioma, aparência e inicialização são salvos imediatamente.",
+      "it": "Salva il nome manualmente. Lingua, aspetto e avvio vengono salvati subito.",
+      "ru": "Имя нужно сохранить вручную. Язык, оформление и автозапуск сохраняются сразу."
+    },
+    "名称、主设备和切换方式需保存；语言、外观、启动、光效和剪贴板开关立即生效。": {
+      "en": "Save name, host and switching changes manually. Language, appearance, startup, glow and clipboard options apply immediately.",
+      "zh-Hant": "名稱、主裝置和切換方式需儲存；語言、外觀、啟動、光效和剪貼簿開關立即生效。",
+      "ja": "名前、ホスト、切り替え方法は保存が必要です。その他の設定はすぐに適用されます。",
+      "ko": "이름, 호스트, 전환 방식은 저장해야 합니다. 나머지 옵션은 즉시 적용됩니다.",
+      "de": "Name, Host und Wechselmethode bitte speichern. Andere Optionen gelten sofort.",
+      "fr": "Enregistrez le nom, l’hôte et le mode de changement. Les autres options s’appliquent immédiatement.",
+      "es": "Guarda nombre, equipo y método de cambio. Las demás opciones se aplican al instante.",
+      "pt": "Salve nome, host e método de troca. As demais opções são aplicadas imediatamente.",
+      "it": "Salva nome, host e metodo di cambio. Le altre opzioni si applicano subito.",
+      "ru": "Имя, главное устройство и способ переключения нужно сохранить. Остальные настройки применяются сразу."
+    },
+    "登录 Mac 后自动启动 LanLink": {
+      "en": "Start LanLink when I log in to Mac",
+      "zh-Hant": "登入 Mac 後自動啟動 LanLink",
+      "ja": "Mac へのログイン時に LanLink を起動",
+      "ko": "Mac 로그인 시 LanLink 자동 시작",
+      "de": "LanLink bei der Mac-Anmeldung starten",
+      "fr": "Lancer LanLink à la connexion au Mac",
+      "es": "Iniciar LanLink al entrar en Mac",
+      "pt": "Iniciar LanLink ao entrar no Mac",
+      "it": "Avvia LanLink all’accesso al Mac",
+      "ru": "Запускать LanLink при входе в Mac"
+    },
+    "登录 Windows 后自动启动 LanLink": {
+      "en": "Start LanLink when I sign in to Windows",
+      "zh-Hant": "登入 Windows 後自動啟動 LanLink",
+      "ja": "Windows へのサインイン時に LanLink を起動",
+      "ko": "Windows 로그인 시 LanLink 자동 시작",
+      "de": "LanLink bei der Windows-Anmeldung starten",
+      "fr": "Lancer LanLink à la connexion Windows",
+      "es": "Iniciar LanLink al entrar en Windows",
+      "pt": "Iniciar LanLink ao entrar no Windows",
+      "it": "Avvia LanLink all’accesso a Windows",
+      "ru": "Запускать LanLink при входе в Windows"
+    },
+    "开机以管理员权限启动": {
+      "en": "Start with administrator privileges",
+      "zh-Hant": "以系統管理員權限啟動",
+      "ja": "管理者権限で起動",
+      "ko": "관리자 권한으로 시작",
+      "de": "Mit Administratorrechten starten",
+      "fr": "Démarrer en tant qu’administrateur",
+      "es": "Iniciar como administrador",
+      "pt": "Iniciar como administrador",
+      "it": "Avvia come amministratore",
+      "ru": "Запускать с правами администратора"
+    },
+    "管理员模式在登录后直接启动；首次开启需要系统确认。": {
+      "en": "Administrator mode starts after sign-in; enabling it requires system approval.",
+      "zh-Hant": "系統管理員模式在登入後直接啟動；首次開啟需系統確認。",
+      "ja": "管理者モードはログイン後に起動します。初回はシステムの承認が必要です。",
+      "ko": "관리자 모드는 로그인 후 시작되며 처음 설정할 때 시스템 확인이 필요합니다.",
+      "de": "Der Administratormodus startet nach der Anmeldung. Die Aktivierung erfordert eine Systembestätigung.",
+      "fr": "Le mode administrateur démarre après connexion. Son activation nécessite une confirmation système.",
+      "es": "El modo administrador se inicia al entrar. Activarlo requiere confirmación del sistema.",
+      "pt": "O modo administrador inicia após o login. A ativação requer confirmação do sistema.",
+      "it": "La modalità amministratore si avvia all’accesso. L’attivazione richiede conferma del sistema.",
+      "ru": "Режим администратора запускается после входа. Для включения нужно подтверждение системы."
+    },
+    "键鼠切换时显示边缘光效": {
+      "en": "Show edge glow when switching devices",
+      "zh-Hant": "鍵鼠切換時顯示邊緣光效",
+      "ja": "デバイス切り替え時に画面端を発光",
+      "ko": "기기 전환 시 가장자리 효과 표시",
+      "de": "Leuchteffekt am Rand beim Gerätewechsel",
+      "fr": "Afficher un halo au changement d’appareil",
+      "es": "Mostrar brillo al cambiar de dispositivo",
+      "pt": "Mostrar brilho ao trocar de dispositivo",
+      "it": "Mostra luce sul bordo al cambio di dispositivo",
+      "ru": "Подсвечивать край при переключении"
+    },
+    "鼠标移走后隐藏光效": {
+      "en": "Hide glow when the pointer moves away",
+      "zh-Hant": "滑鼠移走後隱藏光效",
+      "ja": "ポインターを離すと発光を非表示",
+      "ko": "포인터가 멀어지면 효과 숨기기",
+      "de": "Leuchteffekt beim Wegbewegen ausblenden",
+      "fr": "Masquer le halo quand le pointeur s’éloigne",
+      "es": "Ocultar brillo al alejar el puntero",
+      "pt": "Ocultar brilho ao afastar o ponteiro",
+      "it": "Nascondi luce quando il puntatore si allontana",
+      "ru": "Убирать подсветку при отведении указателя"
+    },
+    "主设备与以下切换设置需点击保存；边缘光效开关立即保存。": {
+      "en": "Save host and switching changes manually. Edge glow options save immediately.",
+      "zh-Hant": "主裝置與以下切換設定需點擊儲存；邊緣光效開關立即儲存。",
+      "ja": "ホストと切り替え設定は保存が必要です。発光設定はすぐに保存されます。",
+      "ko": "호스트와 전환 설정은 저장해야 합니다. 가장자리 효과는 즉시 저장됩니다.",
+      "de": "Host und Wechseloptionen bitte speichern. Leuchteffekte werden sofort gespeichert.",
+      "fr": "Enregistrez l’hôte et le changement manuellement. Les options du halo sont enregistrées immédiatement.",
+      "es": "Guarda equipo y cambio manualmente. El brillo se guarda al instante.",
+      "pt": "Salve host e troca manualmente. O brilho é salvo imediatamente.",
+      "it": "Salva host e cambio manualmente. Le opzioni di luce si salvano subito.",
+      "ru": "Главное устройство и переключение нужно сохранить. Подсветка сохраняется сразу."
+    },
+    "使用所选电脑的键盘和鼠标；离线电脑将在上线后应用。": {
+      "en": "Use the selected computer’s keyboard and mouse. Offline computers apply this when they reconnect.",
+      "zh-Hant": "使用所選電腦的鍵盤和滑鼠；離線電腦將在上線後套用。",
+      "ja": "選択したパソコンのキーボードとマウスを使用します。オフラインの場合は再接続後に適用されます。",
+      "ko": "선택한 컴퓨터의 키보드와 마우스를 사용합니다. 오프라인 컴퓨터는 다시 연결되면 적용됩니다.",
+      "de": "Tastatur und Maus des gewählten Computers verwenden. Offline-Geräte übernehmen dies beim Wiederverbinden.",
+      "fr": "Utilisez le clavier et la souris de l’ordinateur choisi. Les appareils hors ligne l’appliqueront à la reconnexion.",
+      "es": "Usa el teclado y ratón del equipo elegido. Los equipos desconectados lo aplicarán al reconectarse.",
+      "pt": "Use o teclado e mouse do computador escolhido. Computadores offline aplicarão ao reconectar.",
+      "it": "Usa tastiera e mouse del computer scelto. I computer offline applicheranno la scelta alla riconnessione.",
+      "ru": "Используется клавиатура и мышь выбранного компьютера. Отключённые компьютеры применят выбор после подключения."
+    },
+    "光效开关立即生效，无需点击保存。": {
+      "en": "Glow options apply immediately without saving manually.",
+      "zh-Hant": "光效開關立即生效，無需點擊儲存。",
+      "ja": "発光設定は保存操作なしですぐに適用されます。",
+      "ko": "가장자리 효과는 저장을 누르지 않아도 즉시 적용됩니다.",
+      "de": "Leuchteffekte gelten sofort, ohne manuelles Speichern.",
+      "fr": "Les options du halo s’appliquent immédiatement, sans enregistrement manuel.",
+      "es": "El brillo se aplica al instante, sin guardar manualmente.",
+      "pt": "O brilho se aplica imediatamente, sem salvar manualmente.",
+      "it": "Le opzioni di luce si applicano subito, senza salvare.",
+      "ru": "Подсветка меняется сразу, без ручного сохранения."
+    },
+    "以下切换设置仅对本机生效": {
+      "en": "These switching options apply to this device only.",
+      "zh-Hant": "以下切換設定僅對本機生效",
+      "ja": "以下の切り替え設定はこのデバイスのみに適用されます。",
+      "ko": "아래 전환 설정은 이 기기에만 적용됩니다.",
+      "de": "Diese Wechseloptionen gelten nur für dieses Gerät.",
+      "fr": "Ces options s’appliquent uniquement à cet appareil.",
+      "es": "Estas opciones solo afectan a este dispositivo.",
+      "pt": "Estas opções valem apenas para este dispositivo.",
+      "it": "Queste opzioni valgono solo per questo dispositivo.",
+      "ru": "Эти настройки переключения действуют только на этом устройстве."
+    },
+    "边缘停留时间 · {0} 毫秒": {
+      "en": "Edge dwell time · {0} ms",
+      "zh-Hant": "邊緣停留時間 · {0} 毫秒",
+      "ja": "画面端での待機時間 · {0} ミリ秒",
+      "ko": "가장자리 대기 시간 · {0}ms",
+      "de": "Wartezeit am Rand · {0} ms",
+      "fr": "Délai au bord · {0} ms",
+      "es": "Espera en el borde · {0} ms",
+      "pt": "Espera na borda · {0} ms",
+      "it": "Attesa sul bordo · {0} ms",
+      "ru": "Задержка у края · {0} мс"
+    },
+    "即使停留时间为零，创建连接仍需要少量等待时间。": {
+      "en": "Even with zero dwell time, establishing a connection takes a moment.",
+      "zh-Hant": "即使停留時間為零，建立連線仍需要少量等待時間。",
+      "ja": "待機時間がゼロでも、接続の確立には少し時間がかかります。",
+      "ko": "대기 시간이 0이어도 연결에는 잠시 시간이 걸립니다.",
+      "de": "Auch ohne Wartezeit dauert der Verbindungsaufbau einen Moment.",
+      "fr": "Même sans délai, la connexion prend un instant.",
+      "es": "Incluso sin espera, conectar lleva un momento.",
+      "pt": "Mesmo sem espera, conectar leva um momento.",
+      "it": "Anche senza attesa, la connessione richiede un istante.",
+      "ru": "Даже при нулевой задержке подключение занимает немного времени."
+    },
+    "允许自动上传剪贴板信息到组": {
+      "en": "Automatically upload clipboard to the group",
+      "zh-Hant": "允許自動上傳剪貼簿到群組",
+      "ja": "クリップボードをグループに自動送信",
+      "ko": "클립보드를 그룹에 자동 업로드",
+      "de": "Zwischenablage automatisch zur Gruppe hochladen",
+      "fr": "Envoyer automatiquement le presse-papiers au groupe",
+      "es": "Subir portapapeles al grupo automáticamente",
+      "pt": "Enviar área de transferência ao grupo automaticamente",
+      "it": "Invia automaticamente gli appunti al gruppo",
+      "ru": "Автоматически отправлять буфер обмена в группу"
+    },
+    "允许自动获取组剪贴板到本机": {
+      "en": "Automatically download the group clipboard",
+      "zh-Hant": "允許自動取得群組剪貼簿到本機",
+      "ja": "グループのクリップボードを自動取得",
+      "ko": "그룹 클립보드를 자동 다운로드",
+      "de": "Gruppenzwischenablage automatisch herunterladen",
+      "fr": "Récupérer automatiquement le presse-papiers du groupe",
+      "es": "Descargar portapapeles del grupo automáticamente",
+      "pt": "Baixar área de transferência do grupo automaticamente",
+      "it": "Scarica automaticamente gli appunti del gruppo",
+      "ru": "Автоматически получать буфер обмена группы"
+    },
+    "在首页显示快捷同步剪贴板按钮": {
+      "en": "Show clipboard sync shortcuts on the home page",
+      "zh-Hant": "在首頁顯示快速同步剪貼簿按鈕",
+      "ja": "ホームにクリップボード同期ボタンを表示",
+      "ko": "홈 화면에 클립보드 동기화 버튼 표시",
+      "de": "Schnelltasten für die Zwischenablage auf der Startseite",
+      "fr": "Afficher les raccourcis de synchronisation sur l’accueil",
+      "es": "Mostrar accesos de sincronización en inicio",
+      "pt": "Mostrar atalhos de sincronização na página inicial",
+      "it": "Mostra scorciatoie di sincronizzazione nella home",
+      "ru": "Показывать кнопки синхронизации на главной"
+    },
+    "开关立即生效。同步到组内在线设备，保留单独设置的设备授权限制。": {
+      "en": "Changes apply immediately. Syncs with online group devices and respects each device’s permissions.",
+      "zh-Hant": "開關立即生效。同步至群組內上線裝置，保留各裝置的授權限制。",
+      "ja": "変更はすぐに適用されます。オンラインのグループ端末と同期し、各端末の権限を守ります。",
+      "ko": "변경은 즉시 적용됩니다. 온라인 그룹 기기와 동기화하며 각 기기의 권한을 준수합니다.",
+      "de": "Änderungen gelten sofort. Synchronisiert mit Online-Geräten der Gruppe und beachtet deren Berechtigungen.",
+      "fr": "Les changements sont immédiats. La synchronisation respecte les autorisations de chaque appareil en ligne.",
+      "es": "Los cambios son inmediatos. Sincroniza con equipos del grupo en línea y respeta sus permisos.",
+      "pt": "Mudanças imediatas. Sincroniza com dispositivos online do grupo e respeita suas permissões.",
+      "it": "Le modifiche sono immediate. Sincronizza i dispositivi online rispettando le loro autorizzazioni.",
+      "ru": "Изменения применяются сразу. Синхронизация с устройствами группы учитывает разрешения каждого устройства."
+    },
+    "开关立即保存，成功后生效。关闭上传后停止后续自动上传；已经共享的内容仍按有效期保留。同步保留单独设置的设备授权限制。": {
+      "en": "Changes apply after saving. Disabling upload stops future automatic uploads; shared content remains until expiry. Each device’s permissions still apply.",
+      "zh-Hant": "開關儲存成功後生效。停用上傳會停止後續自動上傳；已分享內容保留至到期。同步仍遵守各裝置的授權限制。",
+      "ja": "保存後に適用されます。送信を無効にすると自動送信が停止します。共有済みの内容は期限まで残り、各端末の権限も維持されます。",
+      "ko": "저장 후 적용됩니다. 업로드를 끄면 이후 자동 업로드가 중지됩니다. 공유된 내용은 만료까지 유지되며 기기별 권한을 준수합니다.",
+      "de": "Änderungen gelten nach dem Speichern. Deaktivieren stoppt künftige Uploads. Geteilte Inhalte bleiben bis zum Ablauf; Geräteberechtigungen gelten weiter.",
+      "fr": "Les changements s’appliquent après enregistrement. Désactiver l’envoi arrête les futurs envois. Le contenu partagé reste jusqu’à expiration ; les autorisations restent applicables.",
+      "es": "Se aplica tras guardar. Desactivar la subida detiene futuros envíos. El contenido compartido permanece hasta caducar y se respetan los permisos.",
+      "pt": "Aplica-se após salvar. Desativar o envio interrompe futuros envios. O conteúdo compartilhado fica até expirar, respeitando as permissões.",
+      "it": "Si applica dopo il salvataggio. Disattivando l’invio si fermano gli invii futuri. I contenuti restano fino alla scadenza e le autorizzazioni sono rispettate.",
+      "ru": "Применяется после сохранения. Отключение отправки останавливает будущие загрузки. Общие данные хранятся до истечения срока; разрешения сохраняются."
+    },
+    "修改后点击保存；切换页面会保留草稿": {
+      "en": "Save after editing. Drafts are kept when changing pages.",
+      "zh-Hant": "修改後點擊儲存；切換頁面會保留草稿",
+      "ja": "変更後に保存してください。ページを切り替えても下書きは保持されます。",
+      "ko": "수정 후 저장하세요. 페이지를 바꿔도 초안은 유지됩니다.",
+      "de": "Nach der Bearbeitung speichern. Entwürfe bleiben beim Seitenwechsel erhalten.",
+      "fr": "Enregistrez après modification. Le brouillon est conservé en changeant de page.",
+      "es": "Guarda tras editar. El borrador se conserva al cambiar de página.",
+      "pt": "Salve após editar. O rascunho é mantido ao mudar de página.",
+      "it": "Salva dopo la modifica. Le bozze restano cambiando pagina.",
+      "ru": "Сохраните изменения. Черновики сохраняются при переходе между страницами."
+    },
+    "有未保存的更改 · 切换页面会保留草稿": {
+      "en": "Unsaved changes · Drafts are kept when changing pages",
+      "zh-Hant": "有未儲存的變更 · 切換頁面會保留草稿",
+      "ja": "未保存の変更あり · ページを切り替えても保持されます",
+      "ko": "저장하지 않은 변경 사항 · 페이지 이동 시 유지됩니다",
+      "de": "Ungespeicherte Änderungen · Entwürfe bleiben erhalten",
+      "fr": "Modifications non enregistrées · Brouillon conservé",
+      "es": "Cambios sin guardar · El borrador se conserva",
+      "pt": "Alterações não salvas · Rascunho mantido",
+      "it": "Modifiche non salvate · Bozza conservata",
+      "ru": "Несохранённые изменения · Черновик сохраняется"
+    },
+    "正在保存…保存期间暂时不能修改设置": {
+      "en": "Saving… Settings cannot be edited while saving.",
+      "zh-Hant": "正在儲存…儲存期間暫時無法修改設定",
+      "ja": "保存中…保存中は設定を変更できません。",
+      "ko": "저장 중… 저장 중에는 설정을 수정할 수 없습니다.",
+      "de": "Speichern… Einstellungen können dabei nicht geändert werden.",
+      "fr": "Enregistrement… Les paramètres ne peuvent pas être modifiés pendant l’enregistrement.",
+      "es": "Guardando… No se puede editar durante el guardado.",
+      "pt": "Salvando… Não é possível editar durante o salvamento.",
+      "it": "Salvataggio… Le impostazioni non sono modificabili durante il salvataggio.",
+      "ru": "Сохранение… Пока нельзя изменять настройки."
+    },
+    "正在保存设置…": {
+      "en": "Saving settings…",
+      "zh-Hant": "正在儲存設定…",
+      "ja": "設定を保存中…",
+      "ko": "설정 저장 중…",
+      "de": "Einstellungen werden gespeichert…",
+      "fr": "Enregistrement des paramètres…",
+      "es": "Guardando ajustes…",
+      "pt": "Salvando configurações…",
+      "it": "Salvataggio impostazioni…",
+      "ru": "Сохранение настроек…"
+    },
+    "语言设置已保存": {
+      "en": "Language updated",
+      "zh-Hant": "語言設定已生效",
+      "ja": "言語を変更しました",
+      "ko": "언어가 변경되었습니다",
+      "de": "Sprache geändert",
+      "fr": "Langue mise à jour",
+      "es": "Idioma actualizado",
+      "pt": "Idioma atualizado",
+      "it": "Lingua aggiornata",
+      "ru": "Язык изменён"
+    },
+    "语言已立即生效。": {
+      "en": "Language updated",
+      "zh-Hant": "語言設定已生效",
+      "ja": "言語を変更しました",
+      "ko": "언어가 변경되었습니다",
+      "de": "Sprache geändert",
+      "fr": "Langue mise à jour",
+      "es": "Idioma actualizado",
+      "pt": "Idioma atualizado",
+      "it": "Lingua aggiornata",
+      "ru": "Язык изменён"
+    },
+    "语言未更改，请重试。": {
+      "en": "Language was not changed. Please retry.",
+      "zh-Hant": "語言未變更，請重試。",
+      "ja": "言語を変更できませんでした。再試行してください。",
+      "ko": "언어가 변경되지 않았습니다. 다시 시도하세요.",
+      "de": "Sprache wurde nicht geändert. Bitte erneut versuchen.",
+      "fr": "La langue n’a pas changé. Réessayez.",
+      "es": "No se cambió el idioma. Inténtalo de nuevo.",
+      "pt": "O idioma não mudou. Tente novamente.",
+      "it": "La lingua non è cambiata. Riprova.",
+      "ru": "Язык не изменён. Повторите попытку."
+    },
+    "外观已立即生效。": {
+      "en": "Appearance updated.",
+      "zh-Hant": "外觀已立即生效。",
+      "ja": "外観を変更しました。",
+      "ko": "화면 모드가 변경되었습니다.",
+      "de": "Darstellung geändert.",
+      "fr": "Apparence mise à jour.",
+      "es": "Apariencia actualizada.",
+      "pt": "Aparência atualizada.",
+      "it": "Aspetto aggiornato.",
+      "ru": "Оформление изменено."
+    },
+    "开关已立即生效": {
+      "en": "Option updated",
+      "zh-Hant": "開關已立即生效",
+      "ja": "設定を変更しました",
+      "ko": "옵션이 변경되었습니다",
+      "de": "Option geändert",
+      "fr": "Option mise à jour",
+      "es": "Opción actualizada",
+      "pt": "Opção atualizada",
+      "it": "Opzione aggiornata",
+      "ru": "Настройка изменена"
+    },
+    "设备与权限 · 本页更改均立即保存": {
+      "en": "Device & permissions · Changes save immediately",
+      "zh-Hant": "裝置與權限 · 本頁變更均立即儲存",
+      "ja": "デバイスと権限 · 変更はすぐに保存されます",
+      "ko": "기기 및 권한 · 변경 즉시 저장",
+      "de": "Gerät und Berechtigungen · Änderungen werden sofort gespeichert",
+      "fr": "Appareil et autorisations · Enregistrement immédiat",
+      "es": "Dispositivo y permisos · Guardado inmediato",
+      "pt": "Dispositivo e permissões · Salvamento imediato",
+      "it": "Dispositivo e autorizzazioni · Salvataggio immediato",
+      "ru": "Устройство и разрешения · Изменения сохраняются сразу"
+    },
+    "权限使用模式": {
+      "en": "Permission mode",
+      "zh-Hant": "權限使用模式",
+      "ja": "権限モード",
+      "ko": "권한 모드",
+      "de": "Berechtigungsmodus",
+      "fr": "Mode d’autorisation",
+      "es": "Modo de permisos",
+      "pt": "Modo de permissões",
+      "it": "Modalità autorizzazioni",
+      "ru": "Режим разрешений"
+    },
+    "Root 模式": {
+      "en": "Root mode",
+      "zh-Hant": "Root 模式",
+      "ja": "Root モード",
+      "ko": "Root 모드",
+      "de": "Root-Modus",
+      "fr": "Mode Root",
+      "es": "Modo Root",
+      "pt": "Modo Root",
+      "it": "Modalità Root",
+      "ru": "Режим Root"
+    },
+    "非 Root 模式": {
+      "en": "Non-root mode",
+      "zh-Hant": "非 Root 模式",
+      "ja": "非 Root モード",
+      "ko": "비 Root 모드",
+      "de": "Modus ohne Root",
+      "fr": "Mode sans Root",
+      "es": "Modo sin Root",
+      "pt": "Modo sem Root",
+      "it": "Modalità senza Root",
+      "ru": "Без Root"
+    },
+    "切换 Root 模式": {
+      "en": "Switch to root mode",
+      "zh-Hant": "切換 Root 模式",
+      "ja": "Root モードに切り替え",
+      "ko": "Root 모드로 전환",
+      "de": "Zum Root-Modus wechseln",
+      "fr": "Passer en mode Root",
+      "es": "Cambiar a modo Root",
+      "pt": "Mudar para modo Root",
+      "it": "Passa alla modalità Root",
+      "ru": "Включить режим Root"
+    },
+    "切换非 Root 模式": {
+      "en": "Switch to non-root mode",
+      "zh-Hant": "切換非 Root 模式",
+      "ja": "非 Root モードに切り替え",
+      "ko": "비 Root 모드로 전환",
+      "de": "Zum Modus ohne Root wechseln",
+      "fr": "Passer en mode sans Root",
+      "es": "Cambiar a modo sin Root",
+      "pt": "Mudar para modo sem Root",
+      "it": "Passa alla modalità senza Root",
+      "ru": "Включить режим без Root"
+    },
+    "Root 授权": {
+      "en": "Root authorization",
+      "zh-Hant": "Root 授權",
+      "ja": "Root の権限",
+      "ko": "Root 권한",
+      "de": "Root-Autorisierung",
+      "fr": "Autorisation Root",
+      "es": "Autorización Root",
+      "pt": "Autorização Root",
+      "it": "Autorizzazione Root",
+      "ru": "Разрешение Root"
+    },
+    "ADB 授权": {
+      "en": "ADB authorization",
+      "zh-Hant": "ADB 授權",
+      "ja": "ADB の権限",
+      "ko": "ADB 권한",
+      "de": "ADB-Autorisierung",
+      "fr": "Autorisation ADB",
+      "es": "Autorización ADB",
+      "pt": "Autorização ADB",
+      "it": "Autorizzazione ADB",
+      "ru": "Разрешение ADB"
+    },
+    "正在切换，请留意 Root 管理器的提示…": {
+      "en": "Switching… Watch for the root manager prompt.",
+      "zh-Hant": "正在切換，請留意 Root 管理員的提示…",
+      "ja": "切り替え中…Root 管理アプリの通知を確認してください。",
+      "ko": "전환 중… Root 관리자 메시지를 확인하세요.",
+      "de": "Wechsel läuft… Bitte auf die Root-Manager-Abfrage achten.",
+      "fr": "Changement… Surveillez la demande du gestionnaire Root.",
+      "es": "Cambiando… Revisa el aviso del gestor Root.",
+      "pt": "Alterando… Veja o aviso do gerenciador Root.",
+      "it": "Cambio in corso… Controlla la richiesta del gestore Root.",
+      "ru": "Переключение… Следите за запросом менеджера Root."
+    },
+    "输入与 H.264 投屏自动运行": {
+      "en": "Input and H.264 screen sharing run automatically",
+      "zh-Hant": "輸入與 H.264 螢幕分享自動執行",
+      "ja": "入力と H.264 画面共有が自動動作",
+      "ko": "입력 및 H.264 화면 공유 자동 실행",
+      "de": "Eingabe und H.264-Bildschirmfreigabe laufen automatisch",
+      "fr": "La saisie et le partage H.264 fonctionnent automatiquement",
+      "es": "Entrada y pantalla H.264 automáticas",
+      "pt": "Entrada e compartilhamento H.264 automáticos",
+      "it": "Input e condivisione H.264 automatici",
+      "ru": "Ввод и трансляция H.264 работают автоматически"
+    },
+    "助手恢复中，保留已选择的模式": {
+      "en": "Helper recovering; selected mode is preserved",
+      "zh-Hant": "助手復原中，保留已選擇的模式",
+      "ja": "ヘルパー復旧中。選択したモードは保持されます",
+      "ko": "도우미 복구 중, 선택 모드 유지",
+      "de": "Helfer wird wiederhergestellt; Modus bleibt erhalten",
+      "fr": "Récupération de l’assistant ; mode conservé",
+      "es": "Recuperando asistente; modo conservado",
+      "pt": "Recuperando auxiliar; modo mantido",
+      "it": "Ripristino assistente; modalità mantenuta",
+      "ru": "Восстановление помощника; режим сохранён"
+    },
+    "键鼠与屏幕串流已就绪": {
+      "en": "Keyboard, mouse and screen streaming ready",
+      "zh-Hant": "鍵鼠與螢幕串流已就緒",
+      "ja": "キーボード、マウス、画面配信の準備完了",
+      "ko": "키보드, 마우스 및 화면 스트리밍 준비됨",
+      "de": "Tastatur, Maus und Bildschirmstream bereit",
+      "fr": "Clavier, souris et diffusion d’écran prêts",
+      "es": "Teclado, ratón y transmisión listos",
+      "pt": "Teclado, mouse e transmissão prontos",
+      "it": "Tastiera, mouse e streaming pronti",
+      "ru": "Клавиатура, мышь и трансляция готовы"
+    },
+    "授权已保存，等待助手恢复": {
+      "en": "Authorization saved; waiting for helper recovery",
+      "zh-Hant": "授權已儲存，等待助手復原",
+      "ja": "権限を保存済み。ヘルパーの復旧待ち",
+      "ko": "권한 저장됨, 도우미 복구 대기",
+      "de": "Autorisierung gespeichert; wartet auf Helfer",
+      "fr": "Autorisation enregistrée ; récupération en attente",
+      "es": "Autorización guardada; esperando asistente",
+      "pt": "Autorização salva; aguardando auxiliar",
+      "it": "Autorizzazione salvata; attesa ripristino",
+      "ru": "Разрешение сохранено; ожидание помощника"
+    },
+    "通过电脑为本机开启键鼠与屏幕串流": {
+      "en": "Use a computer to enable input and screen streaming",
+      "zh-Hant": "透過電腦為本機啟用鍵鼠與螢幕串流",
+      "ja": "パソコンから入力と画面配信を有効化",
+      "ko": "컴퓨터로 입력 및 화면 스트리밍 활성화",
+      "de": "Eingabe und Bildschirmstream über einen Computer aktivieren",
+      "fr": "Activer la saisie et la diffusion via un ordinateur",
+      "es": "Activa entrada y transmisión desde un ordenador",
+      "pt": "Ative entrada e transmissão por um computador",
+      "it": "Attiva input e streaming da un computer",
+      "ru": "Включите ввод и трансляцию с помощью компьютера"
+    },
+    "键鼠切换边缘光效": {
+      "en": "Edge glow for device switching",
+      "zh-Hant": "鍵鼠切換邊緣光效",
+      "ja": "デバイス切り替え時の発光",
+      "ko": "기기 전환 가장자리 효과",
+      "de": "Leuchteffekt beim Gerätewechsel",
+      "fr": "Halo de changement d’appareil",
+      "es": "Brillo al cambiar de dispositivo",
+      "pt": "Brilho ao trocar de dispositivo",
+      "it": "Luce al cambio di dispositivo",
+      "ru": "Подсветка при переключении"
+    },
+    "切换键鼠边缘光效": {
+      "en": "Toggle edge glow",
+      "zh-Hant": "切換鍵鼠邊緣光效",
+      "ja": "画面端の発光を切り替え",
+      "ko": "가장자리 효과 전환",
+      "de": "Leuchteffekt umschalten",
+      "fr": "Activer ou désactiver le halo",
+      "es": "Activar o desactivar brillo",
+      "pt": "Ativar ou desativar brilho",
+      "it": "Attiva o disattiva la luce",
+      "ru": "Включить или отключить подсветку"
+    },
+    "默认关闭 · 切换到手机时在对应边缘显示短暂光效": {
+      "en": "Off by default · Briefly highlights the edge when switching to this phone",
+      "zh-Hant": "預設關閉 · 切換到手機時短暫顯示邊緣光效",
+      "ja": "初期設定はオフ · このスマートフォンに切り替えると画面端が短く発光",
+      "ko": "기본 꺼짐 · 휴대전화로 전환 시 가장자리에 잠깐 표시",
+      "de": "Standardmäßig aus · Leuchtet beim Wechsel zum Telefon kurz auf",
+      "fr": "Désactivé par défaut · Éclaire brièvement le bord lors du passage au téléphone",
+      "es": "Desactivado por defecto · Ilumina el borde al cambiar al teléfono",
+      "pt": "Desativado por padrão · Ilumina a borda ao mudar para o celular",
+      "it": "Disattivato per default · Illumina il bordo al passaggio al telefono",
+      "ru": "По умолчанию выключено · Кратко подсвечивает край при переходе на телефон"
+    },
+    "单独决定每台设备可以做什么": {
+      "en": "Choose permissions separately for each device",
+      "zh-Hant": "單獨決定每台裝置可以做什麼",
+      "ja": "デバイスごとに権限を設定",
+      "ko": "기기별 권한 설정",
+      "de": "Berechtigungen für jedes Gerät einzeln festlegen",
+      "fr": "Définir les autorisations de chaque appareil",
+      "es": "Configura los permisos de cada dispositivo",
+      "pt": "Defina permissões para cada dispositivo",
+      "it": "Scegli le autorizzazioni per ogni dispositivo",
+      "ru": "Настройте разрешения для каждого устройства"
+    },
+    "配对、授权与常见问题": {
+      "en": "Pairing, permissions and frequently asked questions",
+      "zh-Hant": "配對、授權與常見問題",
+      "ja": "ペアリング、権限、よくある質問",
+      "ko": "페어링, 권한 및 자주 묻는 질문",
+      "de": "Kopplung, Berechtigungen und häufige Fragen",
+      "fr": "Association, autorisations et questions fréquentes",
+      "es": "Vinculación, permisos y preguntas frecuentes",
+      "pt": "Pareamento, permissões e perguntas frequentes",
+      "it": "Associazione, autorizzazioni e domande frequenti",
+      "ru": "Сопряжение, разрешения и частые вопросы"
+    },
+    "服务正在启动": {
+      "en": "Service starting",
+      "zh-Hant": "服務正在啟動",
+      "ja": "サービス起動中",
+      "ko": "서비스 시작 중",
+      "de": "Dienst startet",
+      "fr": "Démarrage du service",
+      "es": "Iniciando servicio",
+      "pt": "Iniciando serviço",
+      "it": "Avvio del servizio",
+      "ru": "Запуск службы"
+    },
+    "已复制到本机剪贴板": {
+      "en": "Copied to this device’s clipboard",
+      "zh-Hant": "已複製到本機剪貼簿",
+      "ja": "このデバイスのクリップボードにコピーしました",
+      "ko": "이 기기의 클립보드에 복사했습니다",
+      "de": "In die Zwischenablage dieses Geräts kopiert",
+      "fr": "Copié dans le presse-papiers de cet appareil",
+      "es": "Copiado al portapapeles de este dispositivo",
+      "pt": "Copiado para a área de transferência deste dispositivo",
+      "it": "Copiato negli appunti di questo dispositivo",
+      "ru": "Скопировано в буфер обмена устройства"
+    },
+    "最近 10 分钟 · 最多 30 条文字记录": {
+      "en": "Last 10 minutes · Up to 30 text entries",
+      "zh-Hant": "最近 10 分鐘 · 最多 30 筆文字記錄",
+      "ja": "直近10分間 · テキスト30件まで",
+      "ko": "최근 10분 · 최대 30개 텍스트 기록",
+      "de": "Letzte 10 Minuten · Bis zu 30 Texteinträge",
+      "fr": "10 dernières minutes · Jusqu’à 30 textes",
+      "es": "Últimos 10 minutos · Hasta 30 textos",
+      "pt": "Últimos 10 minutos · Até 30 textos",
+      "it": "Ultimi 10 minuti · Fino a 30 testi",
+      "ru": "Последние 10 минут · До 30 текстовых записей"
+    },
+    "暂无同步记录，复制文字后将在这里出现。": {
+      "en": "No synced entries yet. Copied text will appear here.",
+      "zh-Hant": "暫無同步記錄，複製文字後將顯示於此。",
+      "ja": "同期履歴はありません。コピーしたテキストがここに表示されます。",
+      "ko": "동기화 기록이 없습니다. 복사한 텍스트가 여기에 표시됩니다.",
+      "de": "Noch keine Einträge. Kopierter Text erscheint hier.",
+      "fr": "Aucun texte synchronisé. Le texte copié apparaîtra ici.",
+      "es": "Sin entradas sincronizadas. El texto copiado aparecerá aquí.",
+      "pt": "Sem registros sincronizados. O texto copiado aparecerá aqui.",
+      "it": "Nessuna voce sincronizzata. Il testo copiato apparirà qui.",
+      "ru": "Записей пока нет. Скопированный текст появится здесь."
+    },
+    "开发构建": {
+      "en": "Development build",
+      "zh-Hant": "開發版本",
+      "ja": "開発ビルド",
+      "ko": "개발 빌드",
+      "de": "Entwicklungsversion",
+      "fr": "Version de développement",
+      "es": "Versión de desarrollo",
+      "pt": "Versão de desenvolvimento",
+      "it": "Versione di sviluppo",
+      "ru": "Сборка для разработки"
+    },
+    "请选择支持的界面语言": {
+      "en": "Choose a supported interface language",
+      "zh-Hant": "請選擇支援的介面語言",
+      "ja": "対応する表示言語を選択してください",
+      "ko": "지원되는 인터페이스 언어를 선택하세요",
+      "de": "Bitte eine unterstützte Sprache wählen",
+      "fr": "Choisissez une langue prise en charge",
+      "es": "Elige un idioma compatible",
+      "pt": "Escolha um idioma disponível",
+      "it": "Scegli una lingua supportata",
+      "ru": "Выберите поддерживаемый язык"
+    },
+    "版本 ": {
+      "en": "Version ",
+      "zh-Hant": "版本 ",
+      "ja": "バージョン ",
+      "ko": "버전 ",
+      "de": "Version ",
+      "fr": "Version ",
+      "es": "Versión ",
+      "pt": "Versão ",
+      "it": "Versione ",
+      "ru": "Версия "
+    },
+    " · 构建 ": {
+      "en": " · Build ",
+      "zh-Hant": " · 組建 ",
+      "ja": " · ビルド ",
+      "ko": " · 빌드 ",
+      "de": " · Build ",
+      "fr": " · Version ",
+      "es": " · Compilación ",
+      "pt": " · Compilação ",
+      "it": " · Build ",
+      "ru": " · Сборка "
+    },
+    "源码指纹 ": {
+      "en": "Source fingerprint ",
+      "zh-Hant": "原始碼指紋 ",
+      "ja": "ソース識別子 ",
+      "ko": "소스 지문 ",
+      "de": "Quellcode-Fingerabdruck ",
+      "fr": "Empreinte du code source ",
+      "es": "Huella del código ",
+      "pt": "Impressão do código ",
+      "it": "Impronta del codice ",
+      "ru": "Отпечаток кода "
+    },
+    "构建时间 ": {
+      "en": "Built at ",
+      "zh-Hant": "組建時間 ",
+      "ja": "ビルド日時 ",
+      "ko": "빌드 시간 ",
+      "de": "Erstellt am ",
+      "fr": "Compilé le ",
+      "es": "Compilado el ",
+      "pt": "Compilado em ",
+      "it": "Compilato il ",
+      "ru": "Дата сборки "
+    },
+    " · 本机": {
+      "en": " · This device",
+      "zh-Hant": " · 本機",
+      "ja": " · このデバイス",
+      "ko": " · 이 기기",
+      "de": " · Dieses Gerät",
+      "fr": " · Cet appareil",
+      "es": " · Este dispositivo",
+      "pt": " · Este dispositivo",
+      "it": " · Questo dispositivo",
+      "ru": " · Это устройство"
+    },
+    " · 离线": {
+      "en": " · Offline",
+      "zh-Hant": " · 離線",
+      "ja": " · オフライン",
+      "ko": " · 오프라인",
+      "de": " · Offline",
+      "fr": " · Hors ligne",
+      "es": " · Sin conexión",
+      "pt": " · Offline",
+      "it": " · Offline",
+      "ru": " · Не в сети"
+    },
+    " 外观未更改，请重试。": {
+      "en": " Appearance unchanged. Please retry.",
+      "zh-Hant": " 外觀未變更，請重試。",
+      "ja": " 外観を変更できませんでした。再試行してください。",
+      "ko": " 화면 모드를 변경하지 못했습니다. 다시 시도하세요.",
+      "de": " Darstellung unverändert. Bitte erneut versuchen.",
+      "fr": " Apparence inchangée. Réessayez.",
+      "es": " Apariencia sin cambios. Reinténtalo.",
+      "pt": " Aparência inalterada. Tente novamente.",
+      "it": " Aspetto invariato. Riprova.",
+      "ru": " Оформление не изменено. Повторите попытку."
+    },
+    " 开关未更改，请重试。": {
+      "en": " Option unchanged. Please retry.",
+      "zh-Hant": " 開關未變更，請重試。",
+      "ja": " 設定を変更できませんでした。再試行してください。",
+      "ko": " 옵션을 변경하지 못했습니다. 다시 시도하세요.",
+      "de": " Option unverändert. Bitte erneut versuchen.",
+      "fr": " Option inchangée. Réessayez.",
+      "es": " Opción sin cambios. Reinténtalo.",
+      "pt": " Opção inalterada. Tente novamente.",
+      "it": " Opzione invariata. Riprova.",
+      "ru": " Настройка не изменена. Повторите попытку."
+    },
+    "；名称或切换设置仍有未保存的更改。": {
+      "en": "; name or switching changes are still unsaved.",
+      "zh-Hant": "；名稱或切換設定仍有未儲存的變更。",
+      "ja": "。名前または切り替え設定に未保存の変更があります。",
+      "ko": ". 이름 또는 전환 설정에 저장하지 않은 변경이 있습니다.",
+      "de": "; Name oder Wechseloptionen sind noch nicht gespeichert.",
+      "fr": " ; le nom ou le mode de changement restent à enregistrer.",
+      "es": "; aún faltan por guardar el nombre o los ajustes de cambio.",
+      "pt": "; nome ou opções de troca ainda não foram salvos.",
+      "it": "; nome o opzioni di cambio non sono ancora salvati.",
+      "ru": "; имя или параметры переключения ещё не сохранены."
+    },
+    "开关已保存，但设备服务状态无法刷新，请重启设备服务。": {
+      "en": "Saved, but the service status could not be refreshed. Restart the device service.",
+      "zh-Hant": "已儲存，但無法重新整理裝置服務狀態，請重新啟動裝置服務。",
+      "ja": "保存しましたが、サービスの状態を更新できません。デバイスサービスを再起動してください。",
+      "ko": "저장했지만 서비스 상태를 새로 고칠 수 없습니다. 기기 서비스를 재시작하세요.",
+      "de": "Gespeichert, aber der Dienststatus konnte nicht aktualisiert werden. Bitte Gerätedienst neu starten.",
+      "fr": "Enregistré, mais l’état du service n’a pas pu être actualisé. Redémarrez le service.",
+      "es": "Guardado, pero no se pudo actualizar el estado del servicio. Reinícialo.",
+      "pt": "Salvo, mas não foi possível atualizar o estado do serviço. Reinicie-o.",
+      "it": "Salvato, ma non è stato possibile aggiornare lo stato del servizio. Riavvialo.",
+      "ru": "Сохранено, но статус службы не обновлён. Перезапустите службу устройства."
+    },
+    "设置已保存，但设备服务状态无法刷新，请重启设备服务。": {
+      "en": "Saved, but the service status could not be refreshed. Restart the device service.",
+      "zh-Hant": "已儲存，但無法重新整理裝置服務狀態，請重新啟動裝置服務。",
+      "ja": "保存しましたが、サービスの状態を更新できません。デバイスサービスを再起動してください。",
+      "ko": "저장했지만 서비스 상태를 새로 고칠 수 없습니다. 기기 서비스를 재시작하세요.",
+      "de": "Gespeichert, aber der Dienststatus konnte nicht aktualisiert werden. Bitte Gerätedienst neu starten.",
+      "fr": "Enregistré, mais l’état du service n’a pas pu être actualisé. Redémarrez le service.",
+      "es": "Guardado, pero no se pudo actualizar el estado del servicio. Reinícialo.",
+      "pt": "Salvo, mas não foi possível atualizar o estado do serviço. Reinicie-o.",
+      "it": "Salvato, ma non è stato possibile aggiornare lo stato del servizio. Riavvialo.",
+      "ru": "Сохранено, но статус службы не обновлён. Перезапустите службу устройства."
+    },
+    "\n源码指纹 ": {
+      "en": "\nSource fingerprint ",
+      "zh-Hant": "\n原始碼指紋 ",
+      "ja": "\nソース識別子 ",
+      "ko": "\n소스 지문 ",
+      "de": "\nQuellcode-Fingerabdruck ",
+      "fr": "\nEmpreinte du code source ",
+      "es": "\nHuella del código ",
+      "pt": "\nImpressão do código ",
+      "it": "\nImpronta del codice ",
+      "ru": "\nОтпечаток кода "
+    },
+    "\n构建时间 ": {
+      "en": "\nBuilt at ",
+      "zh-Hant": "\n組建時間 ",
+      "ja": "\nビルド日時 ",
+      "ko": "\n빌드 시간 ",
+      "de": "\nErstellt am ",
+      "fr": "\nCompilé le ",
+      "es": "\nCompilado el ",
+      "pt": "\nCompilado em ",
+      "it": "\nCompilato il ",
+      "ru": "\nДата сборки "
+    },
+    "名称需点击保存；外观和登录启动立即保存。 ": {
+      "en": "Save the device name manually. Language, appearance and login startup save immediately.",
+      "zh-Hant": "名稱需點擊儲存；語言、外觀和登入啟動立即儲存。",
+      "ja": "名前は保存が必要です。言語、外観、自動起動はすぐに保存されます。",
+      "ko": "이름은 저장을 눌러야 합니다. 언어, 화면 모드, 자동 시작은 즉시 저장됩니다.",
+      "de": "Den Namen bitte speichern. Sprache, Darstellung und Autostart werden sofort gespeichert.",
+      "fr": "Enregistrez le nom manuellement. Langue, apparence et démarrage sont enregistrés immédiatement.",
+      "es": "Guarda el nombre manualmente. Idioma, apariencia e inicio se guardan al instante.",
+      "pt": "Salve o nome manualmente. Idioma, aparência e inicialização são salvos imediatamente.",
+      "it": "Salva il nome manualmente. Lingua, aspetto e avvio vengono salvati subito.",
+      "ru": "Имя нужно сохранить вручную. Язык, оформление и автозапуск сохраняются сразу."
+    },
+    "名称、主设备和切换方式需保存；外观、启动、光效和剪贴板开关立即生效。": {
+      "en": "Save name, host and switching changes manually. Language, appearance, startup, glow and clipboard options apply immediately.",
+      "zh-Hant": "名稱、主裝置和切換方式需儲存；語言、外觀、啟動、光效和剪貼簿開關立即生效。",
+      "ja": "名前、ホスト、切り替え方法は保存が必要です。その他の設定はすぐに適用されます。",
+      "ko": "이름, 호스트, 전환 방식은 저장해야 합니다. 나머지 옵션은 즉시 적용됩니다.",
+      "de": "Name, Host und Wechselmethode bitte speichern. Andere Optionen gelten sofort.",
+      "fr": "Enregistrez le nom, l’hôte et le mode de changement. Les autres options s’appliquent immédiatement.",
+      "es": "Guarda nombre, equipo y método de cambio. Las demás opciones se aplican al instante.",
+      "pt": "Salve nome, host e método de troca. As demais opções são aplicadas imediatamente.",
+      "it": "Salva nome, host e metodo di cambio. Le altre opzioni si applicano subito.",
+      "ru": "Имя, главное устройство и способ переключения нужно сохранить. Остальные настройки применяются сразу."
+    },
+    "边缘停留时间 · ": {
+      "en": "Edge dwell time · ",
+      "zh-Hant": "邊緣停留時間 · ",
+      "ja": "画面端での待機時間 · ",
+      "ko": "가장자리 대기 시간 · ",
+      "de": "Wartezeit am Rand · ",
+      "fr": "Délai au bord · ",
+      "es": "Espera en el borde · ",
+      "pt": "Espera na borda · ",
+      "it": "Attesa sul bordo · ",
+      "ru": "Задержка у края · "
+    },
+    " 毫秒": {
+      "en": " ms",
+      "zh-Hant": " 毫秒",
+      "ja": " ミリ秒",
+      "ko": "ms",
+      "de": " ms",
+      "fr": " ms",
+      "es": " ms",
+      "pt": " ms",
+      "it": " ms",
+      "ru": " мс"
+    },
+    "确认": {
+      "en": "Confirm",
+      "zh-Hant": "確認",
+      "ja": "確認",
+      "ko": "확인",
+      "de": "Bestätigen",
+      "fr": "Confirmer",
+      "es": "Confirmar",
+      "pt": "Confirmar",
+      "it": "Conferma",
+      "ru": "Подтвердить"
+    },
+    "更多": {
+      "en": "More",
+      "zh-Hant": "更多",
+      "ja": "その他",
+      "ko": "더 보기",
+      "de": "Mehr",
+      "fr": "Plus",
+      "es": "Más",
+      "pt": "Mais",
+      "it": "Altro",
+      "ru": "Ещё"
+    },
+    "隐藏 Dock 图标": {
+      "en": "Hide Dock icon",
+      "zh-Hant": "隱藏 Dock 圖示",
+      "ja": "Dock アイコンを非表示",
+      "ko": "Dock 아이콘 숨기기",
+      "de": "Dock-Symbol ausblenden",
+      "fr": "Masquer l’icône dans le Dock",
+      "es": "Ocultar el icono del Dock",
+      "pt": "Ocultar o ícone do Dock",
+      "it": "Nascondi l’icona nel Dock",
+      "ru": "Скрыть значок в Dock"
+    },
+    "立即保存。隐藏后，可点击屏幕右上角菜单栏中的 LanLink 图标，选择“打开 LanLink”返回主界面。": {
+      "en": "Saved immediately. When the Dock icon is hidden, click the LanLink icon in the menu bar at the top right of the screen and choose “Open LanLink” to return to the main window.",
+      "zh-Hant": "立即儲存。隱藏後，可點擊螢幕右上角選單列中的 LanLink 圖示，選擇「開啟 LanLink」返回主畫面。",
+      "ja": "変更はすぐに保存されます。Dock アイコンを非表示にした後は、画面右上のメニューバーにある LanLink アイコンをクリックし、「LanLink を開く」を選択するとメイン画面に戻れます。",
+      "ko": "즉시 저장됩니다. Dock 아이콘을 숨긴 후에는 화면 오른쪽 상단 메뉴 막대의 LanLink 아이콘을 클릭하고 “LanLink 열기”를 선택하면 기본 화면으로 돌아갈 수 있습니다.",
+      "de": "Wird sofort gespeichert. Wenn das Dock-Symbol ausgeblendet ist, klicken Sie oben rechts in der Menüleiste auf das LanLink-Symbol und wählen Sie „LanLink öffnen“, um zum Hauptfenster zurückzukehren.",
+      "fr": "Enregistré immédiatement. Une fois l’icône du Dock masquée, cliquez sur l’icône LanLink dans la barre des menus en haut à droite de l’écran, puis choisissez « Ouvrir LanLink » pour revenir à la fenêtre principale.",
+      "es": "Se guarda al instante. Una vez oculto el icono del Dock, haz clic en el icono de LanLink en la barra de menús, en la esquina superior derecha de la pantalla, y selecciona «Abrir LanLink» para volver a la ventana principal.",
+      "pt": "Salvo imediatamente. Depois de ocultar o ícone do Dock, clique no ícone do LanLink na barra de menus, no canto superior direito da tela, e escolha “Abrir LanLink” para voltar à janela principal.",
+      "it": "Salvato immediatamente. Quando l’icona nel Dock è nascosta, fai clic sull’icona di LanLink nella barra dei menu in alto a destra dello schermo e scegli “Apri LanLink” per tornare alla finestra principale.",
+      "ru": "Сохраняется сразу. После скрытия значка в Dock нажмите значок LanLink в строке меню в правом верхнем углу экрана и выберите «Открыть LanLink», чтобы вернуться в главное окно."
+    },
+    "无法更新 Dock 图标显示状态，请重试。": {
+      "en": "Could not change Dock icon visibility. Please try again.",
+      "zh-Hant": "無法更新 Dock 圖示顯示狀態，請重試。",
+      "ja": "Dock アイコンの表示状態を変更できませんでした。もう一度お試しください。",
+      "ko": "Dock 아이콘 표시 상태를 변경할 수 없습니다. 다시 시도해 주세요.",
+      "de": "Die Sichtbarkeit des Dock-Symbols konnte nicht geändert werden. Bitte versuchen Sie es erneut.",
+      "fr": "Impossible de modifier la visibilité de l’icône dans le Dock. Veuillez réessayer.",
+      "es": "No se pudo cambiar la visibilidad del icono del Dock. Inténtalo de nuevo.",
+      "pt": "Não foi possível alterar a visibilidade do ícone do Dock. Tente novamente.",
+      "it": "Impossibile modificare la visibilità dell’icona nel Dock. Riprova.",
+      "ru": "Не удалось изменить видимость значка в Dock. Попробуйте ещё раз."
+    },
+    "打开 LanLink": {
+      "en": "Open LanLink",
+      "zh-Hant": "開啟 LanLink",
+      "ja": "LanLink を開く",
+      "ko": "LanLink 열기",
+      "de": "LanLink öffnen",
+      "fr": "Ouvrir LanLink",
+      "es": "Abrir LanLink",
+      "pt": "Abrir LanLink",
+      "it": "Apri LanLink",
+      "ru": "Открыть LanLink"
+    },
+    "返回本机键鼠": {
+      "en": "Return input to this device",
+      "zh-Hant": "返回本機鍵鼠",
+      "ja": "このデバイスの入力に戻る",
+      "ko": "이 기기로 입력 반환",
+      "de": "Eingabe zu diesem Gerät zurückholen",
+      "fr": "Rendre la saisie à cet appareil",
+      "es": "Devolver control a este dispositivo",
+      "pt": "Retornar controle a este dispositivo",
+      "it": "Riporta l’input a questo dispositivo",
+      "ru": "Вернуть ввод на это устройство"
+    },
+    "组与配对": {
+      "en": "Groups & pairing",
+      "zh-Hant": "群組與配對",
+      "ja": "グループとペアリング",
+      "ko": "그룹 및 페어링",
+      "de": "Gruppen und Kopplung",
+      "fr": "Groupes et association",
+      "es": "Grupos y vinculación",
+      "pt": "Grupos e pareamento",
+      "it": "Gruppi e associazione",
+      "ru": "Группы и сопряжение"
+    },
+    "桌面控制": {
+      "en": "Remote desktop",
+      "zh-Hant": "桌面控制",
+      "ja": "リモートデスクトップ",
+      "ko": "원격 데스크톱",
+      "de": "Remotedesktop",
+      "fr": "Bureau à distance",
+      "es": "Escritorio remoto",
+      "pt": "Área de trabalho remota",
+      "it": "Desktop remoto",
+      "ru": "Удалённый рабочий стол"
+    },
+    "屏幕共享": {
+      "en": "Screen sharing",
+      "zh-Hant": "螢幕分享",
+      "ja": "画面共有",
+      "ko": "화면 공유",
+      "de": "Bildschirmfreigabe",
+      "fr": "Partage d’écran",
+      "es": "Compartir pantalla",
+      "pt": "Compartilhar tela",
+      "it": "Condivisione schermo",
+      "ru": "Общий доступ к экрану"
+    },
+    "键鼠操作": {
+      "en": "Keyboard & mouse",
+      "zh-Hant": "鍵盤與滑鼠操作",
+      "ja": "キーボードとマウス",
+      "ko": "키보드 및 마우스",
+      "de": "Tastatur und Maus",
+      "fr": "Clavier et souris",
+      "es": "Teclado y ratón",
+      "pt": "Teclado e mouse",
+      "it": "Tastiera e mouse",
+      "ru": "Клавиатура и мышь"
+    },
+    "键鼠标操作": {
+      "en": "Keyboard & mouse",
+      "zh-Hant": "鍵盤與滑鼠操作",
+      "ja": "キーボードとマウス",
+      "ko": "키보드 및 마우스",
+      "de": "Tastatur und Maus",
+      "fr": "Clavier et souris",
+      "es": "Teclado y ratón",
+      "pt": "Teclado e mouse",
+      "it": "Tastiera e mouse",
+      "ru": "Клавиатура и мышь"
+    },
+    "剪贴板文件共享": {
+      "en": "Clipboard & files",
+      "zh-Hant": "剪貼簿與檔案分享",
+      "ja": "クリップボードとファイル",
+      "ko": "클립보드 및 파일",
+      "de": "Zwischenablage und Dateien",
+      "fr": "Presse-papiers et fichiers",
+      "es": "Portapapeles y archivos",
+      "pt": "Área de transferência e arquivos",
+      "it": "Appunti e file",
+      "ru": "Буфер обмена и файлы"
+    },
+    "全屏": {
+      "en": "Full screen",
+      "zh-Hant": "全螢幕",
+      "ja": "全画面",
+      "ko": "전체 화면",
+      "de": "Vollbild",
+      "fr": "Plein écran",
+      "es": "Pantalla completa",
+      "pt": "Tela cheia",
+      "it": "Schermo intero",
+      "ru": "Полный экран"
+    },
+    "键盘": {
+      "en": "Keyboard",
+      "zh-Hant": "鍵盤",
+      "ja": "キーボード",
+      "ko": "키보드",
+      "de": "Tastatur",
+      "fr": "Clavier",
+      "es": "Teclado",
+      "pt": "Teclado",
+      "it": "Tastiera",
+      "ru": "Клавиатура"
+    },
+    "触控板": {
+      "en": "Touchpad",
+      "zh-Hant": "觸控板",
+      "ja": "タッチパッド",
+      "ko": "터치패드",
+      "de": "Touchpad",
+      "fr": "Pavé tactile",
+      "es": "Panel táctil",
+      "pt": "Touchpad",
+      "it": "Touchpad",
+      "ru": "Тачпад"
+    },
+    "功能键": {
+      "en": "Function keys",
+      "zh-Hant": "功能鍵",
+      "ja": "ファンクションキー",
+      "ko": "기능 키",
+      "de": "Funktionstasten",
+      "fr": "Touches de fonction",
+      "es": "Teclas de función",
+      "pt": "Teclas de função",
+      "it": "Tasti funzione",
+      "ru": "Функциональные клавиши"
+    },
+    "取消桌面控制": {
+      "en": "Stop remote control",
+      "zh-Hant": "取消桌面控制",
+      "ja": "リモート操作を停止",
+      "ko": "원격 제어 중지",
+      "de": "Fernsteuerung beenden",
+      "fr": "Arrêter le contrôle à distance",
+      "es": "Detener control remoto",
+      "pt": "Parar controle remoto",
+      "it": "Interrompi controllo remoto",
+      "ru": "Остановить удалённое управление"
+    },
+    "结束控制": {
+      "en": "End control",
+      "zh-Hant": "結束控制",
+      "ja": "操作を終了",
+      "ko": "제어 종료",
+      "de": "Steuerung beenden",
+      "fr": "Terminer le contrôle",
+      "es": "Finalizar control",
+      "pt": "Encerrar controle",
+      "it": "Termina controllo",
+      "ru": "Завершить управление"
+    },
+    "断开": {
+      "en": "Disconnect",
+      "zh-Hant": "中斷",
+      "ja": "切断",
+      "ko": "연결 해제",
+      "de": "Trennen",
+      "fr": "Déconnecter",
+      "es": "Desconectar",
+      "pt": "Desconectar",
+      "it": "Disconnetti",
+      "ru": "Отключить"
+    },
+    "发送文件": {
+      "en": "Send files",
+      "zh-Hant": "傳送檔案",
+      "ja": "ファイルを送信",
+      "ko": "파일 보내기",
+      "de": "Dateien senden",
+      "fr": "Envoyer des fichiers",
+      "es": "Enviar archivos",
+      "pt": "Enviar arquivos",
+      "it": "Invia file",
+      "ru": "Отправить файлы"
+    },
+    "发送文件…": {
+      "en": "Send files…",
+      "zh-Hant": "傳送檔案…",
+      "ja": "ファイルを送信…",
+      "ko": "파일 보내기…",
+      "de": "Dateien senden…",
+      "fr": "Envoyer des fichiers…",
+      "es": "Enviar archivos…",
+      "pt": "Enviar arquivos…",
+      "it": "Invia file…",
+      "ru": "Отправить файлы…"
+    },
+    "文件": {
+      "en": "Files",
+      "zh-Hant": "檔案",
+      "ja": "ファイル",
+      "ko": "파일",
+      "de": "Dateien",
+      "fr": "Fichiers",
+      "es": "Archivos",
+      "pt": "Arquivos",
+      "it": "File",
+      "ru": "Файлы"
+    },
+    "文件夹": {
+      "en": "Folder",
+      "zh-Hant": "資料夾",
+      "ja": "フォルダー",
+      "ko": "폴더",
+      "de": "Ordner",
+      "fr": "Dossier",
+      "es": "Carpeta",
+      "pt": "Pasta",
+      "it": "Cartella",
+      "ru": "Папка"
+    },
+    "已取消": {
+      "en": "Cancelled",
+      "zh-Hant": "已取消",
+      "ja": "キャンセル済み",
+      "ko": "취소됨",
+      "de": "Abgebrochen",
+      "fr": "Annulé",
+      "es": "Cancelado",
+      "pt": "Cancelado",
+      "it": "Annullato",
+      "ru": "Отменено"
+    },
+    "已接收": {
+      "en": "Received",
+      "zh-Hant": "已接收",
+      "ja": "受信済み",
+      "ko": "수신됨",
+      "de": "Empfangen",
+      "fr": "Reçu",
+      "es": "Recibido",
+      "pt": "Recebido",
+      "it": "Ricevuto",
+      "ru": "Получено"
+    },
+    "对方已接收": {
+      "en": "Received by recipient",
+      "zh-Hant": "對方已接收",
+      "ja": "相手が受信済み",
+      "ko": "상대방 수신 완료",
+      "de": "Vom Empfänger erhalten",
+      "fr": "Reçu par le destinataire",
+      "es": "Recibido por el destinatario",
+      "pt": "Recebido pelo destinatário",
+      "it": "Ricevuto dal destinatario",
+      "ru": "Получено адресатом"
+    },
+    "传输失败": {
+      "en": "Transfer failed",
+      "zh-Hant": "傳輸失敗",
+      "ja": "転送失敗",
+      "ko": "전송 실패",
+      "de": "Übertragung fehlgeschlagen",
+      "fr": "Échec du transfert",
+      "es": "Error de transferencia",
+      "pt": "Falha na transferência",
+      "it": "Trasferimento fallito",
+      "ru": "Ошибка передачи"
+    },
+    "等待传输": {
+      "en": "Waiting to transfer",
+      "zh-Hant": "等待傳輸",
+      "ja": "転送待ち",
+      "ko": "전송 대기",
+      "de": "Wartet auf Übertragung",
+      "fr": "En attente de transfert",
+      "es": "Esperando transferencia",
+      "pt": "Aguardando transferência",
+      "it": "In attesa di trasferimento",
+      "ru": "Ожидание передачи"
+    },
+    "待传输": {
+      "en": "Pending transfer",
+      "zh-Hant": "等待傳輸",
+      "ja": "転送待ち",
+      "ko": "전송 대기",
+      "de": "Übertragung ausstehend",
+      "fr": "Transfert en attente",
+      "es": "Transferencia pendiente",
+      "pt": "Transferência pendente",
+      "it": "Trasferimento in attesa",
+      "ru": "Передача ожидается"
+    },
+    "发送中": {
+      "en": "Sending",
+      "zh-Hant": "傳送中",
+      "ja": "送信中",
+      "ko": "보내는 중",
+      "de": "Wird gesendet",
+      "fr": "Envoi en cours",
+      "es": "Enviando",
+      "pt": "Enviando",
+      "it": "Invio in corso",
+      "ru": "Отправка"
+    },
+    "等待对方接收": {
+      "en": "Waiting for recipient",
+      "zh-Hant": "等待對方接收",
+      "ja": "相手の受信待ち",
+      "ko": "상대방 수신 대기",
+      "de": "Wartet auf Empfänger",
+      "fr": "En attente du destinataire",
+      "es": "Esperando al destinatario",
+      "pt": "Aguardando destinatário",
+      "it": "In attesa del destinatario",
+      "ru": "Ожидание получателя"
+    },
+    "连接失败": {
+      "en": "Connection failed",
+      "zh-Hant": "連線失敗",
+      "ja": "接続失敗",
+      "ko": "연결 실패",
+      "de": "Verbindung fehlgeschlagen",
+      "fr": "Échec de connexion",
+      "es": "Error de conexión",
+      "pt": "Falha na conexão",
+      "it": "Connessione fallita",
+      "ru": "Ошибка подключения"
+    },
+    "操作失败": {
+      "en": "Operation failed",
+      "zh-Hant": "操作失敗",
+      "ja": "操作に失敗しました",
+      "ko": "작업 실패",
+      "de": "Vorgang fehlgeschlagen",
+      "fr": "Échec de l’opération",
+      "es": "Error de operación",
+      "pt": "Falha na operação",
+      "it": "Operazione fallita",
+      "ru": "Ошибка операции"
+    },
+    "重新连接": {
+      "en": "Reconnect",
+      "zh-Hant": "重新連線",
+      "ja": "再接続",
+      "ko": "다시 연결",
+      "de": "Erneut verbinden",
+      "fr": "Reconnecter",
+      "es": "Reconectar",
+      "pt": "Reconectar",
+      "it": "Riconnetti",
+      "ru": "Подключиться снова"
+    },
+    "发起授权": {
+      "en": "Request permission",
+      "zh-Hant": "發起授權",
+      "ja": "権限をリクエスト",
+      "ko": "권한 요청",
+      "de": "Berechtigung anfordern",
+      "fr": "Demander l’autorisation",
+      "es": "Solicitar permiso",
+      "pt": "Solicitar permissão",
+      "it": "Richiedi autorizzazione",
+      "ru": "Запросить разрешение"
+    },
+    "需要设备授权": {
+      "en": "Device permission required",
+      "zh-Hant": "需要裝置授權",
+      "ja": "デバイスの許可が必要",
+      "ko": "기기 권한 필요",
+      "de": "Geräteberechtigung erforderlich",
+      "fr": "Autorisation de l’appareil requise",
+      "es": "Se requiere permiso del dispositivo",
+      "pt": "Permissão do dispositivo necessária",
+      "it": "Autorizzazione del dispositivo richiesta",
+      "ru": "Требуется разрешение устройства"
+    },
+    "等待授权": {
+      "en": "Awaiting permission",
+      "zh-Hant": "等待授權",
+      "ja": "許可待ち",
+      "ko": "권한 대기",
+      "de": "Wartet auf Berechtigung",
+      "fr": "En attente d’autorisation",
+      "es": "Esperando permiso",
+      "pt": "Aguardando permissão",
+      "it": "In attesa di autorizzazione",
+      "ru": "Ожидание разрешения"
+    },
+    "返回设备": {
+      "en": "Back to devices",
+      "zh-Hant": "返回裝置",
+      "ja": "デバイスに戻る",
+      "ko": "기기로 돌아가기",
+      "de": "Zurück zu Geräten",
+      "fr": "Retour aux appareils",
+      "es": "Volver a dispositivos",
+      "pt": "Voltar aos dispositivos",
+      "it": "Torna ai dispositivi",
+      "ru": "Назад к устройствам"
+    },
+    "正在连接设备服务…": {
+      "en": "Connecting to device service…",
+      "zh-Hant": "正在連線至裝置服務…",
+      "ja": "デバイスサービスに接続中…",
+      "ko": "기기 서비스 연결 중…",
+      "de": "Verbindung zum Gerätedienst…",
+      "fr": "Connexion au service…",
+      "es": "Conectando al servicio…",
+      "pt": "Conectando ao serviço…",
+      "it": "Connessione al servizio…",
+      "ru": "Подключение к службе…"
+    },
+    "服务正在启动…": {
+      "en": "Service starting…",
+      "zh-Hant": "服務正在啟動…",
+      "ja": "サービス起動中…",
+      "ko": "서비스 시작 중…",
+      "de": "Dienst startet…",
+      "fr": "Démarrage du service…",
+      "es": "Iniciando servicio…",
+      "pt": "Iniciando serviço…",
+      "it": "Avvio del servizio…",
+      "ru": "Запуск службы…"
+    },
+    " · 在线": {
+      "en": " · Online",
+      "zh-Hant": " · 上線",
+      "ja": " · オンライン",
+      "ko": " · 온라인",
+      "de": " · Online",
+      "fr": " · En ligne",
+      "es": " · En línea",
+      "pt": " · Online",
+      "it": " · Online",
+      "ru": " · В сети"
+    },
+    "已启动，可在设置中开启所需功能": {
+      "en": "Started. Enable the features you need in Settings.",
+      "zh-Hant": "已啟動，可在設定中啟用所需功能",
+      "ja": "起動しました。設定で必要な機能を有効にできます。",
+      "ko": "시작되었습니다. 설정에서 필요한 기능을 켜세요.",
+      "de": "Gestartet. Gewünschte Funktionen in den Einstellungen aktivieren.",
+      "fr": "Démarré. Activez les fonctions souhaitées dans les paramètres.",
+      "es": "Iniciado. Activa las funciones necesarias en Ajustes.",
+      "pt": "Iniciado. Ative os recursos necessários nas configurações.",
+      "it": "Avviato. Attiva le funzioni necessarie nelle impostazioni.",
+      "ru": "Запущено. Включите нужные функции в настройках."
+    },
+    "已连接同组设备": {
+      "en": "Connected to group devices",
+      "zh-Hant": "已連線至同組裝置",
+      "ja": "グループ内のデバイスに接続済み",
+      "ko": "그룹 기기에 연결됨",
+      "de": "Mit Gruppengeräten verbunden",
+      "fr": "Connecté aux appareils du groupe",
+      "es": "Conectado a dispositivos del grupo",
+      "pt": "Conectado aos dispositivos do grupo",
+      "it": "Connesso ai dispositivi del gruppo",
+      "ru": "Подключено к устройствам группы"
+    },
+    "前台自动同步": {
+      "en": "Automatic sync in the foreground",
+      "zh-Hant": "前景自動同步",
+      "ja": "フォアグラウンドで自動同期",
+      "ko": "포그라운드 자동 동기화",
+      "de": "Automatische Synchronisierung im Vordergrund",
+      "fr": "Synchronisation automatique au premier plan",
+      "es": "Sincronización automática en primer plano",
+      "pt": "Sincronização automática em primeiro plano",
+      "it": "Sincronizzazione automatica in primo piano",
+      "ru": "Автосинхронизация на переднем плане"
+    },
+    "ADB / Root 后台自动同步": {
+      "en": "Background sync via ADB / Root",
+      "zh-Hant": "ADB / Root 背景自動同步",
+      "ja": "ADB / Root でバックグラウンド同期",
+      "ko": "ADB / Root 백그라운드 동기화",
+      "de": "Hintergrundsynchronisierung über ADB / Root",
+      "fr": "Synchronisation en arrière-plan via ADB / Root",
+      "es": "Sincronización en segundo plano vía ADB / Root",
+      "pt": "Sincronização em segundo plano via ADB / Root",
+      "it": "Sincronizzazione in background tramite ADB / Root",
+      "ru": "Фоновая синхронизация через ADB / Root"
+    },
+    "前台自动同步 · 后台需要 ADB / Root": {
+      "en": "Foreground sync · Background requires ADB / Root",
+      "zh-Hant": "前景自動同步 · 背景需要 ADB / Root",
+      "ja": "フォアグラウンド同期 · バックグラウンドには ADB / Root が必要",
+      "ko": "포그라운드 동기화 · 백그라운드는 ADB / Root 필요",
+      "de": "Vordergrundsynchronisierung · Im Hintergrund ist ADB / Root nötig",
+      "fr": "Synchronisation au premier plan · ADB / Root requis en arrière-plan",
+      "es": "Sincronización en primer plano · ADB / Root requerido en segundo plano",
+      "pt": "Sincronização em primeiro plano · Segundo plano requer ADB / Root",
+      "it": "Sincronizzazione in primo piano · In background serve ADB / Root",
+      "ru": "Синхронизация на переднем плане · Для фона нужен ADB / Root"
+    },
+    "前台自动同步 · 助手暂不支持后台剪贴板": {
+      "en": "Foreground sync · Helper does not support background clipboard yet",
+      "zh-Hant": "前景自動同步 · 助手尚不支援背景剪貼簿",
+      "ja": "フォアグラウンド同期 · ヘルパーはバックグラウンドのクリップボードに未対応",
+      "ko": "포그라운드 동기화 · 도우미가 백그라운드 클립보드를 지원하지 않음",
+      "de": "Vordergrundsynchronisierung · Helfer unterstützt keine Hintergrundzwischenablage",
+      "fr": "Synchronisation au premier plan · Presse-papiers en arrière-plan non pris en charge",
+      "es": "Sincronización en primer plano · Asistente sin soporte de portapapeles en segundo plano",
+      "pt": "Sincronização em primeiro plano · Auxiliar sem suporte à área de transferência em segundo plano",
+      "it": "Sincronizzazione in primo piano · Appunti in background non supportati dall’assistente",
+      "ru": "Синхронизация на переднем плане · Помощник пока не поддерживает буфер в фоне"
+    },
+    "正在启动": {
+      "en": "Starting"
+    },
+    "已允许电脑授权，请在电脑安卓授权页选择本机": {
+      "en": "Computer authorization allowed. Select this phone on the computer's Android authorization page."
+    },
+    "已解除本应用的 ADB 授权": {
+      "en": "ADB authorization revoked for this app"
+    },
+    "已 Root 授权": {
+      "en": "Root authorized"
+    },
+    "Root 模式已关闭": {
+      "en": "Root mode disabled"
+    },
+    "桌面控制已结束，屏幕共享已按设置关闭": {
+      "en": "Desktop control ended; screen sharing stopped according to your settings"
+    },
+    "已更新组，等待自动连接": {
+      "en": "Group updated; waiting for automatic connection"
+    },
+    "监听失败": {
+      "en": "Unable to listen for connections"
+    },
+    "本设备已移出组，需要重新配对": {
+      "en": "This device was removed from the group and must pair again"
+    },
+    "内容已放入安卓剪贴板，目标应用需支持相应格式": {
+      "en": "Content copied to the Android clipboard. The target app must support its format."
+    },
+    "屏幕共享已授权": {
+      "en": "Screen sharing authorized"
+    },
+    "组成员已更新": {
+      "en": "Group members updated"
+    },
+    "已结束桌面控制": {
+      "en": "Desktop control ended"
+    },
+    "ADB 键鼠授权": {
+      "en": "ADB input authorization"
+    },
+    "ADB 键鼠授权 / 自动恢复": {
+      "en": "ADB input authorization / recovery"
+    },
+    "上传文字剪贴板": {
+      "en": "Upload text clipboard"
+    },
+    "下载文字剪贴板": {
+      "en": "Download text clipboard"
+    },
+    "为选中的手机授权": {
+      "en": "Authorize selected phone"
+    },
+    "之前的 ADB 授权已被解除。请在手机 LanLink 弹窗中点击「允许 ADB 授权」，并保持数据线连接。允许后自动继续。": {
+      "en": "The previous ADB authorization was revoked. Allow ADB authorization in LanLink on the phone and keep the USB cable connected. Setup will continue automatically."
+    },
+    "二维码与数字码同步刷新": {
+      "en": "QR and numeric codes refresh together"
+    },
+    "使用备用模式": {
+      "en": "Use fallback mode"
+    },
+    "保存到…": {
+      "en": "Save to…"
+    },
+    "停止键鼠控制": {
+      "en": "Stop input control"
+    },
+    "允许屏幕共享": {
+      "en": "Allow screen sharing"
+    },
+    "允许键鼠控制": {
+      "en": "Allow keyboard and mouse control"
+    },
+    "全选": {
+      "en": "Select All"
+    },
+    "全部允许": {
+      "en": "Allow all"
+    },
+    "全部撤销": {
+      "en": "Revoke all"
+    },
+    "全部置于前面": {
+      "en": "Bring All to Front"
+    },
+    "共享剪贴板与文件": {
+      "en": "Share clipboard and files"
+    },
+    "关机": {
+      "en": "Shut down"
+    },
+    "关闭提示": {
+      "en": "Dismiss message"
+    },
+    "关闭窗口": {
+      "en": "Close Window"
+    },
+    "其他设备加入本组": {
+      "en": "Join this group from another device"
+    },
+    "其他设备的八位数字配对码": {
+      "en": "Eight-digit pairing code from another device"
+    },
+    "切换全屏": {
+      "en": "Toggle full screen"
+    },
+    "刷新状态": {
+      "en": "Refresh status"
+    },
+    "刷新设备": {
+      "en": "Refresh devices"
+    },
+    "剪切": {
+      "en": "Cut"
+    },
+    "加入": {
+      "en": "Join"
+    },
+    "加入组成功不代表系统已允许控制。系统权限与本组设备授权分别管理。": {
+      "en": "Joining a group does not grant system control permissions. System permissions and group device authorizations are managed separately."
+    },
+    "助手就绪后，同组其他电脑可直接使用，无需重复连接数据线。手机重启后，连接已信任的电脑恢复助手即可。系统 USB 调试信任按电脑分别保存，新电脑恢复助手时仍需手机确认。": {
+      "en": "Once the helper is ready, other computers in the group can use it without reconnecting the cable. After restarting the phone, reconnect a trusted computer to restore the helper. USB debugging trust is saved per computer; a new computer still requires confirmation on the phone."
+    },
+    "发送": {
+      "en": "Send"
+    },
+    "发送文字": {
+      "en": "Send text"
+    },
+    "发送记录": {
+      "en": "Sent files"
+    },
+    "取消传输": {
+      "en": "Cancel transfer"
+    },
+    "取消关机": {
+      "en": "Cancel shutdown"
+    },
+    "取消发送": {
+      "en": "Cancel sending"
+    },
+    "同意并记住": {
+      "en": "Allow and remember"
+    },
+    "在同一局域网中，扫码或输入配对码即可加入你的离线组。": {
+      "en": "Scan a QR code or enter a pairing code on the same local network to join your offline group."
+    },
+    "在文件夹中显示": {
+      "en": "Show in folder"
+    },
+    "在系统设置中允许 LanLink；授权后完全退出并重新打开应用，再刷新状态。": {
+      "en": "Allow LanLink in System Settings. After granting permission, quit and reopen the app, then refresh the status."
+    },
+    "如果“辅助功能”列表中没有 LanLink，请在 Finder 的“应用程序”中找到 LanLink.app，将它拖入列表，再打开对应开关。": {
+      "en": "If LanLink is missing from Accessibility, find LanLink.app in Applications in Finder, drag it into the list, and enable it."
+    },
+    "安卓设备ADB授权": {
+      "en": "Android device ADB authorization"
+    },
+    "完成 Mac 协作权限设置": {
+      "en": "Set up Mac collaboration permissions"
+    },
+    "完成授权后，等待中的远程窗口会自动重试。": {
+      "en": "Waiting remote windows will retry automatically after permission is granted."
+    },
+    "完成系统授权后，请完全退出并重新打开 LanLink，再查看权限状态。": {
+      "en": "After granting system permission, quit and reopen LanLink, then check permission status."
+    },
+    "将上方设备拖入画布，或直接拖动设备调整方位": {
+      "en": "Drag devices onto the canvas or move them to adjust their positions"
+    },
+    "小米等机型如出现系统输入失败，还需开启 USB 调试（安全设置）。": {
+      "en": "On Xiaomi and some other phones, enable USB debugging (Security settings) if system input fails."
+    },
+    "屏幕录制": {
+      "en": "Screen recording"
+    },
+    "已授予": {
+      "en": "Granted"
+    },
+    "已连接到组，部分功能仍需准备。请在对方设备检查应用开关和系统权限。": {
+      "en": "Connected to the group, but some features are not ready. Check app settings and system permissions on the other device."
+    },
+    "已配对设备无法自动连接？": {
+      "en": "Paired device not connecting automatically?"
+    },
+    "已配对设备的局域网 IP": {
+      "en": "Local IP address of the paired device"
+    },
+    "帮助其他组的设备ADB授权": {
+      "en": "Help a device in another group with ADB"
+    },
+    "帮助其他组的设备完成 ADB 配置，无需加入本组。请在手机打开新版 LanLink，开启 USB 调试并信任此电脑。": {
+      "en": "Set up ADB for devices in other groups without joining this group. Open the latest LanLink on the phone, enable USB debugging, and trust this computer."
+    },
+    "开启": {
+      "en": "Enable"
+    },
+    "开启协作权限": {
+      "en": "Enable collaboration permissions"
+    },
+    "开启权限": {
+      "en": "Grant permission"
+    },
+    "开始控制": {
+      "en": "Start control"
+    },
+    "当前为模拟模式，系统键鼠和录屏能力未启用。": {
+      "en": "Simulation mode is active. System input control and screen recording are unavailable."
+    },
+    "所属组：": {
+      "en": "Group: "
+    },
+    "拖动调整方位，点击设备进行操作。": {
+      "en": "Drag to adjust positions. Click a device for actions."
+    },
+    "授予权限": {
+      "en": "Grant permission"
+    },
+    "接收文件": {
+      "en": "Received files"
+    },
+    "接收文件 · 使用“保存到…”或拖到文件夹保存": {
+      "en": "Received files · Use “Save to…” or drag to a folder"
+    },
+    "撤销": {
+      "en": "Undo"
+    },
+    "暂不允许": {
+      "en": "Not now"
+    },
+    "暂存区是空的，其他设备发送的文件会出现在这里。": {
+      "en": "No staged files. Files sent by other devices will appear here."
+    },
+    "最小化": {
+      "en": "Minimize"
+    },
+    "最近 10 分钟 · 最多 30 条文字 · 新内容在前": {
+      "en": "Last 10 minutes · Up to 30 text entries · Newest first"
+    },
+    "服务": {
+      "en": "Services"
+    },
+    "本机功能开关": {
+      "en": "Local feature settings"
+    },
+    "本组手机": {
+      "en": "Phones in this group"
+    },
+    "构建时间：": {
+      "en": "Build time: "
+    },
+    "查看文件": {
+      "en": "Open file"
+    },
+    "查看未就绪原因": {
+      "en": "See why this is not ready"
+    },
+    "桌面控制 · {0}": {
+      "en": "Desktop control · {0}"
+    },
+    "检测连接": {
+      "en": "Check connection"
+    },
+    "正在被控制": {
+      "en": "This device is being controlled"
+    },
+    "清除记录": {
+      "en": "Clear record"
+    },
+    "源码指纹：": {
+      "en": "Source fingerprint: "
+    },
+    "移出": {
+      "en": "Remove"
+    },
+    "移出布局": {
+      "en": "Remove from layout"
+    },
+    "移出设备…": {
+      "en": "Remove device…"
+    },
+    "窗口": {
+      "en": "Window"
+    },
+    "等待设备授权": {
+      "en": "Waiting for device authorization"
+    },
+    "管理此设备对本机的权限": {
+      "en": "Manage this device’s access to this Mac"
+    },
+    "系统权限决定键鼠、屏幕共享等功能是否可用。现在开启，之后可以随时在“本组设备权限”中调整。": {
+      "en": "System permissions enable input control and screen sharing. Grant them now and adjust them later in Group device permissions."
+    },
+    "编辑": {
+      "en": "Edit"
+    },
+    "缩放": {
+      "en": "Zoom"
+    },
+    "若 macOS 要求重启应用，请完成授权后重新打开 LanLink。": {
+      "en": "If macOS asks you to restart the app, reopen LanLink after granting permission."
+    },
+    "让新设备扫码，或在「加入其他组」中输入上方八位数字。": {
+      "en": "Scan this code on the new device or enter the eight digits above in “Join another group”."
+    },
+    "让设备相遇": {
+      "en": "Connect your devices"
+    },
+    "设备标识：": {
+      "en": "Device ID: "
+    },
+    "设备详情与权限": {
+      "en": "Device details and permissions"
+    },
+    "请在手机上允许 ADB 授权": {
+      "en": "Allow ADB authorization on the phone"
+    },
+    "请选择组内手机": {
+      "en": "Select a phone in this group"
+    },
+    "调整方位": {
+      "en": "Adjust position"
+    },
+    "辅助功能": {
+      "en": "Accessibility"
+    },
+    "输入文字": {
+      "en": "Type text"
+    },
+    "输入文本": {
+      "en": "Enter text"
+    },
+    "输入监控": {
+      "en": "Input Monitoring"
+    },
+    "返回本机 · Control + Option + F12": {
+      "en": "Return to this Mac · Control + Option + F12"
+    },
+    "这些开关决定对方能对本机做什么。恢复权限需在本机保存；本机系统权限和全局功能开关仍需开启。离线设备同样可以管理。": {
+      "en": "These switches control what the other device can do on this Mac. Save restored permissions here; system permissions and global feature switches must also be enabled. Offline devices can also be managed."
+    },
+    "连接授权": {
+      "en": "Connect and authorize"
+    },
+    "重做": {
+      "en": "Redo"
+    },
+    "重新发送": {
+      "en": "Send again"
+    },
+    "重新请求": {
+      "en": "Request again"
+    },
+    "键鼠控制：": {
+      "en": "Input control: "
+    },
+    "长文本预览 · 复制可获取完整内容": {
+      "en": "Long text preview · Copy to get the full content"
+    },
+    "隐藏 LanLink": {
+      "en": "Hide LanLink"
+    },
+    "高级选项": {
+      "en": "Advanced options"
+    },
+    "鼠标在此": {
+      "en": "Mouse is here"
+    },
+    "正在重启…": {
+      "en": "Restarting…"
+    },
+    "正在保存…": {
+      "en": "Saving…"
+    },
+    "保存权限": {
+      "en": "Save permissions"
+    },
+    "隐藏二维码": {
+      "en": "Hide QR code"
+    },
+    "点击查看二维码": {
+      "en": "Show QR code"
+    },
+    "配对码已复制": {
+      "en": "Pairing code copied"
+    },
+    "复制配对码": {
+      "en": "Copy pairing code"
+    },
+    "收起输入 ↑": {
+      "en": "Hide input ↑"
+    },
+    "解散当前组并加入其他组 →": {
+      "en": "Dissolve this group and join another →"
+    },
+    "加入其他组 →": {
+      "en": "Join another group →"
+    },
+    "正在配对…": {
+      "en": "Pairing…"
+    },
+    "解散当前组并加入其他组": {
+      "en": "Dissolve this group and join another"
+    },
+    "配对并加入": {
+      "en": "Pair and join"
+    },
+    "正在连接…": {
+      "en": "Connecting…"
+    },
+    "手动连接": {
+      "en": "Connect manually"
+    },
+    "未就绪": {
+      "en": "Not ready"
+    },
+    "系统未就绪": {
+      "en": "System not ready"
+    },
+    "应用未开启": {
+      "en": "Disabled in app"
+    },
+    "未知": {
+      "en": "Unknown"
+    },
+    "正在控制": {
+      "en": "Controlling"
+    },
+    "仅查看": {
+      "en": "View only"
+    },
+    "控制连接已中断": {
+      "en": "Control connection interrupted"
+    },
+    "正在连接设备画面": {
+      "en": "Connecting to the device screen"
+    },
+    "展开侧栏": {
+      "en": "Expand sidebar"
+    },
+    "收起侧栏": {
+      "en": "Collapse sidebar"
+    },
+    "正在发送…": {
+      "en": "Sending…"
+    },
+    "可授权": {
+      "en": "Ready to authorize"
+    },
+    "等待 USB 调试": {
+      "en": "Waiting for USB debugging"
+    },
+    "连接一次，自由控制": {
+      "en": "Connect once, control freely"
+    },
+    "正在处理…": {
+      "en": "Processing…"
+    },
+    "授权请求已结束": {
+      "en": "Authorization request ended"
+    },
+    "正在请求…": {
+      "en": "Requesting…"
+    },
+    "返回设备列表": {
+      "en": "Back to device list"
+    },
+    "取消请求": {
+      "en": "Cancel request"
+    },
+    "开始传输": {
+      "en": "Start transfer"
+    },
+    "重新传输": {
+      "en": "Retry transfer"
+    },
+    "保存暂存文件": {
+      "en": "Save staged file"
+    },
+    "选择新的名称和位置。保存成功后移出暂存区；同名文件不会被覆盖。": {
+      "en": "Choose a new name and location. The file leaves staging after saving. Existing files will not be overwritten."
+    },
+    "删除尚未保存的暂存文件？": {
+      "en": "Delete the unsaved staged file?"
+    },
+    "清除这条发送记录？": {
+      "en": "Clear this sent-file record?"
+    },
+    "发送到设备": {
+      "en": "Send to device"
+    },
+    "暂无在线设备。请打开对方 LanLink，并保持同一网络。": {
+      "en": "No devices are online. Open LanLink on the other device and connect to the same network."
+    },
+    "连接手机 · ADB 引导": {
+      "en": "Connect phone · ADB setup"
+    },
+    "使用无障碍备用控制？": {
+      "en": "Use accessibility fallback control?"
+    },
+    "请先保存目标设备中的工作。": {
+      "en": "Save your work on the target device first."
+    },
+    "移出设备？": {
+      "en": "Remove device?"
+    },
+    "设备权限请求": {
+      "en": "Device permission request"
+    },
+    "无法启动 LanLink": {
+      "en": "Unable to start LanLink"
+    },
+    "请求 {0} 在 30 秒后关机？": {
+      "en": "Ask {0} to shut down in 30 seconds?"
+    },
+    "将 {0} 移出组。该设备需要重新配对，其他离线成员会保留身份。": {
+      "en": "Remove {0} from the group. This device will need to pair again. Other offline members will keep their identities."
+    },
+    "{0} 请求恢复这台 Mac 上受限的功能，可在高级选项中调整。": {
+      "en": "{0} requests access to restricted features on this Mac. Adjust access in Advanced options."
+    },
+    "“{0}” → 这台 Mac": {
+      "en": "“{0}” → This Mac"
+    },
+    "{0} 正在操作或查看本机": {
+      "en": "{0} is controlling or viewing this device"
+    },
+    "版本：{0} · 构建：{1}": {
+      "en": "Version: {0} · Build: {1}"
+    },
+    "本机应用：{0}   本机系统：{1}": {
+      "en": "Local app: {0}   Local system: {1}"
+    },
+    "{0} 秒后刷新 · 每分钟自动更换": {
+      "en": "Refreshes in {0} seconds · Changes every minute"
+    },
+    "正在刷新配对码…": {
+      "en": "Refreshing pairing code…"
+    },
+    "解散当前组并加入其他组？": {
+      "en": "Dissolve this group and join another?"
+    },
+    "加入其他组？": {
+      "en": "Join another group?"
+    },
+    "原组所有设备都会退出，并断开控制。离线设备收到解散通知后退出。先验证新组配对码，成功后才解散原组。": {
+      "en": "All devices will leave the current group and disconnect control sessions. Offline devices will leave when they receive the notice. The new pairing code is verified before the current group is dissolved."
+    },
+    "本机将加入对方的组，在同一局域网内自动连接。": {
+      "en": "This device will join the other group and connect automatically on the same local network."
+    },
+    "为「{0}」准备 ADB 连接": {
+      "en": "Prepare an ADB connection for “{0}”"
+    },
+    "请在「{0}」上授权此功能。": {
+      "en": "Allow this feature on “{0}”."
+    },
+    "请打开“{0}”上的 LanLink，确认授权请求。": {
+      "en": "Open LanLink on “{0}” and confirm the authorization request."
+    },
+    "“{0}”的暂存副本将被删除。请先使用“保存到…”保留文件。": {
+      "en": "The staged copy of “{0}” will be deleted. Use “Save to…” first to keep the file."
+    },
+    "本机原文件会保留。清除后，对方尚未接收完成的“{0}”需要重新发送。": {
+      "en": "The original local file will be kept. If the recipient has not finished receiving “{0}”, it will need to be sent again."
+    },
+    "{0} 个文件或文件夹 · 接收到对方暂存区": {
+      "en": "{0} files or folders · Receive in the other device’s staging area"
+    },
+    "发送到“{0}”": {
+      "en": "Send to “{0}”"
+    },
+    "切换键鼠到此设备": {
+      "en": "Switch input to this device"
+    },
+    "粘贴共享内容": {
+      "en": "Paste shared content"
+    },
+    "关机…": {
+      "en": "Shut down…"
+    },
+    "↑ 上方": {
+      "en": "↑ Above"
+    },
+    "← 左侧": {
+      "en": "← Left"
+    },
+    "右侧 →": {
+      "en": "Right →"
+    },
+    "↓ 下方": {
+      "en": "↓ Below"
+    },
+    "剪贴板与文件": {
+      "en": "Clipboard and files"
+    },
+    "远程关机": {
+      "en": "Remote shutdown"
+    },
+    "本机 · 主设备": {
+      "en": "This device · Main device"
+    },
+    "有限授权": {
+      "en": "Limited authorization"
+    },
+    "融合控制中": {
+      "en": "Combined connection active"
+    },
+    "主页": {
+      "en": "Home"
+    },
+    "最近任务": {
+      "en": "Recent apps"
+    },
+    "设备服务已连接": {
+      "en": "Device service connected"
+    },
+    "设备服务不可用，请点击“重启设备服务”后重试": {
+      "en": "Device service unavailable. Restart the device service and try again."
+    },
+    "操作超时": {
+      "en": "Operation timed out"
+    },
+    "布局已保存": {
+      "en": "Layout saved"
+    },
+    "剪贴板已同步": {
+      "en": "Clipboard synced"
+    },
+    "有未保存的权限修改": {
+      "en": "Unsaved permission changes"
+    },
+    "点击保存，允许此设备访问本机所选功能。": {
+      "en": "Save to allow this device to access the selected features on this Mac."
+    },
+    "01  开启 USB 调试\n手机设置 → 关于手机，连续点击系统版本开启开发者选项，再打开 USB 调试。\n\n02  用数据线连接电脑\n解锁手机，允许 USB 调试并勾选始终允许此电脑，保持手机 LanLink 在线。\n\n03  自动匹配，点击连接\n核对组内设备身份后，点击连接自动配置 ADB，无需选择调试设备。": {
+      "en": "01  Enable USB debugging\nOn the phone, open Settings → About phone and tap the system version repeatedly to enable developer options, then enable USB debugging.\n\n02  Connect the USB cable\nUnlock the phone, allow USB debugging, select Always allow this computer, and keep LanLink online.\n\n03  Match automatically and connect\nAfter verifying the group device identity, connect to configure ADB automatically. There is no need to select a debugging device."
+    },
+    "此手机尚未启用 Root / ADB 增强控制。备用模式支持点击、长按和滑动；拖动会在松开鼠标后执行，悬停、游戏和复杂快捷键受限。此旧版手机请升级到 0.3.9 并启用 ADB / Root 输入助手。\n\n可在设备菜单选择「ADB 键鼠授权」开启增强控制。": {
+      "en": "This phone has not enabled Root / ADB enhanced control. Fallback mode supports taps, long presses and swipes. Dragging runs after mouse release; hovering, games and complex shortcuts are limited. Update this older phone to version 0.3.9 and enable the ADB / Root input helper.\n\nChoose “ADB input authorization” in the device menu to enable enhanced control."
+    },
+    "对方已完整接收": {
+      "en": "Recipient received the complete file"
+    },
+    "对方正在接收": {
+      "en": "Recipient is receiving"
+    },
+    "发送失败": {
+      "en": "Send failed"
+    },
+    "等待对方开始接收": {
+      "en": "Waiting for recipient to start"
+    },
+    "已排队，等待对方接收": {
+      "en": "Queued, waiting for recipient"
+    },
+    "传输中 · {0}%": {
+      "en": "Transferring · {0}%"
+    },
+    "对方应用：{0}   对方系统：{1}   本机访问对方：{2}": {
+      "en": "Remote app: {0}   Remote system: {1}   Access from this device: {2}"
+    },
+    "开启{0}": {
+      "en": "Enable {0}"
+    },
+    "协作功能": {
+      "en": "collaboration"
+    },
+    "自动刷新 · 查看本机访问对方的条件；下方可单独管理对方访问这台 Mac 的权限": {
+      "en": "Auto-refreshing · Review access to other devices and manage their access to this Mac below."
+    },
+    "设置已保存，部分运行状态未能恢复，请重启设备服务。": {
+      "en": "Settings were saved, but some services could not resume. Restart the device service."
+    },
+    "拖动调整方位，点击设备进行操作": {
+      "en": "Drag to arrange devices; click a device for actions"
+    },
+    "正在连接设备服务，请稍后打开设置": {
+      "en": "Connecting to device service. Please open settings in a moment."
+    },
+    "设备服务已中断。点击“重启设备服务”恢复；未保存的设置会保留。": {
+      "en": "The device service stopped. Select Restart device service to recover. Unsaved settings are kept."
+    },
+    "正在重启设备服务…": {
+      "en": "Restarting device service…"
+    },
+    "设备服务已恢复，未保存的设置已保留。": {
+      "en": "Device service restored. Unsaved settings were kept."
+    },
+    "设备服务未能恢复：": {
+      "en": "Unable to restore the device service: "
+    },
+    " 请再次重试。": {
+      "en": " Please try again."
+    },
+    "文件分享入口未能设置：": {
+      "en": "Unable to set up file sharing: "
+    },
+    " 仍可从设备菜单发送文件。": {
+      "en": " You can still send files from the device menu."
+    },
+    "LanLink · 局域网设备协作": {
+      "en": "LanLink · Local network collaboration"
+    },
+    "结束对方控制": {
+      "en": "End incoming control"
+    },
+    "远端设备": {
+      "en": "Remote device"
+    },
+    "  ·  模拟模式": {
+      "en": "  ·  Simulation mode"
+    },
+    "  ·  正在接收 ": {
+      "en": "  ·  Receiving "
+    },
+    "已配对设备": {
+      "en": "Paired device"
+    },
+    "已设置设备": {
+      "en": "Configured device"
+    },
+    "● 融合控制中": {
+      "en": "● Combined control active"
+    },
+    "● 正在控制": {
+      "en": "● Controlling"
+    },
+    "● 离线": {
+      "en": "● Offline"
+    },
+    "点击管理本机": {
+      "en": "Click to manage this device"
+    },
+    "点击操作；拖动到主设备四周设置布局": {
+      "en": "Click for actions; drag around the primary device to arrange the layout"
+    },
+    "↖ 鼠标在此": {
+      "en": "↖ Pointer is here"
+    },
+    "添加设备后，将顶部气泡拖至本机四周": {
+      "en": "Add devices, then drag the bubbles above around this device"
+    },
+    "待传输文件已放到 ": {
+      "en": "Files are staged on "
+    },
+    " 的暂存区": {
+      "en": " (staging area)"
+    },
+    "布局": {
+      "en": "Layout"
+    },
+    "键鼠": {
+      "en": "Keyboard and mouse"
+    },
+    "侧": {
+      "en": "Side"
+    },
+    "方": {
+      "en": "Position"
+    },
+    "切换键鼠": {
+      "en": "Switch keyboard and mouse"
+    },
+    "撤销此设备的本机权限": {
+      "en": "Revoke this device's access to this computer"
+    },
+    "撤销本机权限": {
+      "en": "Revoke access to this computer"
+    },
+    "停止允许“": {
+      "en": "Stop allowing “"
+    },
+    "”操作、查看或共享到本机？其他组成员不受影响，可在本组设备权限页恢复。": {
+      "en": "” to control, view or share to this computer? Other members are unaffected. You can restore access in group device permissions."
+    },
+    "已撤销“": {
+      "en": "Revoked access for “"
+    },
+    "”对本机的权限，可在本组设备权限页恢复。": {
+      "en": "”. You can restore it in group device permissions."
+    },
+    "移出设备": {
+      "en": "Remove device"
+    },
+    "设备已移出组": {
+      "en": "Device removed from the group"
+    },
+    "将 ": {
+      "en": "Remove "
+    },
+    " 移出组？该设备需要重新配对，其他离线成员会保留身份。": {
+      "en": " from the group? It will need to pair again. Other offline members keep their identities."
+    },
+    "关机已取消": {
+      "en": "Shutdown canceled"
+    },
+    "确认关机": {
+      "en": "Confirm shutdown"
+    },
+    " 在 30 秒后关机？请先保存目标设备中的工作。": {
+      "en": " will shut down in 30 seconds. Save your work on that device first."
+    },
+    "已发送关机请求，可在设备菜单中取消": {
+      "en": "Shutdown requested. You can cancel it from the device menu."
+    },
+    "已取消关机请求": {
+      "en": "Shutdown request canceled"
+    },
+    "切换时间": {
+      "en": "Switching delay"
+    },
+    "停留时间（毫秒，所有边缘共用）": {
+      "en": "Dwell time (milliseconds, all edges)"
+    },
+    "请输入 100–3000 毫秒": {
+      "en": "Enter 100–3000 milliseconds"
+    },
+    "切换时间已保存": {
+      "en": "Switching delay saved"
+    },
+    "其他设备": {
+      "en": "Other device"
+    },
+    " 暂时离线": {
+      "en": " Temporarily offline"
+    },
+    "安卓设备": {
+      "en": "Android device"
+    },
+    "本机身份": {
+      "en": "Device identity"
+    },
+    "设备标识": {
+      "en": "Device ID"
+    },
+    "构建详情": {
+      "en": "Build details"
+    },
+    "\n构建时间：": {
+      "en": "\nBuilt at: "
+    },
+    "所属组": {
+      "en": "Group"
+    },
+    "选择本组手机，为其启用键鼠操作与自动恢复。": {
+      "en": "Select a phone in this group to enable keyboard and mouse control and automatic recovery."
+    },
+    "本组暂无安卓设备，请在我的信息中添加手机。": {
+      "en": "There are no Android devices in this group. Add a phone in My information."
+    },
+    "USB + 局域网": {
+      "en": "USB + LAN"
+    },
+    "设备授权确认": {
+      "en": "Confirm device authorization"
+    },
+    "默认允许全部功能；可在高级选项中调整。同意后记住此设备。": {
+      "en": "Allow all features by default; customize in advanced options. This device is remembered after approval."
+    },
+    "权限已开启。": {
+      "en": "Permission enabled."
+    },
+    " 希望控制这台电脑": {
+      "en": " wants to control this computer"
+    },
+    " 请求协作，请开启缺少的权限。": {
+      "en": " requests collaboration. Enable the missing permissions."
+    },
+    " 正在操作或查看本机": {
+      "en": " is controlling or viewing this computer"
+    },
+    "正在被控制\n": {
+      "en": "Incoming control\n"
+    },
+    " · 请检查系统权限": {
+      "en": " · Check system permissions"
+    },
+    "正在生成配对码…": {
+      "en": "Generating pairing code…"
+    },
+    "让新设备扫码，或在「加入其他组」中\n输入上方八位数字。": {
+      "en": "Scan with the new device, or enter the eight digits\nabove in Join another group."
+    },
+    "输入其他设备的八位配对码": {
+      "en": "Enter another device's eight-digit pairing code"
+    },
+    "正在查找设备并配对…": {
+      "en": "Finding and pairing with the device…"
+    },
+    "已配对，正在建立加密连接…": {
+      "en": "Paired. Establishing an encrypted connection…"
+    },
+    "输入已配对设备的局域网 IP": {
+      "en": "Enter the paired device's local IP address"
+    },
+    "设备已连接。": {
+      "en": "Device connected."
+    },
+    "设备已连接": {
+      "en": "Device connected"
+    },
+    "正在连接设备并验证身份…": {
+      "en": "Connecting and verifying device identity…"
+    },
+    " 可检查地址后重试。": {
+      "en": " Check the address and try again."
+    },
+    "配对码正在刷新，请稍后再试。": {
+      "en": "The pairing code is refreshing. Please try again shortly."
+    },
+    "已复制八位配对码，可直接粘贴到另一台设备。": {
+      "en": "Eight-digit pairing code copied. Paste it into the other device."
+    },
+    "配对码需要八位数字，请检查长度后重试。": {
+      "en": "The pairing code requires eight digits. Check its length and try again."
+    },
+    "配对码只能包含数字和分组空格，请检查后重试。": {
+      "en": "The pairing code can contain only digits and grouping spaces. Please check and try again."
+    },
+    "请输入完整的八位数字配对码；粘贴前可先全选原内容。": {
+      "en": "Enter the full eight-digit code. Select all existing text before pasting to replace it."
+    },
+    "配对码已填入，请点击配对并加入。": {
+      "en": "Pairing code entered. Select Pair and join."
+    },
+    "请补全八位数字配对码。": {
+      "en": "Complete the eight-digit pairing code."
+    },
+    "请输入完整的八位数字配对码。": {
+      "en": "Enter the full eight-digit pairing code."
+    },
+    "配对码只能包含八位数字，可粘贴带空格的分组码。": {
+      "en": "The pairing code must contain eight digits. Codes with grouping spaces can be pasted."
+    },
+    "配对码暂不可用": {
+      "en": "Pairing code unavailable"
+    },
+    "无法刷新配对码：": {
+      "en": "Unable to refresh pairing code: "
+    },
+    " 秒后刷新 · 每分钟自动更换": {
+      "en": " seconds until refresh · Changes every minute"
+    },
+    "暂不连接": {
+      "en": "Not now"
+    },
+    "最大化 / 还原": {
+      "en": "Maximize / Restore"
+    },
+    "拖到文件夹": {
+      "en": "Drag to a folder"
+    },
+    "收到的文件": {
+      "en": "Received files"
+    },
+    "发送任务": {
+      "en": "Outgoing transfers"
+    },
+    "暂存区是空的。收到文件后可选择“保存到…”或拖到文件夹。": {
+      "en": "No staged files. After receiving files, select Save to… or drag them to a folder."
+    },
+    "暂无发送任务": {
+      "en": "No outgoing transfers"
+    },
+    "发送到 ": {
+      "en": "Sending to "
+    },
+    "来自 ": {
+      "en": "From "
+    },
+    "清除发送记录": {
+      "en": "Clear transfer record"
+    },
+    "清除“": {
+      "en": "Clear the transfer record for “"
+    },
+    "” 的发送记录": {
+      "en": "”"
+    },
+    "”的发送记录？尚未完成的分享将结束。原文件和对方已保存的文件不受影响。": {
+      "en": "”? Unfinished sharing will end. Original files and files already saved by the recipient are unaffected."
+    },
+    "发送记录已清除，可重新选择文件分享。": {
+      "en": "Transfer record cleared. You can select files to share again."
+    },
+    "已取消发送，其他任务继续。": {
+      "en": "Sending canceled. Other transfers continue."
+    },
+    "已取消传输，可稍后重试；其他任务继续。": {
+      "en": "Transfer canceled. You can retry later. Other transfers continue."
+    },
+    "已开始接收，请等待完成。": {
+      "en": "Receiving started. Please wait for completion."
+    },
+    "删除暂存副本": {
+      "en": "Delete staged copy"
+    },
+    "删除“": {
+      "en": "Delete the staged copy of “"
+    },
+    "”的暂存副本？尚未保存的文件将无法从本机恢复。": {
+      "en": "”? Unsaved files cannot be recovered from this device."
+    },
+    "已删除暂存副本。": {
+      "en": "Staged copy deleted."
+    },
+    "复制已交给文件管理器。请确认目标文件已保存，再删除暂存副本。": {
+      "en": "The file manager is handling the copy. Confirm the destination files are saved before deleting the staged copy."
+    },
+    "选择保存文件夹的位置；已有同名文件夹时将保留暂存副本。": {
+      "en": "Choose where to save the folder. If a folder with the same name exists, the staged copy is kept."
+    },
+    "保存暂存文件（不覆盖已有文件）": {
+      "en": "Save staged file (do not replace existing files)"
+    },
+    "已保存到 ": {
+      "en": "Saved to "
+    },
+    "，并移出暂存区。": {
+      "en": " and removed from staging."
+    },
+    "分享文件 · LanLink": {
+      "en": "Share files · LanLink"
+    },
+    " 个文件或文件夹": {
+      "en": " files or folders"
+    },
+    "正在准备发送到“": {
+      "en": "Preparing to send to “"
+    },
+    "暂无在线设备，请打开对方 LanLink。": {
+      "en": "No devices are online. Open LanLink on the other device."
+    },
+    "文件会进入对方暂存区。可在“暂存文件”的发送任务中查看进度、取消或重试。": {
+      "en": "Files go to the recipient's staging area. View progress, cancel or retry in Staged files → Outgoing transfers."
+    },
+    "文件路径无效": {
+      "en": "Invalid file path"
+    },
+    "选择文件：发送到对方暂存区": {
+      "en": "Select files to send to the recipient's staging area"
+    },
+    "正在获取屏幕…": {
+      "en": "Getting screen…"
+    },
+    "桌面控制 · ": {
+      "en": "Desktop control · "
+    },
+    "重新控制": {
+      "en": "Reconnect control"
+    },
+    "开始": {
+      "en": "Start"
+    },
+    "暂停": {
+      "en": "Pause"
+    },
+    "停止控制": {
+      "en": "Stop control"
+    },
+    "停止键鼠控制，保留画面": {
+      "en": "Stop keyboard and mouse control, keep viewing"
+    },
+    "文字": {
+      "en": "Text"
+    },
+    "粘贴共享剪贴板": {
+      "en": "Paste shared clipboard"
+    },
+    "截图": {
+      "en": "Screenshot"
+    },
+    "返回本机  ·  Ctrl + Alt + F12": {
+      "en": "Return to this device  ·  Ctrl + Alt + F12"
+    },
+    "发送到目标应用的文本": {
+      "en": "Text to send to the target application"
+    },
+    "控制已停止，请关闭文字窗口后重新开始控制": {
+      "en": "Control has stopped. Close this text window and restart control."
+    },
+    "请先开始控制": {
+      "en": "Start control first"
+    },
+    "请在被控设备允许本设备控制。": {
+      "en": "Allow this device to control the remote device."
+    },
+    "正在重新连接设备…": {
+      "en": "Reconnecting to device…"
+    },
+    "已取消连接 · 点击重新控制可再次连接": {
+      "en": "Connection canceled · Select Reconnect control to try again"
+    },
+    "备用控制未启用 · 可从右侧 ADB 开启增强控制": {
+      "en": "Fallback control is disabled · Enable enhanced control using ADB on the right"
+    },
+    "正在控制 · 点击画面后输入": {
+      "en": "Controlling · Click the screen to type"
+    },
+    "正在重新连接 · ": {
+      "en": "Reconnecting · "
+    },
+    "已返回本机 · 查看模式": {
+      "en": "Returned to this device · View mode"
+    },
+    "对方已结束控制": {
+      "en": "The remote device ended control"
+    },
+    "此手机尚未启用 Root / ADB 增强控制。无障碍备用模式支持点击、长按和滑动；拖动会在松开鼠标后执行，悬停、游戏和复杂快捷键受限。此旧版手机请升级到 0.3.9 并启用 ADB / Root 输入助手。\n\n可在“安卓授权”页面开启增强控制。继续使用备用模式？": {
+      "en": "Root / ADB enhanced control is not enabled on this phone. Accessibility fallback supports taps, long presses and swipes; dragging runs after releasing the mouse. Hover, gaming and complex shortcuts are limited. Update this older phone app to 0.3.9 and enable the ADB / Root input helper.\n\nEnable enhanced control in Android authorization. Continue with fallback mode?"
+    },
+    "请先完成或取消当前设备的连接请求": {
+      "en": "Complete or cancel the current device connection request first"
+    },
+    "尚未就绪或授权 · 点击查看": {
+      "en": "Not ready or authorized · Click for details"
+    },
+    "此功能尚未获准使用，请在「": {
+      "en": "This feature needs authorization on “"
+    },
+    "」上授权。点击发起授权后，对方将收到请求。": {
+      "en": "”. Select Request authorization to send a request."
+    },
+    "请在「": {
+      "en": "Please confirm on “"
+    },
+    "」上确认": {
+      "en": "”"
+    },
+    "授权请求已结束，请从设备操作重新发起。": {
+      "en": "The authorization request ended. Start a new request from device actions."
+    },
+    "授权已完成，可以使用获准的功能": {
+      "en": "Authorized. Approved features are available."
+    },
+    "每次开机，只需连接一次": {
+      "en": "Connect once after each restart"
+    },
+    "连接手机，开启增强控制": {
+      "en": "Connect your phone to enable enhanced control"
+    },
+    "01   开启 USB 调试": {
+      "en": "01   Enable USB debugging"
+    },
+    "02   用数据线连接电脑": {
+      "en": "02   Connect to the computer by USB"
+    },
+    "03   自动识别，点击连接": {
+      "en": "03   Wait for detection, then connect"
+    },
+    "手机设置 → 关于手机，连续点击系统版本号开启开发者选项，再进入开发者选项打开「USB 调试」。": {
+      "en": "Open Settings → About phone and repeatedly tap the build number to enable developer options. Then enable USB debugging in developer options."
+    },
+    "解锁手机，允许「USB 调试」，勾选「始终允许此电脑」。保持手机 LanLink 在线；同组设备默认可直接使用。": {
+      "en": "Unlock your phone, allow USB debugging and select Always allow from this computer. Keep LanLink online on the phone; devices in the same group can use it by default."
+    },
+    "小米等机型如提示系统输入失败，还需开启「USB 调试（安全设置）」。": {
+      "en": "If devices such as Xiaomi report an input failure, also enable USB debugging (Security settings)."
+    },
+    "连接并继续": {
+      "en": "Connect and continue"
+    },
+    "等待手机通过数据线连接": {
+      "en": "Waiting for the phone to connect by USB"
+    },
+    "等待手机连接…": {
+      "en": "Waiting for phone connection…"
+    },
+    "已识别组内手机 · 身份核对通过": {
+      "en": "Group phone recognized · Identity verified"
+    },
+    "等待已信任的 USB 设备": {
+      "en": "Waiting for a trusted USB device"
+    },
+    "之前的 ADB 授权已被手机解除。请在手机 LanLink 弹窗中点击「允许 ADB 授权」。": {
+      "en": "The phone revoked its previous ADB authorization. Select Allow ADB authorization in LanLink on the phone."
+    },
+    "保持数据线连接。允许后将重新检查并恢复连接，无需重复开启系统 USB 调试。": {
+      "en": "Keep the USB cable connected. After approval, the connection is checked and restored. You do not need to enable USB debugging again."
+    },
+    "等待手机允许 ADB 授权…": {
+      "en": "Waiting for ADB authorization on the phone…"
+    },
+    "正在检查手机助手并配置连接…": {
+      "en": "Checking the phone helper and configuring the connection…"
+    },
+    "请在手机 LanLink 中同意此电脑的请求，同意后会自动继续…": {
+      "en": "Approve this computer's request in LanLink on your phone. Setup continues automatically…"
+    },
+    "授权完成，正在检查连接…": {
+      "en": "Authorized. Checking the connection…"
+    },
+    "请先在手机 LanLink 中同意请求，然后再次点击「连接并继续」。": {
+      "en": "Approve the request in LanLink on your phone, then select Connect and continue again."
+    },
+    "连接授权已结束，可在安卓授权页重新发起。": {
+      "en": "Connection authorization ended. Start again in Android authorization."
+    },
+    "设备未就绪，请连接手机完成 ADB 配置。": {
+      "en": "The device is not ready. Connect your phone to finish ADB setup."
+    },
+    "从电脑为手机启用 ADB 增强控制": {
+      "en": "Enable ADB enhanced control on your phone from this computer"
+    },
+    "帮助其他组的设备完成 ADB 配置，无需加入本组。请先在手机打开新版 LanLink。": {
+      "en": "Set up ADB for devices in other groups without joining this group. Open the latest LanLink on the phone first."
+    },
+    "连接到这台电脑的手机": {
+      "en": "Phones connected to this computer"
+    },
+    "正在检测连接的手机…": {
+      "en": "Detecting connected phones…"
+    },
+    "正在配置手机助手；如有系统 USB 调试提示，请在手机确认…": {
+      "en": "Setting up the phone helper. Confirm any USB debugging prompt on the phone…"
+    },
+    "增强控制已启用，可以返回设备页开始控制。": {
+      "en": "Enhanced control enabled. Return to Devices to start controlling."
+    },
+    "请在手机的 LanLink 中同意此电脑的请求，同意后再次点击授权。": {
+      "en": "Approve this computer's request in LanLink on your phone, then select Authorize again."
+    },
+    "请允许 USB 调试": {
+      "en": "Allow USB debugging"
+    },
+    "读取组内设备权限…": {
+      "en": "Reading group device permissions…"
+    },
+    "权限已刷新。开关立即保存；此设备 → 本机表示对方可使用这台电脑。": {
+      "en": "Permissions refreshed. Switches save immediately. This device → This computer means the device may use this computer."
+    },
+    " 点击刷新重试。": {
+      "en": " Select Refresh to try again."
+    },
+    "本机 → 安卓设备连接授权": {
+      "en": "This computer → Android connection authorization"
+    },
+    "授权引导已打开，请按提示操作手机。": {
+      "en": "Authorization guide opened. Follow the instructions on your phone."
+    },
+    "允许本组设备使用此功能 · 立即生效": {
+      "en": "Allow group devices to use this feature · Applies immediately"
+    },
+    "本机功能开关已立即保存。": {
+      "en": "This device's feature switch was saved immediately."
+    },
+    "已允许“": {
+      "en": "Permission granted to “"
+    },
+    "已禁止“": {
+      "en": "Permission revoked from “"
+    },
+    "”使用本机的此项能力。": {
+      "en": "” for this feature on this computer."
+    },
+    " 权限未更改，请重试。": {
+      "en": " Permissions were not changed. Please try again."
+    },
+    "本机功能总开关 · 影响所有组成员": {
+      "en": "This device's feature switches · Applies to all group members"
+    },
+    "本机 → 此设备 · 查看对方允许这台电脑使用的功能": {
+      "en": "This computer → Device · Features the device allows this computer to use"
+    },
+    "应用：": {
+      "en": "App: "
+    },
+    "   系统：": {
+      "en": "   System: "
+    },
+    "   对本机：": {
+      "en": "   For this computer: "
+    },
+    "本机允许本组设备使用": {
+      "en": "Allow group devices to use "
+    },
+    "此设备 → 本机 · 允许对方使用这台电脑": {
+      "en": "Device → This computer · Allow access to this computer"
+    },
+    "每项立即保存。关闭后重连不会恢复，其他成员不受影响。": {
+      "en": "Each change saves immediately. Reconnecting does not restore disabled access. Other members are unaffected."
+    },
+    "允许此设备使用本机的": {
+      "en": "Allow this device to use this computer's "
+    },
+    " → 本机 · ": {
+      "en": " → This computer · "
+    },
+    "自动刷新 · 开关立即保存 · 分别显示本机访问对方与对方访问本机的权限": {
+      "en": "Auto-refresh · Switches save immediately · Outgoing and incoming access are shown separately"
+    },
+    "LanLink 启动设置": {
+      "en": "LanLink startup settings"
+    },
+    "LanLink 已在运行，请从系统托盘打开。": {
+      "en": "LanLink is already running. Open it from the system tray."
+    },
+    "LanLink 启动失败": {
+      "en": "LanLink startup failed"
+    },
+    "操作失败，请重试。": {
+      "en": "The operation failed. Please try again."
+    },
+    "没有访问此位置的权限，请选择其他文件夹。": {
+      "en": "You do not have permission to access this location. Choose another folder."
+    },
+    "系统未允许此操作，请检查权限后重试。": {
+      "en": "The system did not allow this operation. Check permissions and try again."
+    },
+    "磁盘空间不足，请清理空间或选择其他位置。": {
+      "en": "Not enough disk space. Free up space or choose another location."
+    },
+    "文件或位置已不存在，请刷新后重试。": {
+      "en": "The file or location no longer exists. Refresh and try again."
+    },
+    "目标已有同名文件，请选择其他名称。": {
+      "en": "A file with that name already exists. Choose another name."
+    },
+    "目标设备未响应，请确认对方已打开 LanLink。": {
+      "en": "The device did not respond. Make sure LanLink is open on it."
+    },
+    "找不到该设备地址，请检查地址后重试。": {
+      "en": "Device address not found. Check the address and try again."
+    },
+    "连接超时，请确认设备在线且处于同一局域网。": {
+      "en": "Connection timed out. Make sure the device is online on the same local network."
+    },
+    "操作未完成，请检查设备连接和权限后重试。": {
+      "en": "The operation did not complete. Check the connection and permissions, then try again."
+    },
+    "传输中 {0}%": {
+      "en": "Receiving {0}%"
+    },
+    " 秒": {
+      "en": " seconds"
+    },
+    " 粘贴共享内容": {
+      "en": " to paste shared content"
+    },
+    "1  用 USB 连接此手机，并在手机的开发者选项中开启「USB 调试」。\n2  解锁手机，确认「允许 USB 调试」并勾选始终允许此电脑，然后刷新下方设备。\n3  选择本机 ADB 连接的手机，点击「为选中的手机授权」。不会改变手机所属组或设备控制权限。": {
+      "en": "1  Connect the phone by USB and enable USB debugging in developer options.\n2  Unlock the phone, allow USB debugging and always allow this computer, then refresh devices below.\n3  Select the locally connected ADB phone and choose Authorize selected phone. Its group and device control permissions are unchanged."
+    },
+    "Root 投屏需要 H.264": {
+      "en": "Root screen sharing requires H.264"
+    },
+    "」启用 ADB 后，自动继续": {
+      "en": "” enables ADB, setup continues automatically"
+    },
+    "不支持": {
+      "en": "Not supported"
+    },
+    "为「": {
+      "en": "For “"
+    },
+    "协作权限": {
+      "en": "Collaboration permissions"
+    },
+    "已关闭自启动": {
+      "en": "Automatic startup disabled"
+    },
+    "已向 ": {
+      "en": "Sent a request to "
+    },
+    "已开启": {
+      "en": "Enabled"
+    },
+    "已开启登录自启动": {
+      "en": "Automatic startup on sign-in enabled"
+    },
+    "已开启管理员登录启动": {
+      "en": "Administrator startup on sign-in enabled"
+    },
+    "接口不存在": {
+      "en": "Interface not found"
+    },
+    "收到关机请求，请点击本机设备菜单中的“取消关机”撤销。剩余 ": {
+      "en": "Shutdown requested. Select Cancel shutdown in this device's menu to cancel. Time remaining: "
+    },
+    "暂时离线": {
+      "en": "Temporarily offline"
+    },
+    "正在切换控制": {
+      "en": "Switching control"
+    },
+    "正在连接该设备的画面": {
+      "en": "Connecting to this device's screen"
+    },
+    "结束": {
+      "en": "End"
+    },
+    "视频帧": {
+      "en": "Video frame"
+    },
+    "解码": {
+      "en": "Decode"
+    },
+    "请求 ": {
+      "en": "Request "
+    },
+    "边缘切换": {
+      "en": "Edge switching"
+    },
+    "键鼠切换": {
+      "en": "Keyboard and mouse switching"
+    },
+    "需要电脑已安装 Android SDK Platform-Tools（Android Studio 可安装）。增强控制可提供更完整的键鼠操作；部分手机还需开启厂商的「USB 调试（安全设置）」。其他组手机重启后，可打开手机 LanLink 并连接数据线，在此页面再次授权；本组手机使用连接引导建立绑定后支持自动恢复。首次 USB 调试确认仍需在手机完成。": {
+      "en": "Android SDK Platform-Tools must be installed on this computer (available through Android Studio). Enhanced control provides more complete keyboard and mouse input. Some phones also require USB debugging (Security settings). After a phone in another group restarts, open LanLink on it, connect USB and authorize again here. Phones in this group support automatic recovery after binding through the connection guide. Initial USB debugging approval still requires confirmation on the phone."
+    },
+    "\n\n保持命令运行。服务重启后需使用新命令。": {
+      "en": "\n\nKeep this command running. Use a new command after restarting the service."
+    },
+    " H.264 串流。": {
+      "en": " H.264 streaming."
+    },
+    " · 已授权": {
+      "en": " · Authorized"
+    },
+    " · 已连接": {
+      "en": " · Connected"
+    },
+    " 个文件 · 接收到对方暂存区": {
+      "en": " files · Receive in the other device's staging area"
+    },
+    " 从图片选择": {
+      "en": " Choose image"
+    },
+    " 台设备连接": {
+      "en": " devices connected"
+    },
+    " 将在 30 秒后关机。": {
+      "en": " will shut down in 30 seconds."
+    },
+    " 希望控制这台手机。默认允许全部功能，可在高级选项中调整。": {
+      "en": " wants to control this phone. All features are allowed by default; adjust them in advanced options."
+    },
+    " 手动输入": {
+      "en": " Enter manually"
+    },
+    " 控制 / 共享屏幕": {
+      "en": " · Remote control / Screen sharing"
+    },
+    " 收起输入": {
+      "en": " Hide input"
+    },
+    " 秒后刷新": {
+      "en": " seconds until refresh"
+    },
+    " 请求协作": {
+      "en": " requests collaboration"
+    },
+    " 请求协作，请在手机上开启所需权限": {
+      "en": " requests collaboration. Enable the required permissions on your phone."
+    },
+    " 请求首次控制，请在手机确认": {
+      "en": " requests control for the first time. Confirm on your phone."
+    },
+    "1. 手机与电脑加入同一组。\n": {
+      "en": "1. Join the same group on your phone and computer.\n"
+    },
+    "2. 用数据线连接电脑，在手机开发者选项中开启 USB 调试并信任电脑。\n": {
+      "en": "2. Connect the phone to your computer by USB. Enable USB debugging in Developer options and trust the computer.\n"
+    },
+    "3. 在电脑「安卓授权」选择本机并点击授权。小米等手机还需开启「USB 调试（安全设置）」。": {
+      "en": "3. Select this phone under Android authorization on your computer and authorize it. Some phones also require USB debugging (Security settings)."
+    },
+    "ADB / Root 串流已就绪，收到屏幕请求时自动开始": {
+      "en": "ADB / Root streaming is ready and starts automatically when requested"
+    },
+    "ADB / Root 输入": {
+      "en": "ADB / Root input"
+    },
+    "ADB / Root 输入助手": {
+      "en": "ADB / Root input helper"
+    },
+    "ADB 助手就绪时直接串流；未连接助手时可使用系统屏幕共享。": {
+      "en": "Stream directly when the ADB helper is ready. Otherwise, use system screen sharing."
+    },
+    "ADB 助手已就绪，同组设备可直接使用，无需重复连接数据线。": {
+      "en": "The ADB helper is ready. Group devices can connect without reconnecting the USB cable."
+    },
+    "ADB 授权已保存，但助手尚未运行。请连接已信任的电脑恢复助手，恢复后同组设备均可直接使用。": {
+      "en": "ADB authorization is saved, but the helper is not running. Connect a trusted computer to restore it for all group devices."
+    },
+    "LanLink 文件分享": {
+      "en": "LanLink file sharing"
+    },
+    "LanLink 正在运行": {
+      "en": "LanLink is running"
+    },
+    "Root / ADB 增强输入 · 已授权": {
+      "en": "Root / ADB enhanced input · Authorized"
+    },
+    "Root 助手或系统操作暂不可用，请确认 Root 管理器仍允许 LanLink。": {
+      "en": "The Root helper or system actions are unavailable. Check that your Root manager still allows LanLink."
+    },
+    "Root 模式已开启，输入助手尚未就绪。可先解除模式后重新授权。": {
+      "en": "Root mode is enabled, but the input helper is not ready. Disable the mode and authorize it again."
+    },
+    "Root 用于增强键鼠与 H.264 屏幕串流。解除会停止 Root 输入和屏幕采集；如需彻底撤销系统 Root 许可，请在 Root 管理器中操作。": {
+      "en": "Root enables enhanced input and H.264 screen streaming. Disabling it stops Root input and capture. Revoke system Root permission in your Root manager if needed."
+    },
+    "‹ 返回设置": {
+      "en": "‹ Back to settings"
+    },
+    "□ 最近任务": {
+      "en": "□ Recent apps"
+    },
+    "◁ 返回": {
+      "en": "◁ Back"
+    },
+    "○ 主页": {
+      "en": "○ Home"
+    },
+    "● 同一局域网": {
+      "en": "● Same local network"
+    },
+    "● 在线": {
+      "en": "● Online"
+    },
+    "● 有限授权": {
+      "en": "● Limited access"
+    },
+    "● 未就绪": {
+      "en": "● Not ready"
+    },
+    "● 未授权": {
+      "en": "● Not authorized"
+    },
+    "● 正在被控制 / 共享屏幕": {
+      "en": "● Remote control / Screen sharing active"
+    },
+    "」。需要时可从原应用重新分享；原文件不会被删除。": {
+      "en": "”. Share it again from the original app if needed. The original file will not be deleted."
+    },
+    "」上允许剪贴板文件共享。": {
+      "en": "”, allow clipboard and file sharing."
+    },
+    "」上授权此功能。": {
+      "en": "”, authorize this feature."
+    },
+    "」在本机暂存区的副本。尚未保存的内容将无法恢复；发送设备上的原文件不受影响。": {
+      "en": "” from this device's staging area. Unsaved content cannot be recovered. The original file on the sender's device is unaffected."
+    },
+    "不是 LanLink 配对二维码": {
+      "en": "This is not a LanLink pairing QR code"
+    },
+    "与 ": {
+      "en": "With "
+    },
+    "中止任务": {
+      "en": "Stop task"
+    },
+    "二维码只在本机识别。未建组时识别成功将直接加入；已有组时需先确认解散。加入后同组设备可使用已开启的协作功能，可在设置中管理授权。": {
+      "en": "QR codes are recognized on this device only. Scanning joins the group, or asks to dissolve your existing group first. Group devices can use enabled features; manage access in Settings."
+    },
+    "二维码尚未显示": {
+      "en": "QR code hidden"
+    },
+    "二维码扫描取景框": {
+      "en": "QR code camera preview"
+    },
+    "仍有权限未开启，请完成上方设置": {
+      "en": "Some permissions are still missing. Complete the settings above."
+    },
+    "从图片选择": {
+      "en": "Choose image"
+    },
+    "传输中 · ": {
+      "en": "Transferring · "
+    },
+    "你之前解除了本应用的 ADB 授权。允许后，已信任的电脑可通过数据线恢复键鼠与屏幕串流。设备控制权限仍由你单独决定。": {
+      "en": "You previously revoked this app's ADB authorization. Allow it to restore input and screen streaming through a trusted USB computer. You still control each device's access separately."
+    },
+    "例如 192.168.1.10": {
+      "en": "For example, 192.168.1.10"
+    },
+    "保存名称": {
+      "en": "Save name"
+    },
+    "保留文件": {
+      "en": "Keep file"
+    },
+    "保留记录": {
+      "en": "Keep record"
+    },
+    "停止协作": {
+      "en": "Stop collaboration"
+    },
+    "允许 ADB 授权": {
+      "en": "Allow ADB authorization"
+    },
+    "允许剪贴板与文件共享": {
+      "en": "Allow clipboard and file sharing"
+    },
+    "允许电脑授权": {
+      "en": "Allow computer authorization"
+    },
+    "允许电脑配置 ADB": {
+      "en": "Allow computer to configure ADB"
+    },
+    "允许远程输入": {
+      "en": "Allow remote input"
+    },
+    "全屏设置": {
+      "en": "Full screen settings"
+    },
+    "八位数字配对码": {
+      "en": "Eight-digit pairing code"
+    },
+    "共享当前剪贴板": {
+      "en": "Share current clipboard"
+    },
+    "共享文本": {
+      "en": "Share text"
+    },
+    "共享本机内容": {
+      "en": "Share this device's content"
+    },
+    "关闭并释放控制": {
+      "en": "Close and release control"
+    },
+    "关闭并释放触控板": {
+      "en": "Close and release touchpad"
+    },
+    "关闭此设备的全部功能，需要重新申请恢复": {
+      "en": "Disable all features for this device. New authorization will be required."
+    },
+    "关闭说明": {
+      "en": "Close help"
+    },
+    "其他设备发送的文件会出现在这里": {
+      "en": "Files sent by other devices appear here"
+    },
+    "准备发送": {
+      "en": "Preparing to send"
+    },
+    "删除暂存文件 ": {
+      "en": "Delete staged file "
+    },
+    "删除暂存文件？": {
+      "en": "Delete staged file?"
+    },
+    "剪贴板已上传到组": {
+      "en": "Clipboard uploaded to the group"
+    },
+    "剪贴板已共享": {
+      "en": "Clipboard shared"
+    },
+    "加入其他组": {
+      "en": "Join another group"
+    },
+    "协作权限提醒": {
+      "en": "Collaboration permission reminders"
+    },
+    "单指移动 · 轻点单击 · 长按拖动": {
+      "en": "Move with one finger · Tap to click · Hold to drag"
+    },
+    "单指移动与轻点单击，双指滚动与轻点右键，长按后拖动。连接只需远程输入授权，无需共享屏幕。": {
+      "en": "Move and click with one finger; scroll and right-click with two. Hold to drag. Only remote input access is required; screen sharing is optional."
+    },
+    "原生触控板": {
+      "en": "Native touchpad"
+    },
+    "双指滚动 · 双指轻点右键": {
+      "en": "Two fingers to scroll · Two-finger tap to right-click"
+    },
+    "双指缩放": {
+      "en": "Pinch to zoom"
+    },
+    "发送中 · ": {
+      "en": "Sending · "
+    },
+    "发送文件到设备": {
+      "en": "Send files to a device"
+    },
+    "发送请求": {
+      "en": "Send request"
+    },
+    "发送进度与接收文件 · 支持取消和重试": {
+      "en": "Transfer progress and received files · Cancel or retry"
+    },
+    "可随时结束本次控制": {
+      "en": "You can end this session at any time"
+    },
+    "右侧触控板": {
+      "en": "Right touchpad"
+    },
+    "右触控板：移动鼠标，轻点单击，双指滚动，长按拖动": {
+      "en": "Right touchpad: move pointer, tap to click, scroll with two fingers, hold to drag"
+    },
+    "右键": {
+      "en": "Right click"
+    },
+    "同组设备可使用你已开启的功能": {
+      "en": "Group devices can use the features you enabled"
+    },
+    "同组设备通常会自动连接；自动发现不可用时可输入电脑的局域网 IP。": {
+      "en": "Group devices usually connect automatically. Enter a computer's local IP address if discovery is unavailable."
+    },
+    "同组设备默认允许全部功能，无需首次确认。可单独关闭某台设备的功能；离线设备的设置也会保存。系统 ADB / Root 权限仍需单独配置。": {
+      "en": "All features are allowed for group devices by default. Disable features per device, including offline devices. System ADB / Root permissions require separate setup."
+    },
+    "回车": {
+      "en": "Enter"
+    },
+    "在已授权 ADB 的电脑执行": {
+      "en": "Run on an ADB-authorized computer"
+    },
+    "在电脑端完成一次 ADB 键鼠授权并记住此电脑。应用重启后助手会重连；手机重启后需已信任的调试连接可用。": {
+      "en": "Authorize ADB input once on a computer and remember it. The helper reconnects after app restarts. After a phone restart, a trusted debugging connection is required."
+    },
+    "在电脑端打开「安卓授权」，选择本机。首次允许 USB 调试时勾选始终允许此电脑；绑定会保存，连接可用时自动恢复。": {
+      "en": "Open Android authorization on your computer and select this phone. Choose Always allow this computer for USB debugging. The saved binding restores when connected."
+    },
+    "在线 · 可随时编辑授权": {
+      "en": "Online · Edit access at any time"
+    },
+    "在线 · 已授权": {
+      "en": "Online · Authorized"
+    },
+    "在线 · 正在检查授权": {
+      "en": "Online · Checking access"
+    },
+    "在线 · 点击发送": {
+      "en": "Online · Tap to send"
+    },
+    "在线 · 点击请求授权": {
+      "en": "Online · Tap to request access"
+    },
+    "在线 · 需要开启输入权限": {
+      "en": "Online · Input permission required"
+    },
+    "在首页的被控提示中结束当前控制；在组设备授权管理中单独关闭某台设备的键鼠、屏幕或剪贴板权限。跨屏键鼠使用 Android 原生鼠标光标。": {
+      "en": "End the current session from the home page's control notice. Manage each device's input, screen, or clipboard access under Group device access. Cross-screen input uses Android's native pointer."
+    },
+    "复位画面": {
+      "en": "Reset view"
+    },
+    "复制命令": {
+      "en": "Copy command"
+    },
+    "完成设置": {
+      "en": "Finish setup"
+    },
+    "对方已结束控制，点击重新请求可再次连接": {
+      "en": "The other device ended control. Tap Request again to reconnect."
+    },
+    "将删除「": {
+      "en": "Delete the staged copy of “"
+    },
+    "将另一台设备的二维码放入画面": {
+      "en": "Point the camera at the other device's QR code"
+    },
+    "将手机变成触控板，控制组内设备": {
+      "en": "Use your phone as a touchpad for group devices"
+    },
+    "局域网协作": {
+      "en": "Local network collaboration"
+    },
+    "左侧触控板": {
+      "en": "Left touchpad"
+    },
+    "左触控板：移动鼠标，轻点单击，双指滚动，长按拖动": {
+      "en": "Left touchpad: move pointer, tap to click, scroll with two fingers, hold to drag"
+    },
+    "已 Root 授权 · 关闭 Root 模式": {
+      "en": "Root authorized · Disable Root mode"
+    },
+    "已保存 · 全部授权": {
+      "en": "Saved · Full access"
+    },
+    "已保存 · 暂不允许任何功能": {
+      "en": "Saved · No features allowed"
+    },
+    "已保存 · 有限授权（": {
+      "en": "Saved · Limited access ("
+    },
+    "已保存，文件已移出暂存区": {
+      "en": "Saved and removed from the staging area"
+    },
+    "已发起授权，请在对方设备确认后再次选择": {
+      "en": "Authorization requested. Confirm on the other device, then select it again."
+    },
+    "已发起授权，请在被控设备确认": {
+      "en": "Authorization requested. Confirm on the controlled device."
+    },
+    "已发送关机请求": {
+      "en": "Shutdown request sent"
+    },
+    "已发送取消请求": {
+      "en": "Cancellation request sent"
+    },
+    "已发送粘贴请求": {
+      "en": "Paste request sent"
+    },
+    "已开始发送，可在文件暂存区查看结果": {
+      "en": "Sending started. Check the file staging area for results."
+    },
+    "已授权。是否解除 LanLink 的 Root 模式？": {
+      "en": "Authorized. Disable LanLink's Root mode?"
+    },
+    "已接收到剪贴板": {
+      "en": "Received in clipboard"
+    },
+    "已控制": {
+      "en": "Controlling"
+    },
+    "已撤销此设备的授权": {
+      "en": "This device's access was revoked"
+    },
+    "已连接 · 原生触控板": {
+      "en": "Connected · Native touchpad"
+    },
+    "应用重启后助手会自动重连。非 Root 手机重启后，需已信任的 USB 或无线调试连接可用；不会使用无障碍或专用输入法接管输入。": {
+      "en": "The helper reconnects after app restarts. Non-rooted phones need a trusted USB or wireless debugging connection after rebooting. Accessibility services and custom keyboards are not used for input."
+    },
+    "开启 Root 授权": {
+      "en": "Enable Root authorization"
+    },
+    "开启 Root 模式": {
+      "en": "Enable Root mode"
+    },
+    "开启所需权限后即可协作，已开启的项目会显示「已授权」。": {
+      "en": "Enable the required permissions to collaborate. Enabled items show Authorized."
+    },
+    "开启边缘切换光效": {
+      "en": "Enable edge switching effect"
+    },
+    "快捷同步剪贴板": {
+      "en": "Clipboard sync shortcuts"
+    },
+    "恢复 ADB 授权": {
+      "en": "Restore ADB authorization"
+    },
+    "我的手机": {
+      "en": "My phone"
+    },
+    "手动输入": {
+      "en": "Enter manually"
+    },
+    "打开共享设置": {
+      "en": "Open sharing settings"
+    },
+    "打开开发者选项": {
+      "en": "Open Developer options"
+    },
+    "打开远程键盘": {
+      "en": "Open remote keyboard"
+    },
+    "打开键盘": {
+      "en": "Open keyboard"
+    },
+    "扫描另一台设备的邀请二维码": {
+      "en": "Scan another device's invitation QR code"
+    },
+    "扫描组邀请二维码": {
+      "en": "Scan group invitation QR code"
+    },
+    "拖动画面 · 双指缩放": {
+      "en": "Drag to pan · Pinch to zoom"
+    },
+    "授权本次屏幕共享": {
+      "en": "Allow this screen sharing session"
+    },
+    "接收共享内容": {
+      "en": "Receive shared content"
+    },
+    "接收方将无法继续下载「": {
+      "en": "Recipients will no longer be able to download “"
+    },
+    "控制中心页面": {
+      "en": "Control center page"
+    },
+    "控制已中断，点击重新请求": {
+      "en": "Control interrupted. Tap Request again."
+    },
+    "控制连接失败": {
+      "en": "Control connection failed"
+    },
+    "撤销此设备的本机授权": {
+      "en": "Revoke this device's access"
+    },
+    "支持系统键鼠注入。电脑端完成首次 ADB 授权后保存绑定，助手可自动重连；手机重启后需已信任的调试连接可用。": {
+      "en": "System mouse and keyboard input is supported. Initial ADB authorization saves a binding for automatic reconnection. After rebooting, a trusted debugging connection is required."
+    },
+    "文件暂存区": {
+      "en": "File staging area"
+    },
+    "文本已共享": {
+      "en": "Text shared"
+    },
+    "无法发送：": {
+      "en": "Unable to send: "
+    },
+    "无法打开设置，请在系统设置中允许显示在其他应用上层": {
+      "en": "Unable to open settings. Allow display over other apps in system settings."
+    },
+    "显示 ADB 启动命令": {
+      "en": "Show ADB startup command"
+    },
+    "暂不设置": {
+      "en": "Skip setup"
+    },
+    "暂存区是空的": {
+      "en": "Staging area is empty"
+    },
+    "暂无支持触控板的设备": {
+      "en": "No touchpad-compatible devices available"
+    },
+    "暂无组设备，请先在设备页添加。": {
+      "en": "No group devices yet. Add one on the Devices page."
+    },
+    "服务尚未启动": {
+      "en": "Service has not started"
+    },
+    "服务正在启动，请稍后重试": {
+      "en": "Service is starting. Try again shortly."
+    },
+    "未取得二维码图片": {
+      "en": "Unable to load QR code image"
+    },
+    "未开启相机权限，可返回使用手动输入或从图片选择。": {
+      "en": "Camera permission is off. Go back to enter a code or choose an image."
+    },
+    "未授权。开启后，请在 Root 管理器中允许 LanLink。": {
+      "en": "Not authorized. Enable this and allow LanLink in your Root manager."
+    },
+    "未授权。需要通过电脑完成一次配置。": {
+      "en": "Not authorized. Complete setup once using a computer."
+    },
+    "本机内容": {
+      "en": "This device's content"
+    },
+    "本机协作": {
+      "en": "Local collaboration"
+    },
+    "本机尚未完成 ADB 授权。允许后，请连接电脑数据线，在电脑连接引导中完成配置。设备控制权限仍由你单独决定。": {
+      "en": "ADB authorization is not set up. Allow it, connect to a computer by USB, and follow the computer's setup guide. You still control each device's access separately."
+    },
+    "本机配对二维码": {
+      "en": "This device's pairing QR code"
+    },
+    "本机配对码": {
+      "en": "This device's pairing code"
+    },
+    "权限与连接状态": {
+      "en": "Permissions and connection status"
+    },
+    "权限就绪后，等待中的远程窗口会自动重试。": {
+      "en": "Waiting remote windows will retry when permissions are ready."
+    },
+    "查看": {
+      "en": "View"
+    },
+    "查看二维码": {
+      "en": "Show QR code"
+    },
+    "查看权限": {
+      "en": "View permissions"
+    },
+    "正在准备发送文件": {
+      "en": "Preparing files to send"
+    },
+    "正在取消…": {
+      "en": "Cancelling…"
+    },
+    "正在启动…": {
+      "en": "Starting…"
+    },
+    "正在接收文件…": {
+      "en": "Receiving files…"
+    },
+    "正在检查设备授权…": {
+      "en": "Checking device access…"
+    },
+    "正在被 ": {
+      "en": "Controlled by "
+    },
+    "正在请求控制…": {
+      "en": "Requesting control…"
+    },
+    "正在连接画面…": {
+      "en": "Connecting to screen…"
+    },
+    "此设备": {
+      "en": "This device"
+    },
+    "此设备不支持相对鼠标输入，可直接轻点画面控制。": {
+      "en": "This device does not support relative pointer input. Tap the screen directly to control it."
+    },
+    "没有 Root / ADB 时仍可查看已授权的屏幕，无法操作手机。": {
+      "en": "Without Root / ADB, you can view an authorized screen but cannot control the phone."
+    },
+    "没有可打开此文件的应用，可以先保存到手机": {
+      "en": "No app can open this file. Save it to your phone first."
+    },
+    "没有可用的图片选择器，请使用扫码或手动输入": {
+      "en": "No image picker is available. Scan a code or enter it manually."
+    },
+    "没有可用相机": {
+      "en": "No camera available"
+    },
+    "点击扫码": {
+      "en": "Tap to scan"
+    },
+    "点击查看缺少的权限和设置入口，已具备的权限会显示已授权。": {
+      "en": "Tap to view missing permissions and open settings. Existing permissions show Authorized."
+    },
+    "画面暂不可用": {
+      "en": "Screen temporarily unavailable"
+    },
+    "相机暂不可用，请返回手动输入或从图片选择。": {
+      "en": "Camera unavailable. Go back to enter a code or choose an image."
+    },
+    "离线 · 可提前设置授权": {
+      "en": "Offline · Access can be set in advance"
+    },
+    "离线 · 等待设备上线": {
+      "en": "Offline · Waiting for device"
+    },
+    "等待其他设备加入": {
+      "en": "Waiting for other devices to join"
+    },
+    "等待对方确认完成": {
+      "en": "Waiting for recipient confirmation"
+    },
+    "粘贴内容": {
+      "en": "Paste content"
+    },
+    "组内默认 · 全部允许": {
+      "en": "Group default · Allow all"
+    },
+    "组剪贴板已同步到本机": {
+      "en": "Group clipboard synced to this device"
+    },
+    "组服务尚未就绪，请重试": {
+      "en": "Group service is not ready. Try again."
+    },
+    "结束分享": {
+      "en": "End sharing"
+    },
+    "结束分享并清除记录？": {
+      "en": "End sharing and clear record?"
+    },
+    "继续全屏": {
+      "en": "Continue full screen"
+    },
+    "缩放画面跟随鼠标": {
+      "en": "Follow pointer when zoomed"
+    },
+    "自动同步可在设置的「共享剪贴板」中开关；允许哪些设备访问本机内容，可在「组设备授权管理」中调整。手动共享的内容将发送给已授权的同组设备。": {
+      "en": "Toggle automatic sync under Shared clipboard in Settings. Manage which devices can access local content under Group device access. Manually shared content goes to authorized group devices."
+    },
+    "解除后停止本应用的输入助手，并阻止电脑自动恢复。不会替你撤销系统 USB 调试信任；如需撤销，请在开发者选项操作。": {
+      "en": "Revoking stops this app's input helper and prevents automatic restoration by computers. To revoke system USB debugging trust, use Developer options."
+    },
+    "解除授权": {
+      "en": "Revoke authorization"
+    },
+    "让两台设备连接同一局域网，并打开 LanLink。设备上线后会自动连接。": {
+      "en": "Connect both devices to the same local network and open LanLink. They will connect automatically when online."
+    },
+    "让新设备扫码，或输入下方八位数字": {
+      "en": "Scan from a new device, or enter the eight-digit code below"
+    },
+    "让设备连接同一局域网，在设备页右上角添加设备，扫码或输入八位数字码加入组。同组设备默认允许协作，无需首次确认；可在组设备授权管理中关闭指定功能。": {
+      "en": "Connect devices to the same local network. Add a device from the Devices page, then scan or enter the eight-digit code. Group devices allow collaboration by default. Disable features under Group device access."
+    },
+    "让设备，自在协作": {
+      "en": "Let your devices work together"
+    },
+    "设备名称输入": {
+      "en": "Device name input"
+    },
+    "设备将在 30 秒后关机": {
+      "en": "Device will shut down in 30 seconds"
+    },
+    "设备已离线，请等待设备重新连接": {
+      "en": "Device offline. Wait for it to reconnect."
+    },
+    "设备已离线，请返回列表并等待设备上线": {
+      "en": "Device offline. Return to the list and wait for it to reconnect."
+    },
+    "设备操作": {
+      "en": "Device actions"
+    },
+    "设备离线": {
+      "en": "Device offline"
+    },
+    "设备页面": {
+      "en": "Devices page"
+    },
+    "设置每台组设备可以在本机使用的功能": {
+      "en": "Choose which features each group device can use here"
+    },
+    "设置页面": {
+      "en": "Settings page"
+    },
+    "该设备需要重新配对才能加入。其他离线成员会保留身份，上线后自动更新。": {
+      "en": "This device must pair again to rejoin. Other offline members keep their identity and update when online."
+    },
+    "请在新版设备中重新显示二维码": {
+      "en": "Show the QR code again on an updated device"
+    },
+    "请打开组内电脑的 LanLink，并更新到支持原生触控板的版本。设备上线后会自动出现在这里。": {
+      "en": "Open LanLink on a group computer and update it to a version with native touchpad support. Devices appear here automatically when online."
+    },
+    "请扫描 LanLink 的组邀请二维码": {
+      "en": "Scan a LanLink group invitation QR code"
+    },
+    "请求中": {
+      "en": "Requesting"
+    },
+    "请求中…": {
+      "en": "Requesting…"
+    },
+    "请求关机": {
+      "en": "Request shutdown"
+    },
+    "请求关机？": {
+      "en": "Request shutdown?"
+    },
+    "请求已结束，请让对方重新发起": {
+      "en": "Request ended. Ask the other device to try again."
+    },
+    "请输入 IP 地址": {
+      "en": "Enter an IP address"
+    },
+    "请输入完整的八位数字": {
+      "en": "Enter the full eight-digit code"
+    },
+    "调整操作方式，或返回普通视图": {
+      "en": "Adjust controls or return to the regular view"
+    },
+    "轻点画面点击 · 三指打开键盘": {
+      "en": "Tap to click · Three fingers to open keyboard"
+    },
+    "轻点画面点击 · 双指缩放 · 三指打开键盘": {
+      "en": "Tap to click · Pinch to zoom · Three fingers to open keyboard"
+    },
+    "输入其他组的配对码": {
+      "en": "Enter another group's pairing code"
+    },
+    "输入助手已连接 · ADB / Root": {
+      "en": "Input helper connected · ADB / Root"
+    },
+    "输入助手待连接 · 可在电脑端恢复": {
+      "en": "Input helper disconnected · Restore from a computer"
+    },
+    "输入对方「添加设备」页面的八位数字": {
+      "en": "Enter the eight-digit code from the other device's Add device page"
+    },
+    "输入要共享的文本": {
+      "en": "Enter text to share"
+    },
+    "输入设备名称": {
+      "en": "Enter device name"
+    },
+    "返回添加设备": {
+      "en": "Back to Add device"
+    },
+    "返回菜单": {
+      "en": "Back to menu"
+    },
+    "这是一个空文件夹": {
+      "en": "This folder is empty"
+    },
+    "进入": {
+      "en": "Open"
+    },
+    "远程控制": {
+      "en": "Remote control"
+    },
+    "连接与故障排查": {
+      "en": "Connection and troubleshooting"
+    },
+    "连接同一 Wi-Fi，轻松加入": {
+      "en": "Join easily on the same Wi-Fi"
+    },
+    "连接失败，请重新请求": {
+      "en": "Connection failed. Request again."
+    },
+    "连接设备": {
+      "en": "Connect device"
+    },
+    "退出全屏": {
+      "en": "Exit full screen"
+    },
+    "选择权限模式": {
+      "en": "Choose permission mode"
+    },
+    "选择要发送的文字或剪贴板内容": {
+      "en": "Choose text or clipboard content to send"
+    },
+    "通过 Root 恢复权限": {
+      "en": "Restore permissions via Root"
+    },
+    "配对服务尚未就绪": {
+      "en": "Pairing service is not ready"
+    },
+    "随时收回控制": {
+      "en": "Reclaim control at any time"
+    },
+    "需要允许 LanLink 显示在其他应用上层，才能在使用其他应用时显示短暂的屏幕边缘光效。此权限仅用于光效，不是键鼠控制的必要权限。": {
+      "en": "Allow LanLink to display over other apps to show a brief edge effect while using them. This permission is only for the effect and is optional for input control."
+    },
+    "需要对方允许剪贴板文件共享": {
+      "en": "The other device must allow clipboard and file sharing"
+    },
+    "需要开启手机权限，点击查看并设置": {
+      "en": "Phone permissions required. Tap to review and configure."
+    },
+    "需要开启系统输入权限": {
+      "en": "System input permission required"
+    },
+    "需要重新配对才能加入": {
+      "en": "Pair again to rejoin"
+    },
+    "非 Root 模式由电脑完成 ADB 键鼠授权；查看手机屏幕时再按提示允许系统投屏。Root 模式需手机已 Root，并在 Root 管理器允许 LanLink，使用实时": {
+      "en": "Non-Root mode uses a computer for ADB input authorization; allow system screen sharing when prompted. Root mode requires a rooted phone and permission in your Root manager, with live"
+    },
+    "首次控制需要你同意。点击选择允许的功能，同意后记住此设备。": {
+      "en": "Your approval is required for first-time control. Choose allowed features and remember this device."
+    },
+    "首次控制需要你同意，点击选择允许的功能": {
+      "en": "First-time control needs your approval. Tap to choose allowed features."
+    },
+    "高级设置": {
+      "en": "Advanced settings"
+    },
+    "，已选择": {
+      "en": ", selected"
+    },
+    "，打开全屏触控板": {
+      "en": ", open full screen touchpad"
+    }
+  }
+}

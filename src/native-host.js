@@ -53,6 +53,6 @@ createInterface({ input: process.stdin }).on('line', line => {
     } catch (e) { write({ id: request.id, error: e.message }); }
     finally { inFlight--; }
   };
-  if (['settings', 'join', 'device-remove', 'stop-inbound', 'consent-decide', 'consent-revoke', 'send-files', 'device-paste'].includes(request.method)) mutations = mutations.then(run, run);
+  if (['settings', 'join', 'device-remove', 'stop-inbound', 'consent-decide', 'consent-revoke', 'consent-set', 'send-files', 'device-paste'].includes(request.method)) mutations = mutations.then(run, run);
   else run();
 });

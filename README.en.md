@@ -13,7 +13,7 @@ LanLink brings the computers and Android phones on your local network into one w
 
 No account is required, and everyday collaboration works without cloud services or internet access. Devices join a group through a temporary numeric code or QR code, then exchange data over encrypted direct connections. Desktop clients use native windows and ship with their runtime.
 
-> **Current version: 0.3.45 development preview.** This README describes the current working tree; it does not imply that every platform has passed physical-device acceptance testing. See [validation status](#validation) for the recorded scope. The repository does not yet include a project-wide license; see [licensing and third-party components](#license).
+> **Current version: 0.3.46 development preview.** This README describes the current working tree; it does not imply that every platform has passed physical-device acceptance testing. See [validation status](#validation) for the recorded scope. The repository does not yet include a project-wide license; see [licensing and third-party components](#license).
 
 ## Contents
 
@@ -45,7 +45,7 @@ No account is required, and everyday collaboration works without cloud services 
 | **Keep working when the network slows down** | Input queues coalesce adjacent movements and discard stale motion, video adjusts its bitrate to latency and backlog, and file transfers leave bandwidth for active input and video. |
 | **Use a cable or a second network** | A trusted USB debugging connection can assist computer–Android sessions. Computers can also use a second IP network interface. LanLink selects a path according to link conditions while the LAN connection stays online. |
 
-**Highlights in 0.3.45:** isolated sessions across multiple devices, reuse of an already running Android helper by other group computers, adaptive input and video on poor connections, and macOS single-instance handling per data directory. See [CHANGELOG.md](CHANGELOG.md) for the full history.
+**Highlights in 0.3.46:** reliable clipboard recopy and repeated file uploads, per-device inbound permissions, file cancellation/retry/save, visible errors with service recovery, and embedded source fingerprints. See the [fix and validation record](docs/FIXES-0.3.46-2026-10-09.md). See [CHANGELOG.md](CHANGELOG.md) for the full history.
 
 <a id="platforms"></a>
 ## Platforms and capabilities
@@ -73,6 +73,8 @@ Use the [build instructions](#build) below to create a package for each platform
 Closing the desktop's main window hides it and returns input locally while the application keeps running in the background. Use **Quit LanLink (退出 LanLink)** in the tray or application menu to exit completely.
 
 Connect the devices to the same LAN with direct access to one another. Allow private-network access when Windows Firewall prompts you. Guest Wi-Fi or access-point isolation can prevent discovery and connections.
+
+On all three platforms, **Settings → Language** offers Simplified Chinese, Traditional Chinese, English, Japanese, Korean, German, French, Spanish, Portuguese, Italian, and Russian. First launch follows a supported system language, with English as the fallback. Manual choices are saved only on this device and apply immediately. Settings and common controls are translated into these languages; other messages fall back to English. Device names, file names, and clipboard content remain unchanged.
 
 ### 2. Pair your devices
 
@@ -133,7 +135,7 @@ npm run icons
 npm start
 ```
 
-Output: `dist/LanLink-0.3.45-windows-x64/` and a `.zip` with the same name. `-VideoRuntime` is optional, but without FFmpeg the desktop is limited to the JPEG fallback and cannot view phone screens that provide H.264 only. Build the native QUIC library before running the packaging script.
+Output: `dist/LanLink-0.3.46-windows-x64/` and a `.zip` with the same name. `-VideoRuntime` is optional, but without FFmpeg the desktop is limited to the JPEG fallback and cannot view phone screens that provide H.264 only. Build the native QUIC library before running the packaging script.
 
 </details>
 
@@ -149,7 +151,7 @@ npm start
 
 The script builds the Swift UI, system bridge, and Rust QUIC library. By default, it also builds and bundles FFmpeg from a pinned source release. Set `LANLINK_FFMPEG_DIST` to use an existing video runtime directory containing `bin/ffmpeg` and `LICENSE.txt`.
 
-Apple Silicon output: `dist/LanLink-0.3.45-macos-arm64/LanLink.app` and `dist/LanLink-0.3.45-macos-arm64.zip`. The Intel path uses `macos-x64` and still needs validation. The current script uses ad-hoc signing, without Apple Developer signing or notarization.
+Apple Silicon output: `dist/LanLink-0.3.46-macos-arm64/LanLink.app` and `dist/LanLink-0.3.46-macos-arm64.zip`. The Intel path uses `macos-x64` and still needs validation. The current script uses ad-hoc signing, without Apple Developer signing or notarization.
 
 </details>
 
@@ -416,6 +418,7 @@ These are **results already recorded in the repository**, not a claim that all t
 
 | Report | Covered | Does not establish |
 | --- | --- | --- |
+| [2026-10-09 · 0.3.46 reliability fixes](docs/FIXES-0.3.46-2026-10-09.md) | All 223 regression cases exercised: 221 passed by default, two UI cases passed separately; live Mac UI and isolated Android integration; full Windows cross-compilation and 35 C# assertions | Live Windows WPF, physical-phone poor networks and long-duration testing |
 | [2026-10-09 · 0.3.45 multi-device and poor-network changes](docs/MULTI-DEVICE-VALIDATION-2026-10-09.md) | 196 regression cases: 195 passed, 0 failed, 1 Mac UI test skipped by default and passed when enabled separately; Mac app / bridge builds, bundled runtime startup and shutdown; multi-service and adaptation tests | Four physical devices working together; a fresh Windows WPF build for these changes; weak-network or long-running physical-phone testing |
 | [2026-10-08 · Mac / Android remote control](docs/REMOTE-CONTROL-VALIDATION-2026-10-08.md) | Real Mac modules with an Android 14 emulator: input, H.264, reverse-direction video, and auxiliary-link fallback | Every vendor ROM or long-running physical mouse use; the focused script's exit cleanup did not pass |
 | [2026-10-07 · initial macOS build](docs/MACOS-VALIDATION-2026-10-07.md) | Apple Silicon native build, packaging, signature verification, and basic UI | Intel Macs, Apple notarization, or full three-platform acceptance |

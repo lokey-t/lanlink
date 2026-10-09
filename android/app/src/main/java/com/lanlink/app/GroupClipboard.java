@@ -31,13 +31,19 @@ final class GroupClipboard {
   }
   private synchronized boolean add(JSONObject r)throws Exception{JSONObject record=valid(r);if(record==null || r.optJSONArray("files")!=null && r.optJSONArray("files").length()>0 || record.optString("text").isEmpty() || records.containsKey(record.getString("id")))return false;records.put(record.getString("id"),record);prune();return records.containsKey(record.getString("id"));}
   private static boolean newer(JSONObject a,JSONObject b){return b==null || a.optLong("at")>b.optLong("at") || a.optLong("at")==b.optLong("at") && a.optString("id").compareTo(b.optString("id"))>0;}
-  synchronized void applied(String text){appliedText=text;}
-  synchronized void appliedFiles(String fingerprint){appliedFingerprint=fingerprint;}
+  synchronized void applied(String text){appliedText=text;lastText=null;lastFingerprint=null;appliedFingerprint=null;}
+  synchronized void appliedFiles(String fingerprint){appliedFingerprint=fingerprint;lastText=null;lastFingerprint=null;appliedText=null;}
   synchronized boolean echo(String text){return Objects.equals(text,appliedText)||Objects.equals(text,lastText);}
   synchronized JSONObject latest(){return latest;}
+  synchronized JSONObject reusable(String fingerprint,JSONArray files)throws Exception{
+    if(files.length()==0||latest==null||!service.deviceId.equals(latest.optString("source"))||latest.optLong("at")<=System.currentTimeMillis()-TTL||!Objects.equals(fingerprint,lastFingerprint)||!service.clipboardOfferAvailable(latest.optString("id")))return null;
+    JSONArray old=latest.optJSONArray("files");if(old==null||old.length()!=files.length())return null;
+    for(int i=0;i<files.length();i++)if(!old.getJSONObject(i).optString("name").equals(files.getJSONObject(i).optString("name"))||old.getJSONObject(i).optLong("size")!=files.getJSONObject(i).optLong("size"))return null;
+    return new JSONObject(latest.toString()).put("_fingerprint",fingerprint);
+  }
   void publish(JSONObject offer,boolean manual)throws Exception{
     if(offer.optString("text").isEmpty() && offer.optJSONArray("files").length()==0){if(manual)throw new IOException("本机剪贴板暂无可上传内容");return;}
-    synchronized(this){if(manual && latest!=null && service.deviceId.equals(latest.optString("source")) && latest.optLong("at")>System.currentTimeMillis()-TTL && offer.optString("_fingerprint",offer.optString("text")).equals(lastFingerprint)){for(Wire peer:service.peers.values())if(allowed(peer.id))peer.send(obj("type","clipboard","offer",latest));service.clip=latest;return;}}
+    synchronized(this){if(manual && latest!=null && service.deviceId.equals(latest.optString("source")) && latest.optLong("at")>System.currentTimeMillis()-TTL && offer.optString("_fingerprint",offer.optString("text")).equals(lastFingerprint) && (offer.optJSONArray("files").length()==0 || offer.optString("id").equals(latest.optString("id")))){for(Wire peer:service.peers.values())if(allowed(peer.id))peer.send(obj("type","clipboard","offer",latest));service.clip=latest;return;}}
     synchronized(this){String fingerprint=offer.optString("_fingerprint",offer.optString("text"));if(!manual && (!upload() || fingerprint.equals(lastFingerprint) || fingerprint.equals(appliedFingerprint) || offer.optJSONArray("files").length()==0 && echo(offer.optString("text")))){if(latest!=null)service.clip=latest;return;}
       lastFingerprint=fingerprint;appliedFingerprint=null;offer.remove("_fingerprint");
       offer.put("at",Math.max(System.currentTimeMillis(),latest==null?0:latest.optLong("at")+1)).put("name",service.name).put("source",service.deviceId);latest=offer;lastText=offer.optString("text");appliedText=null;add(offer);}

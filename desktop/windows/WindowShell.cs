@@ -66,12 +66,12 @@ namespace LanLink.Desktop {
     public static object Label(string text, string icon) {
       var row = new StackPanel { Orientation = Orientation.Horizontal };
       var glyph = Glyph(icon); glyph.Margin = new Thickness(0, 0, 12, 0); row.Children.Add(glyph);
-      row.Children.Add(MainWindow.Text(text, 14)); return row;
+      var label=MainWindow.LText(text, 13);label.MaxWidth=104;row.Children.Add(label); return row;
     }
     public static Button CaptionButton(string icon,string tip,Action action,bool dark=false) {
-      var button=MainWindow.Button("",action);button.Content=Glyph(icon,18);button.Width=36;button.Height=32;button.Padding=new Thickness(0);button.Margin=new Thickness(2,0,2,0);button.Background=Brushes.Transparent;button.BorderThickness=new Thickness(0);button.ToolTip=tip;
+      var button=MainWindow.Button("",action);button.Content=Glyph(icon,18);button.Width=36;button.Height=32;button.Padding=new Thickness(0);button.Margin=new Thickness(2,0,2,0);button.Background=Brushes.Transparent;button.BorderThickness=new Thickness(0);UiLocale.Bind(button,FrameworkElement.ToolTipProperty,tip);
       if(dark)((System.Windows.Shapes.Path)((Viewbox)button.Content).Child).Stroke=new SolidColorBrush(Color.FromRgb(199,205,216));
-      System.Windows.Automation.AutomationProperties.SetName(button,tip);return button;
+      UiLocale.Bind(button,System.Windows.Automation.AutomationProperties.NameProperty,tip);return button;
     }
     public static Border Wrap(Window window, UIElement content, bool resize = true, bool compact = false, bool dark = false, UIElement captionAccessory = null, Action<FrameworkElement> captionReady = null) {
       window.WindowStyle = WindowStyle.None;
@@ -85,7 +85,7 @@ namespace LanLink.Desktop {
       var caption = new Grid { Background = Brushes.Transparent, Margin = new Thickness(18, 0, 10, 0) };
       caption.ColumnDefinitions.Add(new ColumnDefinition()); caption.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); root.Children.Add(caption);
       var label = new DockPanel { VerticalAlignment = VerticalAlignment.Center };
-      if (!compact) { var brand = Glyph("brand", 23); brand.Margin = new Thickness(0, 0, 10, 0); DockPanel.SetDock(brand, Dock.Left); label.Children.Add(brand); } var captionText=MainWindow.Text(window.Title, compact ? 12 : 14,dark?"#DCE0E8":"#233957");if(dark)captionText.Foreground=new SolidColorBrush(Color.FromRgb(220,224,232));captionText.TextTrimming=TextTrimming.CharacterEllipsis;label.Children.Add(captionText); caption.Children.Add(label);
+      if (!compact) { var brand = Glyph("brand", 23); brand.Margin = new Thickness(0, 0, 10, 0); DockPanel.SetDock(brand, Dock.Left); label.Children.Add(brand); } var captionText=MainWindow.Text(window.Title, compact ? 12 : 14,dark?"#DCE0E8":"#233957");if(dark)captionText.Foreground=new SolidColorBrush(Color.FromRgb(220,224,232));captionText.SetBinding(TextBlock.TextProperty,new System.Windows.Data.Binding("Title"){Source=window});captionText.TextTrimming=TextTrimming.CharacterEllipsis;label.Children.Add(captionText); caption.Children.Add(label);
       caption.MouseLeftButtonDown += delegate(object sender, MouseButtonEventArgs e) {
         if (e.ClickCount == 2 && resize) window.WindowState = window.WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
         else if (e.LeftButton == MouseButtonState.Pressed) window.DragMove();

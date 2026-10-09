@@ -6,6 +6,8 @@ import android.view.*;
 import android.widget.TextView;
 import java.lang.reflect.*;
 import java.net.Socket;
+import java.net.ServerSocket;
+import java.net.InetAddress;
 import java.util.*;
 import org.json.JSONObject;
 
@@ -25,7 +27,18 @@ final class AdbPermissionProbe {
     SharedPreferences identity=service.getSharedPreferences("identity",0),helper=service.getSharedPreferences("adb-helper",0);
     Map<String,?> original=identity.getAll(),originalHelper=helper.getAll();Object owner=field(service,"owner");
     check(owner==null,"no active control during probe");
-    Wire peer=new Wire(new Socket(),Wire.obj(),new byte[32],service);peer.id=UUID.randomUUID().toString();peer.info=Wire.obj("name","ADB 授权测试电脑","platform","windows");
+    // A disconnected fake Wire is removed by the real service heartbeat, which also
+    // clears permissionNotice. Use an authenticated loopback connection so the UI
+    // assertion tests confirmation, not a race against the disconnect cleanup.
+    Wire peer,desktop;String peerId=UUID.randomUUID().toString();byte[] key=new byte[32];new java.security.SecureRandom().nextBytes(key);
+    try(ServerSocket listener=new ServerSocket(0,1,InetAddress.getLoopbackAddress())){
+      Socket client=new Socket(InetAddress.getLoopbackAddress(),listener.getLocalPort()),server=listener.accept();
+      peer=new Wire(client,Wire.obj("id",service.deviceId,"name","ADB 测试手机"),key,new Wire.Listener(){public void ready(Wire p){}public void closed(Wire p){service.closed(p);}public void message(Wire p,JSONObject m){}});
+      desktop=new Wire(server,Wire.obj("id",peerId,"name","ADB 授权测试电脑","platform","windows"),key,new Wire.Listener(){
+        public void ready(Wire p){}public void closed(Wire p){}
+        public void message(Wire p,JSONObject m){try{if(m.optString("type").equals("ping"))p.send(Wire.obj("type","pong"));else if(m.optString("type").equals("request"))p.send(Wire.obj("type","response","id",m.optString("id"),"result",Wire.obj()));}catch(Exception ignored){}}
+      });peer.start();desktop.start();long deadline=System.currentTimeMillis()+5000;while((!peer.connected||!desktop.connected)&&System.currentTimeMillis()<deadline)Thread.sleep(20);check(peer.connected&&desktop.connected,"authenticated ADB fixture connected");
+    }
     Method update=MainActivity.class.getDeclaredMethod("update");update.setAccessible(true);
     try{
       service.peers.put(peer.id,peer);
@@ -41,7 +54,7 @@ final class AdbPermissionProbe {
         }
         check(service.permissionNotice.peek(System.currentTimeMillis()).needs.contains("adb"),"explicitly revoked ADB requires local restoration");
         test.runOnMainSync(()->{try{update.invoke(activity);}catch(Exception e){throw new RuntimeException(e);}});test.waitForIdleSync();
-        Dialog dialog=(Dialog)field(activity,"permissionDialog");check(dialog!=null&&dialog.isShowing(),"phone confirmation is visible");
+        Dialog dialog=(Dialog)field(activity,"permissionDialog");check(dialog!=null&&dialog.isShowing(),"phone confirmation is visible (resumed="+field(activity,"resumed")+", alive="+field(activity,"alive")+", request="+service.permissionNotice.peek(System.currentTimeMillis())+", consent="+service.consent.peek()+")");
         View button=find(dialog.getWindow().getDecorView(),"允许 ADB 授权");check(button!=null&&button.isShown(),"explicit allow action is visible");
         check(service.adbRevoked()==revoked,"request never silently grants permission");
         test.runOnMainSync(()->button.performClick());test.waitForIdleSync();
@@ -50,7 +63,7 @@ final class AdbPermissionProbe {
       }
       return "PASS: first-time ADB setup without redundant app approval, truthful helper readiness, visible explicit-revocation restoration and independent device grants";
     }finally{
-      service.peers.remove(peer.id,peer);peer.close();service.permissionNotice.removePeer(peer.id);service.dismissPermissionNotice();
+      service.peers.remove(peer.id,peer);peer.close();desktop.close();service.permissionNotice.removePeer(peer.id);service.dismissPermissionNotice();
       restore(identity,original,"root_mode","adb_revoked","allow_input");restore(helper,originalHelper,"adb_authorized");
       test.runOnMainSync(()->{try{update.invoke(activity);}catch(Exception ignored){}});
     }

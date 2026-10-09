@@ -12,7 +12,7 @@ export class ClipboardSync {
   state(){return {upload:this.upload,download:this.download,shortcuts:!!this.service.config.clipboardShortcuts,showShortcuts:!!this.service.config.clipboardShortcuts && (!this.upload || !this.download),history:this.list().map(r=>({...r,text:r.text.slice(0,2000),length:r.text.length}))};}
   fingerprint(clip){return createHash('sha256').update(JSON.stringify([clip.text||'',clip.files||[]])).digest('hex');}
   suppress(clip){const key=this.fingerprint(clip);return key===this.applied || key===this.lastLocal;}
-  markApplied(clip){this.applied=this.fingerprint(clip);}
+  markApplied(clip){this.applied=this.fingerprint(clip);this.lastLocal=null;}
   validate(record){
     if(!record || typeof record.id!=='string' || record.id.length>64 || typeof record.source!=='string' || record.source.length>64 || typeof record.text!=='string' || record.text.length>1000000 || !Number.isSafeInteger(record.at) || record.at<=this.now()-TTL || record.at>this.now()+30000 || this.service.group.excluded(record.source))return null;
     const known=record.source===this.service.config.id || this.service.group.data.members[record.source] || this.service.config.knownDevices?.[record.source] || this.service.peers.has(record.source);
@@ -22,7 +22,7 @@ export class ClipboardSync {
   add(record){const r=this.validate(record);if(!r || !r.text || record.files?.length || this.records.has(r.id))return false;this.records.set(r.id,r);this.prune();return this.records.has(r.id);}
   async publish(offer,raw,manual=false){
     if(!offer.text && !offer.files.length){if(manual)throw Error('本机剪贴板暂无可上传内容');return false;}
-    if(manual && this.lastLocal===this.fingerprint(raw) && this.latest?.source===this.service.config.id && this.latest.at>this.now()-TTL){
+    if(manual && offer.id===this.latest?.id && this.lastLocal===this.fingerprint(raw) && this.latest?.source===this.service.config.id && this.latest.at>this.now()-TTL){
       this.service.clipboard=this.latest;for(const p of this.service.peers.values())if(this.allowed(p.remote.id))p.send({type:'clipboard',offer:this.latest});return true;
     }
     if(!manual && (!this.upload || this.suppress(raw))){if(this.latest)this.service.clipboard=this.latest;return false;}

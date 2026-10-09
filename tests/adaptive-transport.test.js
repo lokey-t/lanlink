@@ -1,19 +1,60 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
-import {AdaptiveMotion, InputQueue} from '../src/input-queue.js';
+import {AdaptiveMotion, InputQueue, motionRttSample} from '../src/input-queue.js';
 import {AdaptiveVideo, VideoFeedback} from '../src/adaptive-video.js';
 import {MotionSender, MotionReceiver} from '../src/quic-motion.js';
 import {RtcFrameQueue} from '../src/rtc-video.js';
 import {QuicVideo} from '../src/quic.js';
 import {VideoHost} from '../src/video.js';
 
-test('motion pacing reacts to initial high RTT, congestion and gradual recovery independently per peer', () => {
+test('stable high RTT without backlog does not add mouse pacing latency', () => {
+  for (const rttMs of [10, 150, 200, 600]) {
+    let now=0;const pacing=new AdaptiveMotion(()=>now);
+    for(let i=0;i<50;i++){now+=100;pacing.feedback({rttMs,queued:0});assert.equal(pacing.interval,8);}
+  }
+});
+
+test('mouse congestion is bounded to 24ms and continuous clean Datagram feedback restores 8ms within one second', () => {
   let now=0;const slow=new AdaptiveMotion(()=>now),fast=new AdaptiveMotion(()=>now);
-  slow.feedback({rttMs:200});assert.equal(slow.interval,50);assert.equal(fast.interval,8);
-  slow.feedback({rttMs:NaN});assert.equal(slow.interval,50);
-  for(let i=0;i<200;i++){now+=300;slow.feedback({rttMs:10});}assert.equal(slow.interval,8);
-  now+=300;fast.feedback({queued:65536});assert.ok(fast.interval>=16);assert.equal(slow.interval,8);
+  slow.feedback({rttMs:10,queued:131072});assert.equal(slow.interval,24);assert.equal(fast.interval,8);
+  slow.feedback({rttMs:NaN,queued:0});assert.equal(slow.interval,24);
+  for(let i=0;i<64;i++){now+=16;slow.feedback({queued:0});}
+  assert.equal(slow.interval,8,'healthy movements must not keep resetting recovery');
+  now+=120;slow.feedback({rttMs:250});assert.equal(slow.interval,12);
+  now+=120;slow.feedback({rttMs:250});assert.equal(slow.interval,16);
+  for(let i=0;i<20;i++){now+=120;slow.feedback({rttMs:1000});assert.ok(slow.interval<=16,'RTT alone must not invoke the severe backlog limit');}
+});
+
+test('partial and invalid feedback cannot hide fresh queue pressure; stale samples do not pin mouse throttling', () => {
+  let now=0;const pacing=new AdaptiveMotion(()=>now);
+  pacing.feedback({queued:131072});assert.equal(pacing.interval,24);
+  for(let i=0;i<4;i++){now+=100;pacing.feedback({rttMs:10});assert.equal(pacing.interval,24);}
+  pacing.feedback({});pacing.feedback({queued:-1});pacing.feedback({delayMs:Infinity});assert.equal(pacing.interval,24);
+  for(let i=0;i<25;i++){now+=100;pacing.feedback({rttMs:10});}
+  assert.equal(pacing.interval,8);
+});
+
+test('a stable slower route replaces the old RTT baseline instead of throttling the peer forever', () => {
+  let now=0;const pacing=new AdaptiveMotion(()=>now);pacing.feedback({rttMs:8});
+  for(let i=0;i<120;i++){now+=100;pacing.feedback({rttMs:200,queued:0});}
+  assert.equal(pacing.baseRtt,200);assert.equal(pacing.interval,8);
+  assert.ok(pacing.rttBuckets.length<=20,'RTT history remains bounded during continuous input');
+});
+
+test('file, video, acquisition and text work are excluded from mouse network RTT feedback', () => {
+  for(const method of ['quicFile','bulkOpen','videoOpen','videoKeep','text','acquire','release','permission-status'])assert.equal(motionRttSample(method),false);
+  for(const method of ['linkPing','keepControl'])assert.equal(motionRttSample(method),true);
+  for(const kind of ['move','relative','key','button','wheel'])assert.equal(motionRttSample('input',{kind}),true);
+});
+
+test('a slow reliable motion acknowledgement is not followed by an extra pacing wait', async () => {
+  let now=0,release;const sent=[],gate=new Promise(resolve=>release=resolve);
+  const queue=new InputQueue(async(_method,args)=>{sent.push({at:now,...args});if(sent.length===1)await gate;return {};},{adaptive:true,now:()=>now});
+  queue.feedback({queued:131072});
+  const first=queue.request('input',{kind:'move',x:0,y:0}),next=queue.request('input',{kind:'move',x:1,y:1});
+  now=150;release();await Promise.all([first,next]);
+  assert.deepEqual(sent.map(m=>m.at),[0,150]);
 });
 
 test('input queue coalesces absolute/raw motion within a fresh window without crossing clicks', async () => {
@@ -36,7 +77,7 @@ test('stalled input discards old raw displacement but retains the final absolute
 
 test('pacing coalesces bursts and lets a following button flush its preceding position immediately', async () => {
   const calls=[],queue=new InputQueue(async(method,args)=>{calls.push(args);return {};},{adaptive:true});
-  queue.feedback({rttMs:200});await queue.request('input',{kind:'move',x:0,y:0});
+  queue.feedback({queued:131072});await queue.request('input',{kind:'move',x:0,y:0});
   const pending=[];for(let i=1;i<=20;i++)pending.push(queue.request('input',{kind:'move',x:i/20,y:0}));
   assert.equal(calls.length,1);
   pending.push(queue.request('input',{kind:'button',button:0,down:true}));await Promise.all(pending);

@@ -34,6 +34,7 @@ final class ClipboardProbe {
             if(step.equals("helper-copy"))service.shell.request(Wire.obj("method","clipboard-set","text",a.optString("text")));
             if(step.equals("mode")){service.groupClipboard.setting("upload",a.optBoolean("upload",true));service.groupClipboard.setting("download",a.optBoolean("download",true));}
             if(step.equals("manual-upload"))service.publishClipboard();
+            if(step.equals("repeat-file-upload")){for(int i=0;i<50;i++)service.publishClipboard();result.put("offer",service.groupClipboard.latest());Field offers=LinkService.class.getDeclaredField("offers");offers.setAccessible(true);check(((Map<?,?>)offers.get(service)).size()<=2,"repeated file upload reuses live snapshot");}
             if(step.equals("manual-download"))service.groupClipboard.downloadNow();
             if(step.equals("rtc-answer")){RtcVideo video=new RtcVideo(activity);rtc.set(video);result.put("sdp",video.answer(a.getString("sdp")));}
             if(step.equals("rtc-offer")){RtcVideo video=new RtcVideo(activity);rtc.set(video);result.put("sdp",video.offer());}

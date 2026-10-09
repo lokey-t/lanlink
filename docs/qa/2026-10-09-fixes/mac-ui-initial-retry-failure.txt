@@ -1,0 +1,32 @@
+✔ macOS remote window switches targets only after draining the prior session (33627.923583ms)
+✖ macOS editing, service recovery, and offline authorization use live native models (30235.40425ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 1
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 63959.240958
+
+✖ failing tests:
+
+test at tests/mac-ux.test.js:8:1
+✖ macOS editing, service recovery, and offline authorization use live native models (30235.40425ms)
+  AssertionError [ERR_ASSERTION]: Command+X must remove the selection
+  
+  
+  1 !== 0
+  
+      at run (file:///Users/alice/Documents/%E9%A1%B9%E7%9B%AE/LLM/project/lanlink/tests/mac-ux.test.js:34:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> (file:///Users/alice/Documents/%E9%A1%B9%E7%9B%AE/LLM/project/lanlink/tests/mac-ux.test.js:38:16)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

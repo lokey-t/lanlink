@@ -2,7 +2,7 @@ plugins { id 'com.android.application' }
 android {
     namespace 'com.lanlink.app'
     compileSdk 35
-    defaultConfig { applicationId 'com.lanlink.app'; minSdk 29; targetSdk 35; versionCode 36; versionName '0.3.45'; testInstrumentationRunner 'com.lanlink.app.PermissionFlowTest' }
+    defaultConfig { applicationId 'com.lanlink.app'; minSdk 29; targetSdk 35; versionCode 37; versionName '0.3.46'; testInstrumentationRunner 'com.lanlink.app.PermissionFlowTest' }
     signingConfigs {
         debug {
             // Reuse this workspace's existing test signer so Studio can update the
@@ -23,3 +23,18 @@ dependencies {
     implementation 'com.google.zxing:core:3.5.3'
     implementation 'io.github.webrtc-sdk:android:150.7871.01'
 }
+
+// Embed the same source identity as the desktop packages on every build.
+def generateBuildIdentity = tasks.register('generateBuildIdentity', Exec) {
+    workingDir rootProject.file('..')
+    commandLine(System.getenv('LANLINK_NODE') ?: 'node', 'scripts/build-info.js')
+}
+tasks.named('preBuild').configure { dependsOn(generateBuildIdentity) }
+
+// Package the same curated language catalog used by both desktop clients.
+def generateLanguageAssets = tasks.register('generateLanguageAssets', Copy) {
+    from(rootProject.file('../src/locales.json'))
+    into(layout.buildDirectory.dir('generated/languageAssets'))
+}
+android.sourceSets.main.assets.srcDir(layout.buildDirectory.dir('generated/languageAssets'))
+tasks.named('preBuild').configure { dependsOn(generateLanguageAssets) }

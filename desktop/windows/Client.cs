@@ -20,6 +20,7 @@ namespace LanLink.Desktop {
     readonly object gate = new object();
     readonly TaskCompletionSource<object> ready = new TaskCompletionSource<object>();
     Process process; int sequence; bool stopping;
+    public bool IsRunning { get { try { return process!=null && !process.HasExited && !stopping; } catch { return false; } } }
     public Action<string> Failed;
     public Action<object> EdgeFeedback;
     public async Task Start(string root, string options) {

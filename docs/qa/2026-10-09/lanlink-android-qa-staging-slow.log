@@ -1,0 +1,6 @@
+PASS: desktop → Android file/folder reliable transfer, provider read, failed-save retention, successful-save cleanup without input control.
+PASS: pending drag metadata, deleted source removal, restart cleanup, mouse session retract, receiver-initiated transfer.
+PASS: eight-file queue preserves bytes and keeps the control RPC responsive.
+SLOW-RECEIVER SNAPSHOT: [{"name":"手机分享1.txt","state":"queued","received":0,"size":400002},{"name":"手机分享0.txt","state":"queued","received":0,"size":400001}]
+PASS: Android/Desktop staged files, provider view, saved content and removal, failed save retention, transient offers, share-sheet device chooser and control center
+PASS: Android share-sheet chooser → desktop staging, both multiple files preserve hashes; QUIC reliable streams.

@@ -1,0 +1,27 @@
+Android修复完成：
+- 报告14、19：发送记录持久化，排队/发送/等待确认/完成/失败/取消分明；仅stage-complete结束；慢网连击一次任务；取消选择器不产生新offer；本次请求id幂等。
+- 文件可靠性：批量URI准备失败完整回滚；失败任务可重试、清理；发送和接收可取消；part清理，停止中不能误触重试/删除；显式resume防迟到offer/begin复活取消任务。
+- 报告20：删除按钮明确标识，未保存本机副本确认保护；清除未完成发送记录确认后结束分享。
+- 报告18：真实掉线按钮返回设备列表，重连后从列表新Wire可继续控制。
+- 报告15、文案体验：准确说明首次扫码直接入组/换组确认；共享面板正确设置名并直达设置；设置注明立即保存。
+- 构建标识：设置页显示0.3.46、revision/sourceFingerprint/builtAt；根Gradle任务自动生成assets/build-info.json。
+- 延伸修复01/07：Android GroupClipboard应用远端剪贴板时清除历史去重哨兵；重复文件上传复用有效快照，避免淘汰正在发布的offer。
+- 旧独立ADB失败根因：未连接假的Wire被生产heartbeat清理，同时permissionNotice被清除；改真实加密loopback。首启POST_NOTIFICATIONS也可能暂停Activity，emulator-only runner预授权通知；不削弱原确认断言。
+- 旧Staging UI标签失效：controlTile添加稳定tag，原UI断言保留并适配，未跳过步骤。
+已通过日志：
+/tmp/lanlink-android-repair-staging-final.log
+/tmp/lanlink-android-repair-clipboard-final.log
+/tmp/lanlink-android-repair-touchpad-final.log
+/tmp/lanlink-android-repair-default-final.log
+/tmp/lanlink-android-repair-pairing.log
+/tmp/lanlink-android-repair-build.log
+最终其他专项日志 /tmp/lanlink-android-repair-final-*.log（7项全PASS）；原生触控板另有touchpad-final。
+独立ADB冷启动连续3次PASS：/tmp/lanlink-android-repair-adb-cold-final-{1,2,3}.log。
+最后源码构建及最终APK默认综合/clipboard真实transport再次PASS。
+截图已人工检查：/tmp/lanlink-repair-sending.png；/tmp/lanlink-repair-delete-confirmation.png；/tmp/lanlink-repair-touchpad-offline.png。
+独立测试环境：emulator-5570只读副本；5554未安装/清理/操作。剪贴板、鼠标、视频均仅一次性模拟器和模拟桌面原生能力。无真实关机。
+
+加跑TCP回退全部通过：/tmp/lanlink-android-repair-staging-tcp.log。QUIC与TCP均验证取消终止worker/清临时文件/显式重试/字节一致。
+最终APK：android/app/build/outputs/apk/debug/app-debug.apk，0.3.46 (37)，SHA256 2beeebafbeba432ae6965089b37ba8b3ae300292384ee49547ee6c5318dc182c。当前包指纹 f1bea1fab58288acfe42443a1d98beed13f7f8cc5cbc51b08c87c2d672423904，builtAt 2026-10-09T14:28:38.606Z（22:28:38 上海）。根全仓冻结后请重新生成统一元信息/打包。
+资源清理：emulator-5570已定向终止，原5554未触碰。
+测试过程异常透明记录：修复前ADB确认失败已复现；通知权限及假Wire心跳竞争已修正，最终清数据3连PASS。曾有一次连续进程启动failed-to-attach，另一次两个instrumentation意外相撞造成Process crashed；随后所有套件严格顺序执行，最终全部通过。未将失败/跳过算为通过。

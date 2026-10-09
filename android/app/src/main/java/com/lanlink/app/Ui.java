@@ -26,6 +26,8 @@ final class Ui {
     return "dark".equals(value) || "light".equals(value) ? value : "system";
   }
   static void applyTheme(android.app.Activity activity) {
+    Language.initialize(activity);
+    Language.refresh(activity);
     String mode = themeMode(activity);
     dark = "dark".equals(mode) || "system".equals(mode) &&
         (activity.getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES;
@@ -204,19 +206,20 @@ final class Ui {
     title.setGravity(Gravity.CENTER);
     title.setSingleLine(true);
     tile.addView(title, new LinearLayout.LayoutParams(-1, -2));
+    tile.setTag("control-tile-" + glyph);
     tile.setSelected(selected);
     tile.setFocusable(true);
-    tile.setContentDescription(label + (selected ? "，已选择" : ""));
+    tile.setContentDescription(label + (selected ? Language.t("，已选择") : ""));
     tile.setOnClickListener(v -> action.run());
     return tile;
   }
 
   View clipboardShortcuts(Runnable upload, Runnable download) {
     LinearLayout group=row();group.setBackground(shape(LILAC,16));group.setClipToOutline(true);
-    group.setContentDescription("快捷同步剪贴板");
+    group.setContentDescription(Language.t("快捷同步剪贴板"));
     for(int i=0;i<2;i++) {
       if(i==1){View divider=new View(context);divider.setBackgroundColor(LINE);group.addView(divider,new LinearLayout.LayoutParams(dp(1),dp(24)));}
-      FrameLayout button=new FrameLayout(context);button.setContentDescription(i==0?"上传剪贴板":"下载剪贴板");button.setBackground(touch(Color.TRANSPARENT,0));
+      FrameLayout button=new FrameLayout(context);button.setContentDescription(i==0?Language.t("上传剪贴板"):Language.t("下载剪贴板"));button.setBackground(touch(Color.TRANSPARENT,0));
       button.addView(icon(i==0?"clipboard-upload":"clipboard-download",PURPLE),new FrameLayout.LayoutParams(dp(24),dp(24),Gravity.CENTER));
       Runnable action=i==0?upload:download;button.setOnClickListener(v->action.run());group.addView(button,new LinearLayout.LayoutParams(dp(48),dp(48)));
     }

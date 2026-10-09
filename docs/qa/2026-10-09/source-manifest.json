@@ -1,0 +1,25 @@
+{
+  "date": "2026-10-09 Asia/Shanghai",
+  "base_commit": "59d03b8",
+  "version": "0.3.45",
+  "state": "working tree with pre-existing uncommitted changes",
+  "sha256": {
+    "package.json": "7e6eef66f523d14a95643b03762a145b3ec40cece608b9c0c56b2ca10a84d4b4",
+    "src/service.js": "4360395840bff17ee651d55d9fa2d0fd5624a37f0289cd43b1e2f227aa0b3df7",
+    "src/clipboard-sync.js": "f2adef3374e1dd8f8aca9175650cac6b518d706dc25857d44d4950b564134fe1",
+    "src/staging.js": "a4d2834e428e663c65df0003ccab4d4b4c4a5c91c45bf7ed91cacb9f13dfdd38",
+    "src/access.js": "d837d17a46b2e5c6041e4aa2f23eb1f74bcf411720c2737b076be224a379e465",
+    "src/permissions.js": "82f3d67a65f3fe6f8e8706ab77496705ed72124746af2974d80d56603aba2363",
+    "desktop/macos/LanLink.swift": "5855ed0c2d66daed6186440cd4208330596358d1d8c7d647c9d6845b79956f7c",
+    "desktop/macos/Remote.swift": "21527185f1eab4897a4fa87f19d7525ad61bd351578fbfb84fc6fb298f8ae06c",
+    "desktop/macos/Staging.swift": "5bd8b6d8e5aa4355dd2eae89dd458d028a592763796b67a67685c4cf4f3578ce",
+    "desktop/macos/AdbGuide.swift": "6aed67face46c463dc56837583eed7944bab534246d4e3fc232e8128006e2ec4",
+    "desktop/windows/Main.cs": "0b4a35e279822917e952fa269530564727b1e1df7b5dec084a34b8636ddf9bfc",
+    "desktop/windows/Remote.cs": "87f7d5a9056d68be9e41260c2da8b14106048c8864c97a1fc40b10c24aaf1314",
+    "desktop/windows/Permissions.cs": "a16d910d539f848fa2b33bbc615db54c8f56b231a6c65b0676b43e5757ec7ad6",
+    "desktop/windows/Pairing.cs": "12ba269ff9efde5ce32a6c0aec0302020533f549cab024c296ef6c5b8520935b",
+    "android/app/src/main/java/com/lanlink/app/MainActivity.java": "56e29402e48d4c5139d451a4ac8a055fdcd87f2590fda09ffac31f874b676dd6",
+    "android/app/src/main/java/com/lanlink/app/StagingFiles.java": "0fef87eb38187e25380ef9ffad6bd0a27da0189d2db36a6e3b53fe45e851f497",
+    "android/app/src/main/java/com/lanlink/app/ScanActivity.java": "27260849e6bada3fd5b6fc41dbb1f5f783093ddd20b621edf37f5af8d1517bc1"
+  }
+}

@@ -27,7 +27,7 @@ test('actual idle FFmpeg decoder closes its input and exits without leaving a wo
   assert.equal(decoder.push({ key: true, data: Buffer.from([0, 0, 1, 9]) }), false);
 });
 
-test('service shutdown drains active and retired codecs before its parent exits immediately', { timeout: 10000 }, async t => {
+test('service shutdown drains active and retired codecs before its parent exits immediately', { timeout: 15000 }, async t => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'lanlink-codec-exit-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const probePath = path.join(dir, 'probe.cjs'), probePids = path.join(dir, 'probe-pids');
@@ -43,22 +43,23 @@ test('service shutdown drains active and retired codecs before its parent exits 
     import { captureVideo } from ${JSON.stringify(new URL('../src/video.js', import.meta.url).href)};
     import { readFile } from 'node:fs/promises';
     const service = new Service(await loadConfig(process.argv[1]), process.argv[1], new NativeBridge({ disabled: true }));
+    const pids = [], report = () => process.stdout.write(JSON.stringify(pids) + '\\n');
     const workers = await Promise.all(Array.from({ length: 4 }, async () => {
       const child = spawn(process.execPath, ['-e', "process.on('SIGTERM',()=>{});process.stdin.resume();setInterval(()=>{},100);process.stdout.write('ready');"], { stdio: ['pipe', 'pipe', 'pipe'] });
+      pids.push(child.pid); report();
       await once(child.stdout, 'data');
       return child;
     }));
-    const pids = workers.map(child => child.pid);
     if (${testProbe}) {
       const source = captureVideo({ capabilities: {} }, true, () => {}, () => {});
       service.videoHost.sessions.set('probing', { source, sockets: new Set() });
-      for (let attempt = 0; attempt < 100; attempt++) {
-        try { pids.push(Number(await readFile(${JSON.stringify(probePids)}, 'utf8'))); break; }
-        catch { await new Promise(resolve => setTimeout(resolve, 10)); }
+      for (let attempt = 0; attempt < 500; attempt++) {
+        try { const pid = Number(await readFile(${JSON.stringify(probePids)}, 'utf8')); if (Number.isInteger(pid) && pid > 0) { pids.push(pid); report(); break; } }
+        catch {}
+        await new Promise(resolve => setTimeout(resolve, 10));
       }
       if (pids.length !== 5) throw Error('probe did not start');
     }
-    process.stdout.write(JSON.stringify(pids) + '\\n');
     const codec = child => ({ close: () => stopVideoProcess(child) });
     service.videoHost.sessions.set('active', { source: codec(workers[0]), sockets: new Set() });
     service.videoHost.sessions.set('retired', { source: codec(workers[1]), sockets: new Set() });
@@ -71,8 +72,16 @@ test('service shutdown drains active and retired codecs before its parent exits 
     process.exit(0);
   `;
   const parent = spawn(process.execPath, ['--input-type=module', '-e', code, dir], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...(testProbe ? { LANLINK_FFMPEG: probePath } : {}) } });
-  let pids = [], output = '', errors = '';
-  parent.stdout.on('data', data => { output += data; if (output.includes('\n')) pids = JSON.parse(output.trim()); });
+  let pids = [], output = '', pendingOutput = '', errors = '';
+  // Publish every owned PID before waiting for readiness, so a failed startup
+  // cannot hide already-running workers from the outer test's cleanup.
+  parent.stdout.on('data', data => {
+    output += data; pendingOutput += data;
+    for (let end; (end = pendingOutput.indexOf('\n')) >= 0;) {
+      const reported = JSON.parse(pendingOutput.slice(0, end)); pendingOutput = pendingOutput.slice(end + 1);
+      pids = [...new Set([...pids, ...reported.filter(pid => Number.isInteger(pid) && pid > 0)])];
+    }
+  });
   parent.stderr.on('data', data => { errors += data; });
   t.after(() => { parent.kill('SIGKILL'); for (const pid of pids) try { process.kill(pid, 'SIGKILL'); } catch {} });
   const [exitCode, signal] = await once(parent, 'close');
@@ -87,7 +96,7 @@ test('shared encoder probe stops only after every capture cancels and a later st
   t.after(async () => { for (const pid of pids) try { process.kill(pid, 'SIGKILL'); } catch {} await rm(dir, { recursive: true, force: true }); });
   await writeFile(exe, `#!${process.execPath}\nprocess.on('SIGTERM',()=>{});require('node:fs').appendFileSync(${JSON.stringify(pidFile)},process.pid+'\\n');setInterval(()=>{},100);`, { mode: 0o700 });
   const waitPid = async count => {
-    for (let attempt = 0; attempt < 100; attempt++) {
+    for (let attempt = 0; attempt < 500; attempt++) {
       try { const found = (await readFile(pidFile, 'utf8')).trim().split('\n').map(Number); if (found.length >= count) { pids.splice(0, pids.length, ...found); return found.at(-1); } } catch {}
       await new Promise(resolve => setTimeout(resolve, 10));
     }

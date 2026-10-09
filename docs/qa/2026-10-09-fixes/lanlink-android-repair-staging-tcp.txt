@@ -1,0 +1,9 @@
+PASS: desktop → Android file/folder reliable transfer, provider read, failed-save retention, successful-save cleanup without input control.
+PASS: pending drag metadata, deleted source removal, restart cleanup, mouse session retract, receiver-initiated transfer.
+PASS: eight-file queue preserves bytes and keeps the control RPC responsive.
+PASS: cancelled chooser emits no offer; rapid repeat taps produce one batch and slow receiver stays waiting.
+PASS: sender cancel/retry preserves offer identity; only receiver completion marks outgoing completed.
+PASS: unreadable batch rolls back; rejected send remains visible, retries successfully and clears its records.
+PASS: receiving cancel stops the worker, clears partial data and retries to matching bytes.
+PASS: Android/Desktop staged files, provider view, saved content and removal, failed save retention, transient offers, share-sheet device chooser and control center
+PASS: Android share-sheet chooser → desktop staging, both multiple files preserve hashes; encrypted TCP.

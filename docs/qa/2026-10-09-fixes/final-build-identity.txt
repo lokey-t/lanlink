@@ -1,0 +1,6 @@
+Version: 0.3.46
+Build ID: 0.3.46+90bcd0966f1a
+Revision: da0e473dc25e-modified
+Source SHA256: 90bcd0966f1a98ce989396410faf3527ae2cc2cc76382fae14afae55fbdf532c
+Mac bundled source files checked: 278; mismatches: 0
+Android embedded source fingerprint: matches

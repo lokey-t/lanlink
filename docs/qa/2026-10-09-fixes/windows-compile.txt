@@ -1,0 +1,1 @@
+Windows x64 WinExe cross-compilation succeeded. WPF UI was not executed.

@@ -33,6 +33,9 @@ try{
   native.copy('电脑自动上传 → 手机');await until(async()=>{const r=await step('status');return r.latest?.text==='电脑自动上传 → 手机';});
   await step('copy',{text:'手机自动上传 → 电脑'});await until(()=>native.clip.text==='手机自动上传 → 电脑');const count=service.clipboardSync.list().length;
   await new Promise(r=>setTimeout(r,1500));assert.equal(service.clipboardSync.list().length,count,'system write must not echo');
+  await step('copy',{text:'手机回切 X'});await until(()=>native.clip.text==='手机回切 X');native.copy('电脑插入 Y');await until(async()=>(await step('status')).system?.text==='电脑插入 Y');await step('copy',{text:'手机回切 X'});await until(()=>native.clip.text==='手机回切 X');
+  native.copy('电脑回切 X');await until(async()=>(await step('status')).system?.text==='电脑回切 X');await step('copy',{text:'手机插入 Y'});await until(()=>native.clip.text==='手机插入 Y');native.copy('电脑回切 X');await until(async()=>(await step('status')).system?.text==='电脑回切 X');
+  console.log('PASS: phone and desktop X → remote Y → X both synchronize without stale echo suppression.');
   await step('mode',{upload:false,download:false});await step('copy',{text:'手机手动上传'});await new Promise(r=>setTimeout(r,300));assert.notEqual(native.clip.text,'手机手动上传');await step('manual-upload');await until(()=>native.clip.text==='手机手动上传');
   await step('ui');
   if(process.argv.includes('--transport')){
@@ -49,7 +52,7 @@ try{
     // The emulator's inbound TCP ports require an explicit ADB mapping.
     const videoEndpoint=service.links.videoEndpoint.bind(service.links);
     service.links.videoEndpoint=async(p,info)=>{if(p!==peer)return videoEndpoint(p,info);const port=Number((await run(['forward','tcp:0','tcp:'+info.port])).stdout.trim());return {host:'127.0.0.1',info:{...info,port},close:()=>run(['forward','--remove','tcp:'+port]).catch(()=>{})};};
-    const source=await step('file-source');await service.materialize({...source.offer,source:peer.remote.id});assert.equal(createHash('sha256').update(await readFile(native.clip.files[0])).digest('hex'),source.sha256);
+    const source=await step('file-source');const repeated=await step('repeat-file-upload');await service.materialize({...repeated.offer,source:peer.remote.id});assert.equal(createHash('sha256').update(await readFile(native.clip.files[0])).digest('hex'),source.sha256);
     await step('mode',{upload:false,download:false});const data=Buffer.alloc(850000,6),file=path.join(dir,'desktop-file.bin');await writeFile(file,data);native.clip={text:'',files:[file]};const offer=await service.snapshotClipboard(false);const result=await step('file-receive',{offer});assert.equal(result.length,data.length);assert.equal(result.sha256,createHash('sha256').update(data).digest('hex'));service.links.videoEndpoint=videoEndpoint;
     if(quicTest)assert.ok(peer.quicConn,'file transfer retained QUIC');
     console.log('PASS: Android/desktop '+(quicTest?'QUIC reliable streams':'AES-GCM binary file channels')+', 800 KB and 850 KB, SHA-256 and system file clipboard both directions.');

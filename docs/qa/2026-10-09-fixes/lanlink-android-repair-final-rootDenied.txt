@@ -1,0 +1,2 @@
+PASS: denied application su leaves Root disabled and normal permission settings visible.
+

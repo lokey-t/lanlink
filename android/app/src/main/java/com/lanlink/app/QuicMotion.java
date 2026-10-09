@@ -26,16 +26,37 @@ final class QuicMotion {
   }
   /** Per-connection pacing: native Datagram enqueue time is not network RTT. */
   static final class Pacing {
-    int interval=8,good;long changedAt=-2000,lastSent=-50;double rtt,base=Double.POSITIVE_INFINITY;
-    synchronized void feedback(double sample,long queued){
-      long now=android.os.SystemClock.elapsedRealtime();if(queued<0||!Double.isFinite(sample)||sample>30000)return;
-      if(sample>=0){base=Math.min(base,sample);rtt=rtt==0?sample:rtt*.75+sample*.25;}
-      double latency=Math.max(rtt,sample);
-      if(queued>32768||latency>120||latency>Math.max(70,base*2)){good=0;int target=(int)Math.max(16,Math.min(50,Math.ceil(latency/4)));if(now-changedAt>=250&&(target>interval||queued>32768)){interval=Math.min(50,Math.max(target,interval+4));changedAt=now;}}
-      else if(sample>=0&&queued<8192&&++good>=8&&now-changedAt>=2000){interval=Math.max(8,interval-4);good=0;changedAt=now;}
+    static final int MIN=8,MAX=24;
+    final java.util.function.LongSupplier clock;
+    final ArrayDeque<double[]> rttBuckets=new ArrayDeque<>();
+    int interval=MIN,good;long changedAt=-1000000,lastSent=-1000000,recoverSince=-1;
+    long rttAt=-1,queueAt=-1,delayAt=-1,queued;double rtt,delay,base=Double.POSITIVE_INFINITY;
+    Pacing(){this(android.os.SystemClock::elapsedRealtime);}
+    Pacing(java.util.function.LongSupplier clock){this.clock=clock;}
+    void feedback(Double sample,Long queued){feedback(sample,null,queued);}
+    synchronized void feedback(Double sample,Double delaySample,Long queueSample){
+      if(sample==null&&delaySample==null&&queueSample==null)return;
+      if(sample!=null&&(!Double.isFinite(sample)||sample<0||sample>30000)||delaySample!=null&&(!Double.isFinite(delaySample)||delaySample<0)||queueSample!=null&&queueSample<0)return;
+      long now=clock.getAsLong();
+      if(sample!=null){
+        long bucket=now/500;while(!rttBuckets.isEmpty()&&rttBuckets.peekFirst()[0]<=bucket-20)rttBuckets.removeFirst();
+        double[] last=rttBuckets.peekLast();if(last!=null&&last[0]==bucket)last[1]=Math.min(last[1],sample);else rttBuckets.addLast(new double[]{bucket,sample});
+        base=Double.POSITIVE_INFINITY;for(double[] entry:rttBuckets)base=Math.min(base,entry[1]);
+        rtt=rttAt<0?sample:rtt+(sample-rtt)*(sample<rtt?.5:.25);rttAt=now;
+      }
+      if(queueSample!=null){queued=queueSample;queueAt=now;}
+      if(delaySample!=null){delay=delaySample;delayAt=now;}
+      double excess=rttAt>=0&&now-rttAt<=2000?Math.max(0,rtt-base):0;
+      long backlog=queueAt>=0&&now-queueAt<=500?queued:0;
+      double freshDelay=delayAt>=0&&now-delayAt<=500?delay:0;
+      int target=backlog>=65536||freshDelay>=80?24:backlog>=16384?20:backlog>=4096||excess>=40||freshDelay>=35?16:excess>=15||freshDelay>=15?12:8;
+      if(target>interval){good=0;recoverSince=-1;if(now-changedAt>=120){interval=backlog>=131072?MAX:Math.min(target,interval+4);changedAt=now;}}
+      else if(target<interval){if(recoverSince<0)recoverSince=now;if(++good>=3&&now-recoverSince>=200&&now-changedAt>=250){interval=Math.max(target,interval-4);changedAt=now;good=0;recoverSince=now;}}
+      else{good=0;recoverSince=-1;}
     }
-    void pace()throws InterruptedException{long wait;synchronized(this){wait=interval-(android.os.SystemClock.elapsedRealtime()-lastSent);}if(wait>0)Thread.sleep(wait);synchronized(this){lastSent=android.os.SystemClock.elapsedRealtime();}}
+    void pace()throws InterruptedException{long wait;synchronized(this){wait=interval-(clock.getAsLong()-lastSent);}if(wait>0)Thread.sleep(wait);synchronized(this){lastSent=clock.getAsLong();}}
   }
+  static boolean rttSample(String method,JSONObject args){return method.equals("linkPing")||method.equals("keepControl")||method.equals("input")&&Arrays.asList("move","relative","button","key","wheel").contains(args.optString("kind"));}
   static boolean unit(double n){return Double.isFinite(n)&&n>=0&&n<=1;}
   static final class Receiver {
     String epoch;long seq,time=-1;double dx,dy;

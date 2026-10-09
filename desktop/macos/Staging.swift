@@ -4,14 +4,57 @@ import UniformTypeIdentifiers
 
 @MainActor extension Model {
     func refreshStaging() async {
-        do { stagedFiles = try await call("stage-list")["files"] as? [[String:Any]] ?? [] }
-        catch { notice = error.localizedDescription }
+        let generation = serviceGeneration
+        do { let result = try await call("stage-list"); guard generation == serviceGeneration else { return }; stagedFiles = result["files"] as? [[String: Any]] ?? []; outgoingFiles = result["outgoing"] as? [[String: Any]] ?? [] }
+        catch { if generation == serviceGeneration { notice = error.localizedDescription } }
     }
     func stageAction(_ method:String, _ id:String) {
-        Task { do { let result=try await call(method,["id":id]); notice=result["message"] as? String ?? ""; await refreshStaging() } catch { notice=error.localizedDescription } }
+        guard !stageBusy.contains(id) else { return }
+        let version = (stageActionVersions[id] ?? 0) + 1; stageActionVersions[id] = version
+        let blocks = method != "stage-start" && method != "stage-outgoing-retry"
+        if blocks { stageBusy.insert(id) }
+        Task { defer { if blocks { stageBusy.remove(id) } }; do {
+            let result = try await call(method, ["id": id])
+            guard stageActionVersions[id] == version else { return }
+            let defaults = ["stage-cancel": "传输已取消，可重新传输", "stage-remove": "已删除暂存文件", "stage-start": "已开始接收文件", "stage-outgoing-cancel": "发送已取消", "stage-outgoing-retry": "已重新开始发送", "stage-outgoing-remove": "已清除发送记录"]
+            notice = result["message"] as? String ?? defaults[method] ?? "操作已完成"
+            await refreshStaging()
+        } catch { if stageActionVersions[id] == version { notice = error.localizedDescription } } }
     }
     func openStaged(_ id:String) {
-        Task { do { let result=try await call("stage-ready",["id":id]); if let path=result["path"] as? String { NSWorkspace.shared.open(URL(fileURLWithPath:path)) } } catch { notice=error.localizedDescription } }
+        Task { do { let result = try await call("stage-ready", ["id": id]); if let path = result["path"] as? String, !NSWorkspace.shared.open(URL(fileURLWithPath: path)) { notice = "无法打开文件，请使用“保存到…”后选择其他应用打开。" } } catch { notice = error.localizedDescription } }
+    }
+    func revealStaged(_ id: String) {
+        Task { do { let result = try await call("stage-ready", ["id": id]); if let path = result["path"] as? String { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) } } catch { notice = error.localizedDescription } }
+    }
+    func saveStaged(_ row: [String: Any]) {
+        guard let id = row["id"] as? String, !stageBusy.contains(id) else { return }
+        let panel = NSSavePanel(); panel.nameFieldStringValue = row["name"] as? String ?? "文件"
+        panel.title = L("保存暂存文件"); panel.message = L("选择新的名称和位置。保存成功后移出暂存区；同名文件不会被覆盖。"); panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let destination = panel.url else { return }
+        stageBusy.insert(id)
+        Task { defer { stageBusy.remove(id) }; do {
+            let result = try await call("stage-save", ["id": id, "destination": destination.path])
+            notice = "文件已保存到“" + destination.path + "”并移出暂存区"
+            await refreshStaging()
+            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: result["path"] as? String ?? destination.path)])
+        } catch { notice = "保存失败：" + Model.readableMessage(error.localizedDescription) + "。暂存原件已保留，可更换位置或名称后重试。" } }
+    }
+    func removeStaged(_ row: [String: Any]) {
+        guard let id = row["id"] as? String, !stageBusy.contains(id) else { return }
+        if row["state"] as? String == "ready" {
+            let alert = NSAlert(); alert.messageText = L("删除尚未保存的暂存文件？")
+            alert.informativeText = LF("“{0}”的暂存副本将被删除。请先使用“保存到…”保留文件。", row["name"] as? String ?? L("文件")); alert.addButton(withTitle: L("取消")); alert.addButton(withTitle: L("删除"))
+            guard alert.runModal() == .alertSecondButtonReturn else { return }
+        }
+        stageAction("stage-remove", id)
+    }
+    func clearOutgoing(_ row: [String: Any]) {
+        guard let id = row["id"] as? String, !stageBusy.contains(id) else { return }
+        let alert = NSAlert(); alert.messageText = L("清除这条发送记录？")
+        alert.informativeText = LF("本机原文件会保留。清除后，对方尚未接收完成的“{0}”需要重新发送。", row["name"] as? String ?? L("文件"))
+        alert.addButton(withTitle: L("取消")); alert.addButton(withTitle: L("清除记录"))
+        if alert.runModal() == .alertSecondButtonReturn { stageAction("stage-outgoing-remove", id) }
     }
     func chooseShareDevice(_ urls:[URL]) {
         guard !urls.isEmpty else { return }
@@ -19,13 +62,13 @@ import UniformTypeIdentifiers
         Task {
             await refresh()
             let online=devices.filter { $0.online && !$0.local }
-            let alert=NSAlert(); alert.messageText="发送到设备"; alert.informativeText="\(urls.count) 个文件或文件夹 · 接收到对方暂存区"
+            let alert=NSAlert(); alert.messageText=L("发送到设备"); alert.informativeText=LF("{0} 个文件或文件夹 · 接收到对方暂存区", String(urls.count))
             let choice=NSPopUpButton(frame:NSRect(x:0,y:0,width:300,height:32)); choice.addItems(withTitles:online.map(\.name)); alert.accessoryView=choice
-            if online.isEmpty { alert.informativeText="暂无在线设备。请打开对方 LanLink，并保持同一网络。"; alert.addButton(withTitle:"关闭"); alert.runModal(); return }
-            alert.addButton(withTitle:"发送"); alert.addButton(withTitle:"取消")
+            if online.isEmpty { alert.informativeText=L("暂无在线设备。请打开对方 LanLink，并保持同一网络。"); alert.addButton(withTitle:L("关闭")); alert.runModal(); return }
+            alert.addButton(withTitle:L("发送")); alert.addButton(withTitle:L("取消"))
             if alert.runModal() == .alertFirstButtonReturn {
                 let device=online[choice.indexOfSelectedItem]
-                feature(device,["clipboard"]) { self.perform("stage-share",["id":device.id,"files":urls.map(\.path)],success:"文件已发送到对方暂存区") }
+                feature(device,["clipboard"]) { self.perform("stage-share",["id":device.id,"files":urls.map(\.path)],success:"已开始发送，文件将在对方暂存区排队接收") }
             }
         }
     }
@@ -35,13 +78,17 @@ struct StagingView:View {
     @ObservedObject var model:Model
     var body:some View {
         VStack(alignment:.leading,spacing:20) {
-            HStack { Text("暂存文件").font(.system(size:26,weight:.semibold)); Spacer(); Button("刷新") { Task { await model.refreshStaging() } } }
-            Text("接收文件 · 查看或拖到文件夹保存").font(.caption).foregroundStyle(.secondary)
+            HStack { Text(L("暂存文件")).font(.system(size:26,weight:.semibold)); Spacer(); Button(L("刷新")) { Task { await model.refreshStaging() } } }
+            Text(L("接收文件 · 使用“保存到…”或拖到文件夹保存")).font(.caption).foregroundStyle(.secondary)
             ScrollView { LazyVStack(spacing:14) {
-                if model.stagedFiles.isEmpty { Text("暂存区是空的，其他设备发送的文件会出现在这里。").foregroundStyle(.secondary).frame(maxWidth:.infinity,alignment:.leading).padding(20) }
+                if !model.outgoingFiles.isEmpty {
+                    Text(L("发送记录")).font(.headline).frame(maxWidth: .infinity, alignment: .leading)
+                    ForEach(model.outgoingFiles, id: \.masterChoiceID) { row in OutgoingStagingCard(model: model, row: row) }
+                    Divider(); Text(L("接收文件")).font(.headline).frame(maxWidth: .infinity, alignment: .leading)
+                }
+                if model.stagedFiles.isEmpty { Text(L("暂存区是空的，其他设备发送的文件会出现在这里。")).foregroundStyle(.secondary).frame(maxWidth:.infinity,alignment:.leading).padding(20) }
                 ForEach(model.stagedFiles,id:\.masterChoiceID) { row in StagingCard(model:model,row:row) }
             } }
-            Text(model.notice).font(.caption).foregroundStyle(.secondary).lineLimit(2)
         }.buttonStyle(FlatButtonStyle()).task { await model.refreshStaging() }
     }
 }
@@ -49,18 +96,51 @@ struct StagingCard:View {
     @ObservedObject var model:Model; let row:[String:Any]
     var id:String { row["id"] as? String ?? "" }
     var state:String { row["state"] as? String ?? "pending" }
-    var status:String { if state=="ready" { return "已接收" }; if state=="receiving" { let received=row["received"] as? Double ?? 0,size=max(1,row["size"] as? Double ?? 0); return "传输中 · \(Int(received*100/size))%" }; return state=="pending" ? "待传输":state=="queued" ? "等待传输":"传输失败" }
+    var status:String { if state=="ready" { return "已接收" }; if state=="receiving" { let received=row["received"] as? Double ?? 0,size=max(1,row["size"] as? Double ?? 0); return LF("传输中 · {0}%", String(Int(received*100/size))) }; return state=="pending" ? "待传输":state=="queued" ? "等待传输":state=="cancelled" ? "已取消":"传输失败" }
     var body:some View {
         VStack(alignment:.leading,spacing:14) {
-            HStack { Image(systemName:row["type"] as? String=="folder" ? "folder":"doc").foregroundStyle(.blue); Text(row["name"] as? String ?? "文件").font(.headline).lineLimit(2); Spacer(); Text(status).font(.caption).foregroundStyle(.secondary) }
+            HStack { Image(systemName:row["type"] as? String=="folder" ? "folder":"doc").foregroundStyle(.blue); Text(row["name"] as? String ?? "文件").font(.headline).lineLimit(2); Spacer(); Text(L(status)).font(.caption).foregroundStyle(.secondary) }
             HStack { Text(row["sourceName"] as? String ?? "设备"); Text(ByteCountFormatter.string(fromByteCount:Int64(row["size"] as? Double ?? 0),countStyle:.file)); Text(Date(timeIntervalSince1970:(row["created"] as? Double ?? 0)/1000),style:.time) }.font(.caption).foregroundStyle(.secondary)
             HStack(spacing:12) {
-                if state=="ready" { Button("查看文件") { model.openStaged(id) }; StagedDragOut(model:model,id:id).frame(width:160,height:38) }
-                else if state != "receiving" && state != "queued" { Button(state=="pending" ? "开始传输":"重新传输") { model.stageAction("stage-start",id) } }
-                if state != "receiving" { Button("移除") { model.stageAction("stage-remove",id) } }
-            }
-            if let error=row["error"] as? String,!error.isEmpty { Text(error).font(.caption).foregroundStyle(.red) }
+                if state=="ready" {
+                    Button(L("保存到…")) { model.saveStaged(row) }
+                    Button(L("查看文件")) { model.openStaged(id) }
+                    Button(L("在文件夹中显示")) { model.revealStaged(id) }
+                } else if state != "receiving" && state != "queued" { Button(L(state=="pending" ? "开始传输":"重新传输")) { model.stageAction("stage-start",id) } }
+                if state == "receiving" || state == "queued" { Button(L("取消传输")) { model.stageAction("stage-cancel", id) } }
+                else { Button(L("删除")) { model.removeStaged(row) } }
+            }.disabled(model.stageBusy.contains(id))
+            if state == "ready" { StagedDragOut(model: model, id: id).frame(width: 160, height: 30).disabled(model.stageBusy.contains(id)) }
+            if let error=row["error"] as? String,!error.isEmpty { Text(Model.displayMessage(error)).font(.caption).foregroundStyle(.red) }
         }.padding(20).frame(maxWidth:.infinity,alignment:.leading).background(Palette.card,in:RoundedRectangle(cornerRadius:20)).overlay(RoundedRectangle(cornerRadius:20).stroke(Palette.line))
+    }
+}
+
+struct OutgoingStagingCard: View {
+    @ObservedObject var model: Model; let row: [String: Any]
+    var id: String { row["id"] as? String ?? "" }
+    var state: String { row["state"] as? String ?? "queued" }
+    var status: String {
+        switch state {
+        case "ready", "completed", "complete": return "对方已完整接收"
+        case "sending", "receiving": return "对方正在接收"
+        case "failed": return "发送失败"
+        case "cancelled": return "已取消"
+        case "pending": return "等待对方开始接收"
+        default: return "已排队，等待对方接收"
+        }
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack { Text(row["name"] as? String ?? "文件").font(.headline); Spacer(); Text(L(status)).font(.caption) }
+            Text(LF("发送到“{0}”", row["targetName"] as? String ?? L("设备")) + " · " + ByteCountFormatter.string(fromByteCount: Int64(row["size"] as? Double ?? 0), countStyle: .file)).font(.caption).foregroundStyle(.secondary)
+            if let error = row["error"] as? String, !error.isEmpty { Text(Model.displayMessage(error)).font(.caption).foregroundStyle(.red) }
+            HStack {
+                if state == "failed" || state == "cancelled" { Button(L("重新发送")) { model.stageAction("stage-outgoing-retry", id) } }
+                if !["ready", "completed", "complete", "cancelled"].contains(state) { Button(L("取消发送")) { model.stageAction("stage-outgoing-cancel", id) } }
+                if ["failed", "cancelled", "completed", "complete", "ready"].contains(state) { Button(L("清除记录")) { model.clearOutgoing(row) } }
+            }.disabled(model.stageBusy.contains(id))
+        }.padding(18).frame(maxWidth: .infinity, alignment: .leading).background(Palette.card, in: RoundedRectangle(cornerRadius: 18))
     }
 }
 
@@ -124,8 +204,9 @@ struct StagedDragOut:NSViewRepresentable {
 @MainActor final class FileDragEdges {
     weak var model:Model?;var panels:[NSPanel]=[];var signature="";var visibility:Timer?
     init(_ model:Model) { self.model=model;visibility=Timer(timeInterval:0.04,repeats:true){[weak self] _ in Task{@MainActor in guard let self else{return};for panel in self.panels {panel.ignoresMouseEvents=NSEvent.pressedMouseButtons&1==0}}};RunLoop.main.add(visibility!,forMode:.common) }
+    func stop() { signature = ""; for panel in panels { panel.close() }; panels = [] }
     func update() {
-        guard let model else { return };let next=model.isMaster && (model.state["active"] as? String ?? "").isEmpty ? model.edges.sorted { $0.key<$1.key }.map { $0.key+":"+$0.value }.joined(separator:"|"):""
+        guard let model else { return };let next=model.serviceReady && model.isMaster && (model.state["active"] as? String ?? "").isEmpty ? model.edges.sorted { $0.key<$1.key }.map { $0.key+":"+$0.value }.joined(separator:"|"):""
         guard next != signature else { return };signature=next;for panel in panels { panel.close() };panels=[];guard !next.isEmpty else { return }
         for screen in NSScreen.screens { for (edge,id) in model.edges where !id.isEmpty {
             var frame=screen.frame;switch edge {case "left":frame.size.width=4;case "right":frame.origin.x=frame.maxX-4;frame.size.width=4;case "top":frame.origin.y=frame.maxY-4;frame.size.height=4;case "bottom":frame.size.height=4;default:continue}

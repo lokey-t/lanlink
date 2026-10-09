@@ -16,12 +16,12 @@ import { appendFileSync } from 'node:fs';
 let active = null;
 createInterface({ input: process.stdin }).on('line', line => {
   const request = JSON.parse(line); appendFileSync(process.argv[2], JSON.stringify(request) + '\\n');
-  const delay = request.method === 'control' && request.args.id === 'A' ? 250 : request.method === 'input' ? 180 : request.method === 'stream-next' ? 20 : 1;
+  const delay = request.method === 'control' && request.args.id === 'A' ? 250 : ['input', 'paste'].includes(request.method) ? 180 : request.method === 'stream-next' ? 20 : 1;
   setTimeout(() => {
     if (request.method === 'control') active = request.args.id;
     if (request.method === 'release' && (!request.args.id || active === request.args.id)) active = null;
-    const result = request.method === 'state' ? { active, peers: [], capabilities: { simulated: true } } : {};
-    const error = request.method === 'input' ? 'CONTROL_ENDED: previous device disconnected' : undefined;
+    const result = request.method === 'state' ? { active, peers: [], capabilities: { simulated: true } } : request.method === 'stream-next' ? {data:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',codec:'h264',fps:30} : {};
+    const error = ['input', 'paste'].includes(request.method) ? 'CONTROL_ENDED: previous device disconnected' : undefined;
     process.stdout.write(JSON.stringify({ id: request.id, result, error }) + '\\n');
   }, delay);
 }).on('close', () => process.exit(0));
@@ -33,7 +33,7 @@ createInterface({ input: process.stdin }).on('line', line => {
     const code = await new Promise((resolve, reject) => { child.once('exit', resolve); child.once('error', reject); });
     assert.equal(code, 0, output); return output;
   }
-  await run('xcrun', ['swiftc', '-swift-version', '5', '-D', 'LANLINK_MODEL_TEST', '-module-cache-path', path.join(root, 'module-cache'), '-framework', 'AppKit', '-framework', 'SwiftUI', '-framework', 'ServiceManagement', 'desktop/macos/LanLink.swift', 'desktop/macos/SingleInstance.swift', 'desktop/macos/Remote.swift', 'desktop/macos/AdbGuide.swift', 'desktop/macos/Staging.swift', 'tests/MacRemoteProbe.swift', '-o', executable]);
+  await run('xcrun', ['swiftc', '-swift-version', '5', '-D', 'LANLINK_MODEL_TEST', '-module-cache-path', path.join(root, 'module-cache'), '-framework', 'AppKit', '-framework', 'SwiftUI', '-framework', 'ServiceManagement', 'desktop/macos/LanLink.swift', 'desktop/macos/Localization.swift', 'desktop/macos/SingleInstance.swift', 'desktop/macos/Remote.swift', 'desktop/macos/AdbGuide.swift', 'desktop/macos/Staging.swift', 'tests/MacRemoteProbe.swift', '-o', executable]);
   assert.match(await run(executable, [process.execPath, fixture, log]), /MAC_REMOTE_PROBE_OK/);
   const requests = (await readFile(log, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
   const indexOf = (method, id) => requests.findIndex(request => request.method === method && request.args.id === id);

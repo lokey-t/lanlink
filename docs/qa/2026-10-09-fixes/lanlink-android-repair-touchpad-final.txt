@@ -1,0 +1,2 @@
+PASS touchpad center: three aligned outlined tiles, capability/offline/permission filtering, input-only loopback claim, native relative input, keyboard entry, clean release, offline recovery and new-connection reuse; screenshots: ui-check/control-center-touchpad.png, ui-check/touchpad-session.png
+

@@ -1,0 +1,3 @@
+
+PASS: authenticated requests, denial, prompt merging, cooldown, OS permission gating, ownership and disconnect cleanup; native pages, QR reveal, invalid code, permission card, guide, automatic app permissions, system permission entry, target stop, touchpad, system keyboard text, viewport pan/pinch, reciprocal-control races, ADB bootstrap consent, ADB-only input gating and Node/Android group crypto; settings rename, authorization revoke, per-device grants, persistence and immediate ownership release
+

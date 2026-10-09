@@ -1,0 +1,36 @@
+✔ QA01 local X → remote Y → local X broadcasts the final user copy without echo (279.72025ms)
+✔ QA07 repeated manual file upload keeps its advertised source and changed bytes create a new offer (99.388ms)
+✔ QA08 rename is visible on an existing authenticated connection and persists remotely (121.004875ms)
+✔ QA16 invalid compound settings cannot partially change memory, disk or master selection (146.657333ms)
+✔ QA02 inbound permissions are available for Android/offline members and selective revocation preserves unrelated grants (126.621292ms)
+✔ QA09 offline authorization expires, clears stale notice and permits a new request (79.852166ms)
+✔ QA13 manual connection reports refusal and authentication failure, while successful connection resolves (145.833958ms)
+✔ QA06 rejected batches reclaim export quota and stay reclaimed after restart (169.765959ms)
+✔ file cancellation isolates one task, preserves retry and records completion only after acknowledgement (188.260084ms)
+✔ saving a staged folder creates a chosen destination; conflicts preserve both original and staged copy (102.370166ms)
+✔ a late initial offer or begin cannot restart a user-cancelled transfer; explicit retry can (146.353834ms)
+✔ cancelling and removing a queued transfer never waits for another active file (117.395167ms)
+✔ clearing a cancelled outgoing record releases its quota while keeping its original file (409.691041ms)
+✔ concurrent permission edits and settings preserve both denials in memory and on disk (221.698625ms)
+✔ a committed setting remains visibly saved if native cleanup fails afterwards (181.527541ms)
+✔ failed staging manifest commit preserves the receipt across reload and removes only the new destination (255.79975ms)
+✔ cancelling or clearing an unoffered batch item never sends a ghost offer (127.873875ms)
+✔ file/folder sharing receives into staging without input control or changing clipboard (150.958166ms)
+✔ drag offers remain metadata-only and disappear when source deletes or mouse session ends (117.490125ms)
+✔ started drag transfer survives session ending; exports reject other recipients and revoked sharing (204.343667ms)
+✔ staging manifest rejects escaping, duplicate and conflicting paths, and oversized files (0.320583ms)
+✔ session ending during a transfer retains its source offer and completes the same transfer (159.73875ms)
+✔ source restart does not revive an unstarted drag offer; receiver restart drops the pending entry (118.596917ms)
+✔ failed preflight reports an ordinary transfer failure but removes a vanished transient source (70.53675ms)
+✔ staging files use native QUIC reliable streams and preserve content hashes (173.098ms)
+✔ ending a drag during manifest preparation cannot publish a stale pending entry (60.075125ms)
+✔ edge file sharing cancels the local OS drag, binds metadata to control, and retracts on return (172.987125ms)
+✔ a large multi-file share queues receivers and completes every source exactly once (284.084125ms)
+ℹ tests 28
+ℹ suites 0
+ℹ pass 28
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3016.922792
