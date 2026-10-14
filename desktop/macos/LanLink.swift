@@ -136,16 +136,28 @@ struct Device: Identifiable {
     }
     static func displayMessage(_ text: String) -> String { L(readableMessage(text)) }
     @Published var selected: String?
+    @Published var layoutMasterSaving = false
+    func chooseLayoutMaster(_ device: Device) async {
+        guard !layoutMasterSaving, device.id != masterID,
+              ["darwin", "win32"].contains(device.platform), devices.contains(where: { $0.id == device.id }) else { return }
+        layoutMasterSaving = true
+        defer { layoutMasterSaving = false }
+        do {
+            let result = try await call("settings", ["masterId": device.id])
+            presentOperationResult(result, success: "主控设备已切换", successAsToast: true)
+            await refresh()
+        } catch { notice = error.localizedDescription }
+    }
     @Published var layoutDragID: String?
     @Published var layoutDragPoint: CGPoint = .zero
-    @Published var layoutDragTranslation: CGSize = .zero
     var layoutCanvasFrame: CGRect = .zero
-    var layoutLocalCenter: CGPoint = .zero
+    var layoutContentFrame: CGRect = .zero
+    var layoutGeometry: SharedLayoutGeometry?
     func finishLayoutDrag(_ point: CGPoint) {
         defer { layoutDragID = nil }
         guard let id = layoutDragID, layoutCanvasFrame.contains(point) else { return }
-        let x = point.x - layoutLocalCenter.x, y = point.y - layoutLocalCenter.y
-        place(id, abs(x) > abs(y) ? (x < 0 ? "left" : "right") : (y < 0 ? "top" : "bottom"))
+        guard let cell = layoutGeometry?.cell(CGPoint(x: point.x - layoutContentFrame.minX, y: point.y - layoutContentFrame.minY)) else { return }
+        place(id, at: cell)
     }
     @Published var screen: NSImage?
     @Published var remoteID: String?
@@ -178,6 +190,7 @@ struct Device: Identifiable {
     @Published var startupEnabled = SMAppService.mainApp.status == .enabled
     var pendingFeatureID:String?;var pendingFeature:(()->Void)?
     var accessController:AccessController?;var lastAccess="";var disclosure:ConsentDisclosure?;var adbGuide: AdbGuideController?; var lastAdbGuide = ""; var consentAlert: NSAlert?; var consentRequest = ""; var permissionWindow: NSWindow?
+    var androidDisconnectAlert: NSAlert?; var androidDisconnectRequest = ""; var seenAndroidDisconnectRequests: Set<String> = []
     var controlVersion = 0
     var root = Bundle.main.resourceURL!
     var process: Process?; var input = Pipe(); var output = Pipe(); var errors = Pipe()
@@ -190,6 +203,20 @@ struct Device: Identifiable {
     weak var remoteSurface: InputSurface?; var recoveringInput=false; var remoteRatio = 0.5; var remotePrepared = false; var preparingControl = false; var acquiredAt = Date.distantPast; var resumeRemote = false
     var stream = Data(); var statusItem: NSStatusItem?; var remoteWindow: NSWindow?
     var edges: [String: String] { state["edges"] as? [String: String] ?? [:] }
+    var masterID: String { state["masterId"] as? String ?? (isMaster ? state["id"] as? String ?? "" : "") }
+    var layoutPositions: [String: SharedLayoutCell] {
+        if let layout = state["layout"] as? [String: Any] {
+            var result: [String: SharedLayoutCell] = [:]
+            for (id, value) in layout["positions"] as? [String: [String: Any]] ?? [:] {
+                if let x = value["x"] as? Int, let y = value["y"] as? Int, (-32...32).contains(x), (-32...32).contains(y) { result[id] = SharedLayoutCell(x: x, y: y) }
+            }
+            return result
+        }
+        // Older service previews have only the original four neighbours.
+        var result = [state["id"] as? String ?? "local": SharedLayoutCell(x: 0, y: 0)]
+        for (edge, id) in edges where !id.isEmpty { result[id] = SharedLayoutCell(x: 0, y: 0).adjacent(edge) }
+        return result
+    }
     var dwell: Int { state["dwell"] as? Int ?? 100 }
     var lastEdgeGlow=""
     var isMaster: Bool { state["master"] as? Bool ?? false }
@@ -291,8 +318,9 @@ struct Device: Identifiable {
         for promise in waiting { promise.resume(throwing: failure(message)) }
         poll?.cancel(); poll = nil; serviceReady = false; fileDragEdges?.stop()
         var offlineState = state
-        for key in ["active", "pendingControl", "owner", "accessNotice", "adbGuide", "fallbackNotice", "shutdownAt"] { offlineState.removeValue(forKey: key) }
+        for key in ["active", "pendingControl", "owner", "accessNotice", "adbGuide", "fallbackNotice", "androidDisconnectNotice", "shutdownAt"] { offlineState.removeValue(forKey: key) }
         offlineState["viewers"] = [String](); offlineState["consentRequests"] = [[String: Any]](); state = offlineState
+        endAndroidDisconnectNotice()
         if !closing {
             serviceError = message; notice = message
             devices = devices.map { var d = $0; if !d.local { d.online = false }; return d }
@@ -310,6 +338,7 @@ struct Device: Identifiable {
         failed("正在重启设备服务…")
         closeRemote(); await remoteTeardown?.value
         accessController?.end(); adbGuide?.end(); pendingFeature = nil; pendingFeatureID = nil
+        endAndroidDisconnectNotice()
         if let alert = consentAlert { alert.window.sheetParent?.endSheet(alert.window, returnCode: .cancel) }
         consentAlert = nil; consentRequest = ""; lastAccess = ""; lastAdbGuide = ""
         stageHoverSessions.removeAll(); fileDragEdges?.stop()
@@ -396,7 +425,17 @@ struct Device: Identifiable {
                 guard let id = info["id"] as? String else { continue }; all.removeAll { $0.id == id }
                 all.append(Device(id: id, name: info["name"] as? String ?? "已配对设备", platform: info["platform"] as? String ?? "", online: true, transport: info["transport"] as? String ?? "", access:info["access"] as? [String:Any] ?? [:]))
             }
-            for id in edges.values where !id.isEmpty && !all.contains(where: { $0.id == id }) { all.append(Device(id: id, name: "已设置设备", platform: "")) }
+            if let members = state["layoutDevices"] as? [[String: Any]] {
+                all = members.compactMap { member in
+                    guard let id = member["id"] as? String else { return nil }
+                    var device = all.first { $0.id == id } ?? Device(id: id, name: "已配对设备", platform: "")
+                    device.name = member["name"] as? String ?? device.name; device.platform = member["platform"] as? String ?? device.platform
+                    device.local = id == state["id"] as? String; device.online = device.local || member["online"] as? Bool == true
+                    return device
+                }
+            } else {
+                for id in layoutPositions.keys where !all.contains(where: { $0.id == id }) { all.append(Device(id: id, name: "已设置设备", platform: "")) }
+            }
             if sidebarPage=="staging" { await refreshStaging() };if fileDragEdges==nil { fileDragEdges=FileDragEdges(self) };fileDragEdges?.update()
             guard generation == serviceGeneration, !Task.isCancelled else { return }
             devices = all.sorted { if $0.local != $1.local { return $0.local }; return $0.name < $1.name }
@@ -404,14 +443,15 @@ struct Device: Identifiable {
             if let remoteID, state["active"] as? String != remoteID { controlling = false }
         } catch { if generation == serviceGeneration { notice = error.localizedDescription } }
     }
-    func place(_ id: String, _ edge: String) {
-        guard devices.contains(where: { $0.id == id && !$0.local }) else { return }
-        var next = edges; let old = next.first { $0.value == id }?.key; let occupied = next[edge] ?? ""
-        for key in Array(next.keys) where next[key] == id { next[key] = "" }
-        if let old, old != edge { next[old] = occupied }; next[edge] = id
-        perform("settings", ["edges": next, "master": true], success: "布局已保存", successAsToast: true)
+    func place(_ id: String, at cell: SharedLayoutCell) {
+        guard devices.contains(where: { $0.id == id }) else { return }
+        perform("layout-place", ["id": id, "x": cell.x, "y": cell.y], success: "布局已保存", successAsToast: true)
     }
-    func removeLayout(_ id: String) { var next = edges; for key in Array(next.keys) where next[key] == id { next[key] = "" }; perform("settings", ["edges": next], success: "布局已保存", successAsToast: true) }
+    func place(_ id: String, _ edge: String, relativeTo anchor: String) {
+        guard let cell = layoutPositions[anchor]?.adjacent(edge) else { return }
+        place(id, at: cell)
+    }
+    func removeLayout(_ id: String) { perform("layout-remove", ["id": id], success: "布局已保存", successAsToast: true) }
     func sendFiles(_ d: Device) {
         let dialog = NSOpenPanel(); dialog.canChooseDirectories = true; dialog.allowsMultipleSelection = true
         dialog.message = "文件将传输到接收设备的暂存区。"
@@ -582,6 +622,32 @@ struct Device: Identifiable {
             } }
         }
         if state["permissionNotice"] is [String: Any], !firstDevicePermissionGuide { appDelegate?.showMain(); firstDevicePermissionGuide = true }
+        refreshAndroidDisconnectNotice()
+    }
+    func endAndroidDisconnectNotice() {
+        let alert = androidDisconnectAlert
+        androidDisconnectAlert = nil; androidDisconnectRequest = ""
+        if let alert { alert.window.sheetParent?.endSheet(alert.window, returnCode: .cancel) }
+    }
+    func refreshAndroidDisconnectNotice() {
+        let request = state["androidDisconnectNotice"] as? [String: Any]
+        let id = request?["requestId"] as? String ?? ""
+        if androidDisconnectAlert != nil, androidDisconnectRequest != id { endAndroidDisconnectNotice() }
+        guard let request, !id.isEmpty else { return }
+        let name = request["name"] as? String ?? L("设备")
+        let message = L(request["message"] as? String ?? "")
+        if let alert = androidDisconnectAlert { alert.messageText = L("安卓设备连接中断"); alert.informativeText = name + "\n\n" + message; alert.buttons.first?.title = L("确认"); return }
+        guard !seenAndroidDisconnectRequests.contains(id), let main = appDelegate?.mainWindow, main.attachedSheet == nil else { return }
+        let alert = NSAlert(); alert.alertStyle = .warning; alert.messageText = L("安卓设备连接中断"); alert.informativeText = name + "\n\n" + message
+        alert.addButton(withTitle: L("确认"))
+        androidDisconnectAlert = alert; androidDisconnectRequest = id; seenAndroidDisconnectRequests.insert(id)
+        appDelegate?.showMain(); NSApp.activate(ignoringOtherApps: true)
+        alert.beginSheetModal(for: main) { [weak self, weak alert] response in Task { @MainActor in
+            guard let self, let alert, self.androidDisconnectAlert === alert else { return }
+            self.androidDisconnectAlert = nil; self.androidDisconnectRequest = ""
+            guard response == .alertFirstButtonReturn else { return }
+            do { _ = try await self.call("android-disconnect-dismiss", ["requestId": id]) } catch { self.notice = error.localizedDescription }
+        } }
     }
     func closeRemote() { remoteOpenVersion += 1; _ = tearDownRemote() }
     @discardableResult private func tearDownRemote() -> Task<Void, Never>? {
@@ -710,23 +776,42 @@ struct Glass: NSViewRepresentable {
 struct DeviceTile: View {
     @ObservedObject var model: Model; let device: Device; var compact = false; var canvasSize: CGSize?
     @State private var actionsVisible = false
-    var detail: String { device.local ? (model.isMaster ? "本机 · 主设备" : "本机") : model.state["active"] as? String == device.id ? (device.transport=="USB + 局域网" ? "融合控制中":"正在控制") : device.online ? (device.access["status"] as? String ?? "未就绪") : "离线" }
-    var body: some View {
+    var isLayoutMaster: Bool { device.id == model.masterID }
+    var detail: String { device.id == model.masterID ? (device.local ? "本机 · 主设备" : (device.online ? "主设备" : "主设备 · 离线")) : device.local ? "本机" : model.state["active"] as? String == device.id ? (device.transport=="USB + 局域网" ? "融合控制中":"正在控制") : device.online ? (device.access["status"] as? String ?? "未就绪") : "离线" }
+    var canChooseMaster: Bool { canvasSize != nil && ["darwin", "win32"].contains(device.platform) }
+    var borderColor: Color { isLayoutMaster ? Color.indigo.opacity(0.65) : model.selected == device.id ? Color.blue.opacity(0.45) : Palette.line }
+    var cardSurface: some View {
         Group { if compact { HStack(spacing: 14) { icon; labels } } else { VStack(spacing: canvasSize == nil ? 12 : 6) { icon; labels } } }
             .padding(canvasSize == nil ? (compact ? 16 : 14) : 10)
             .frame(width: canvasSize?.width ?? (compact ? 212 : device.platform == "android" ? 164 : 248),
                    height: canvasSize?.height ?? (compact ? 78 : device.platform == "android" ? 170 : 148))
             .background(device.local ? Color.blue.opacity(0.075) : Palette.card, in: RoundedRectangle(cornerRadius: 18))
-            .overlay(RoundedRectangle(cornerRadius: 16).stroke(model.selected == device.id ? Color.blue.opacity(0.45) : Palette.line))
-            .overlay(alignment:.topTrailing){if !compact && ((model.state["active"] as? String ?? "").isEmpty ? device.local:model.state["active"] as? String==device.id){Label(L("鼠标在此"),systemImage:"cursorarrow").font(.caption2).padding(5).background(Color.blue.opacity(0.08),in:Capsule()).offset(y:-18)}}
-            .contentShape(RoundedRectangle(cornerRadius: 16)).onTapGesture { model.selected = device.id; actionsVisible = true }
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(borderColor))
+            .overlay(alignment: .topLeading) {
+                if !compact && isLayoutMaster {
+                    Label(L("主控电脑"), systemImage: "keyboard.fill").font(.system(size: 10, weight: .semibold))
+                        .padding(.horizontal, 7).padding(.vertical, 4).foregroundStyle(Color.indigo)
+                        .background(Palette.card, in: Capsule()).overlay(Capsule().stroke(Color.indigo.opacity(0.35)))
+                        .offset(x: 6, y: -12).allowsHitTesting(false).accessibilityIdentifier("layoutMasterBadge")
+                }
+            }
+            .overlay(alignment:.topTrailing){if !compact && ((model.state["active"] as? String ?? "").isEmpty ? device.local:model.state["active"] as? String==device.id){HStack(spacing: 3) { Image(systemName: "cursorarrow"); if !isLayoutMaster { Text(L("鼠标在此")) } }.font(.caption2).padding(5).background(Color.blue.opacity(0.08),in:Capsule()).offset(y:-18).help(L("鼠标在此")).accessibilityLabel(L("鼠标在此"))}}
+    }
+    var body: some View {
+        cardSurface.contentShape(RoundedRectangle(cornerRadius: 16)).onTapGesture {
+                if canChooseMaster {
+                    actionsVisible = false; model.selected = nil
+                    Task { await model.chooseLayoutMaster(device) }
+                } else { model.selected = device.id; actionsVisible = true }
+            }
+            .accessibilityIdentifier("layoutDevice-" + device.id)
+            .accessibilityHint(L(canChooseMaster ? "点击电脑切换主控，主控标识会同步到同组设备。" : "点击设备查看操作"))
             .popover(isPresented: Binding(get: { actionsVisible && model.selected == device.id }, set: { actionsVisible = $0; if !$0 { model.selected = nil } })) { DeviceActions(model: model, device: device).padding(14).frame(width: 230).background(Glass(material: .popover, mode: .withinWindow)) }
             .contextMenu { DeviceActions(model: model, device: device) }
             .simultaneousGesture(DragGesture(minimumDistance: 6, coordinateSpace: .named("deviceLayout"))
                 .onChanged { value in
-                    guard !device.local else { return }
                     actionsVisible = false; model.selected = nil
-                    model.layoutDragID = device.id; model.layoutDragPoint = value.location; model.layoutDragTranslation = value.translation
+                    model.layoutDragID = device.id; model.layoutDragPoint = value.location
                 }
                 .onEnded { value in model.finishLayoutDrag(value.location) })
             .onDrop(of:[UTType.fileURL],delegate:DeviceFileDrop(model:model,device:device))
@@ -747,6 +832,9 @@ struct DeviceTile: View {
 }
 struct DeviceActions: View {
     @ObservedObject var model: Model; let device: Device
+    @State private var relativeID = ""
+    var anchors: [Device] { model.devices.filter { $0.id != device.id && model.layoutPositions[$0.id] != nil } }
+    var anchorID: String { anchors.contains(where: { $0.id == relativeID }) ? relativeID : anchors.first(where: { $0.id == model.masterID })?.id ?? anchors.first?.id ?? "" }
     func feature(_ title:String,_ keys:[String],_ action:@escaping ()->Void)->some View { Button(L(title)){model.feature(device,keys,action)}.foregroundStyle(model.restricted(device,keys) ? Color.gray : Color.primary) }
     var body: some View { VStack(alignment: .leading, spacing: 12) {
         Text(device.name).font(.headline)
@@ -756,6 +844,11 @@ struct DeviceActions: View {
             Button(L("查看未就绪原因")) { model.selected = nil; model.sidebarPage = "permissions"; model.permissionsVisible = true }
         }
         Divider()
+        if ["darwin", "win32"].contains(device.platform) {
+            Button(L(device.id == model.masterID ? "主控电脑" : "设为主控电脑")) {
+                model.selected = nil; Task { await model.chooseLayoutMaster(device) }
+            }.disabled(device.id == model.masterID || model.layoutMasterSaving)
+        }
         if device.local {
             Button(L("返回本机键鼠")) { model.releaseAll(); model.selected = nil }
             Button(L("取消关机")) { model.perform("cancel-shutdown"); model.selected = nil }.disabled(model.state["shutdownAt"] == nil || model.state["shutdownAt"] is NSNull)
@@ -770,100 +863,90 @@ struct DeviceActions: View {
             }.disabled(!device.online)
             Divider()
             Button(L("管理此设备对本机的权限")) { model.selected = nil; model.managingDevice = device }
-            DisclosureGroup(L("调整方位")) {VStack(spacing:6){direction("top","↑ 上方");HStack{direction("left","← 左侧");Text(L("本机")).font(.caption).foregroundStyle(.secondary);direction("right","右侧 →")};direction("bottom","↓ 下方")}.padding(8)}
             Button(L("移出设备…")) { model.removeDevice(device) }
-            Button(L("移出布局")) { model.removeLayout(device.id); model.selected = nil }.disabled(!model.edges.values.contains(device.id))
             if device.platform != "android" { Divider(); feature("关机…",["shutdown"]) { model.selected = nil; model.shutdown(device) }.disabled(!device.online); Button(L("取消关机")) { model.perform("cancel-shutdown", ["id": device.id]) }.disabled(!device.online) }
         }
-    }.buttonStyle(.plain) }
-    func direction(_ edge:String,_ title:String)->some View{Button(L(title)){model.place(device.id,edge);model.selected=nil}.padding(8).background(model.edges[edge]==device.id ? Color.blue.opacity(0.14):Color.gray.opacity(0.05),in:RoundedRectangle(cornerRadius:10))}
-}
-struct DeviceLayoutGeometry {
-    let card: CGSize
-    let center: CGPoint
-    let horizontalStep: CGFloat
-    let verticalStep: CGFloat
-    init(size: CGSize, edges: Set<String>) {
-        let left = edges.contains("left") ? 1 : 0, right = edges.contains("right") ? 1 : 0
-        let top = edges.contains("top") ? 1 : 0, bottom = edges.contains("bottom") ? 1 : 0
-        let columns = CGFloat(1 + left + right), rows = CGFloat(1 + top + bottom)
-        let gap: CGFloat = 32, margin: CGFloat = 16
-        let scale = max(0.1, min(1, (size.width - 2 * margin - (columns - 1) * gap) / (columns * 180), (size.height - 2 * margin - (rows - 1) * gap) / (rows * 112)))
-        card = CGSize(width: 180 * scale, height: 112 * scale)
-        let horizontalGap = columns > 1 ? min(56, max(gap, (size.width - 2 * margin - columns * card.width) / (columns - 1))) : gap
-        let verticalGap = rows > 1 ? min(56, max(gap, (size.height - 2 * margin - rows * card.height) / (rows - 1))) : gap
-        horizontalStep = card.width + horizontalGap
-        verticalStep = card.height + verticalGap
-        center = CGPoint(x: size.width / 2 + CGFloat(left - right) * horizontalStep / 2, y: size.height / 2 + CGFloat(top - bottom) * verticalStep / 2)
-    }
-    func point(_ edge: String) -> CGPoint {
-        switch edge {
-        case "left": return CGPoint(x: center.x - horizontalStep, y: center.y)
-        case "right": return CGPoint(x: center.x + horizontalStep, y: center.y)
-        case "top": return CGPoint(x: center.x, y: center.y - verticalStep)
-        case "bottom": return CGPoint(x: center.x, y: center.y + verticalStep)
-        default: return center
+        Divider()
+        DisclosureGroup(L("调整方位")) {
+            VStack(spacing: 8) {
+                if anchors.isEmpty {
+                    Button(L("放到中心")) { model.place(device.id, at: SharedLayoutCell(x: 0, y: 0)); model.selected = nil }
+                } else {
+                    Picker(L("相对设备"), selection: Binding(get: { anchorID }, set: { relativeID = $0 })) { ForEach(anchors) { Text($0.name).tag($0.id) } }
+                    direction("top", "↑ 上方")
+                    HStack { direction("left", "← 左侧"); Spacer(); direction("right", "右侧 →") }
+                    direction("bottom", "↓ 下方")
+                }
+            }.padding(.vertical, 8)
         }
+        Button(L("移出布局")) { model.removeLayout(device.id); model.selected = nil }.disabled(model.layoutPositions[device.id] == nil)
+    }.buttonStyle(.plain) }
+    func direction(_ edge: String, _ title: String) -> some View {
+        Button(L(title)) { model.place(device.id, edge, relativeTo: anchorID); model.selected = nil }
+            .disabled(model.layoutPositions[anchorID]?.adjacent(edge) == nil)
+            .padding(8).background(Color.gray.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
     }
 }
 struct LayoutCanvas: View {
     @ObservedObject var model: Model
     @Environment(\.accessibilityReduceMotion) var reduceMotion
-    var body: some View { GeometryReader { geometry in
-        let size = geometry.size
-        let occupied = Set(model.edges.filter { !$0.value.isEmpty }.map(\.key))
-        let layout = DeviceLayoutGeometry(size: size, edges: occupied)
-        let card = layout.card
-        let frame = geometry.frame(in: .named("deviceLayout"))
-        let center = layout.center
-        ZStack {
-            TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion || (model.state["active"] as? String ?? "").isEmpty)) { timeline in
+    var body: some View { GeometryReader { viewport in
+        let positions = model.layoutPositions
+        let layout = SharedLayoutGeometry(size: viewport.size, cells: Array(positions.values))
+        let viewportFrame = viewport.frame(in: .named("deviceLayout"))
+        ScrollView([.horizontal, .vertical]) {
+            ZStack {
                 Canvas { ctx, _ in
-                    for x in stride(from: 15, to: Int(size.width), by: 24) {
-                        for y in stride(from: 10, to: Int(size.height), by: 24) {
-                            ctx.fill(Path(ellipseIn: CGRect(x: CGFloat(x), y: CGFloat(y), width: 1.3, height: 1.3)), with: .color(.blue.opacity(0.13)))
-                        }
-                    }
-                    for (edge, id) in model.edges where !id.isEmpty {
-                        let point = layout.point(edge)
-                        let horizontal = edge == "left" || edge == "right"
-                        let dx = horizontal ? (point.x < center.x ? -card.width / 2 - 4 : card.width / 2 + 4) : 0
-                        let dy = horizontal ? 0 : (point.y < center.y ? -card.height / 2 - 4 : card.height / 2 + 4)
-                        let fusion = model.devices.first(where: { $0.id == id })?.transport == "USB + 局域网"
-                        for offset in (fusion ? [CGFloat(-3), CGFloat(3)] : [CGFloat(0)]) {
-                            var line = Path()
-                            line.move(to: CGPoint(x: center.x + dx + (horizontal ? 0 : offset), y: center.y + dy + (horizontal ? offset : 0)))
-                            line.addLine(to: CGPoint(x: point.x - dx + (horizontal ? 0 : offset), y: point.y - dy + (horizontal ? offset : 0)))
-                            ctx.stroke(line, with: .color(.blue.opacity(0.24)), lineWidth: 1.5)
-                            if model.state["active"] as? String == id {
-                                let phase = reduceMotion ? 0 : timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 0.9) / 0.9
-                                ctx.stroke(line, with: .color(.indigo.opacity(0.7)), style: StrokeStyle(lineWidth: 2, dash: [6, 16], dashPhase: -22 * phase))
+                    for x in layout.minX...layout.maxX { for y in layout.minY...layout.maxY {
+                        let point = layout.point(SharedLayoutCell(x: x, y: y))
+                        let rect = CGRect(x: point.x - layout.step.width / 2 + 4, y: point.y - layout.step.height / 2 + 4, width: layout.step.width - 8, height: layout.step.height - 8)
+                        ctx.stroke(Path(roundedRect: rect, cornerRadius: 12), with: .color(.blue.opacity(0.10)), style: StrokeStyle(lineWidth: 1, dash: [3, 5]))
+                    } }
+                }.allowsHitTesting(false)
+                TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion || (model.state["active"] as? String ?? "").isEmpty)) { timeline in
+                  Canvas { ctx, _ in
+                    let ids = positions.keys.sorted()
+                    for (index, id) in ids.enumerated() {
+                        guard let cell = positions[id], id != model.layoutDragID else { continue }
+                        for otherID in ids.dropFirst(index + 1) {
+                            guard let other = positions[otherID], otherID != model.layoutDragID, abs(cell.x - other.x) + abs(cell.y - other.y) == 1 else { continue }
+                            let first = model.devices.first { $0.id == id }, second = model.devices.first { $0.id == otherID }
+                            let fusion = first?.transport == "USB + 局域网" || second?.transport == "USB + 局域网"
+                            let active = model.state["active"] as? String == id || model.state["active"] as? String == otherID
+                            for offset in fusion ? [CGFloat(-3), CGFloat(3)] : [CGFloat(0)] {
+                                let endpoints = layout.connection(cell, other, offset: offset)
+                                var line = Path(); line.move(to: endpoints.start); line.addLine(to: endpoints.end)
+                                ctx.stroke(line, with: .color(.blue.opacity(first?.online == true && second?.online == true ? 0.35 : 0.15)), lineWidth: 1.5)
+                                if active { let phase = reduceMotion ? 0 : timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 0.9) / 0.9; ctx.stroke(line, with: .color(.indigo.opacity(0.7)), style: StrokeStyle(lineWidth: 2, dash: [6, 16], dashPhase: -22 * phase)) }
                             }
                         }
                     }
+                  }
+                }.allowsHitTesting(false)
+                ForEach(model.devices) { device in
+                    if let cell = positions[device.id] {
+                        let origin = layout.point(cell)
+                        let dragging = model.layoutDragID == device.id
+                        let point = dragging ? CGPoint(x: model.layoutDragPoint.x - model.layoutContentFrame.minX, y: model.layoutDragPoint.y - model.layoutContentFrame.minY) : origin
+                        DeviceTile(model: model, device: device, canvasSize: CGSize(width: 180, height: 112))
+                            .scaleEffect(layout.card.width / 180).frame(width: layout.card.width, height: layout.card.height)
+                            .position(point).zIndex(dragging ? 1 : 0)
+                            .animation(model.layoutDragID != nil || reduceMotion ? nil : .easeInOut(duration: 0.2), value: point)
+                    } else if model.layoutDragID == device.id {
+                        DeviceTile(model: model, device: device, canvasSize: CGSize(width: 180, height: 112))
+                            .scaleEffect(layout.card.width / 180).frame(width: layout.card.width, height: layout.card.height)
+                            .position(x: model.layoutDragPoint.x - model.layoutContentFrame.minX, y: model.layoutDragPoint.y - model.layoutContentFrame.minY).zIndex(1).allowsHitTesting(false)
+                    }
                 }
-            }.allowsHitTesting(false)
-            ForEach(model.devices) { device in
-                let edge = device.local ? "local" : model.edges.first(where: { $0.value == device.id })?.key
-                if edge != nil || model.layoutDragID == device.id {
-                    let dragging = model.layoutDragID == device.id
-                    let origin = layout.point(edge ?? "local")
-                    let point = dragging ? (edge != nil ? CGPoint(x: origin.x + model.layoutDragTranslation.width, y: origin.y + model.layoutDragTranslation.height) : CGPoint(x: model.layoutDragPoint.x - frame.minX, y: model.layoutDragPoint.y - frame.minY)) : origin
-                    DeviceTile(model: model, device: device, canvasSize: CGSize(width: 180, height: 112))
-                        .scaleEffect(card.width / 180).frame(width: card.width, height: card.height)
-                        .position(point).zIndex(dragging ? 1 : 0)
-                        .animation(model.layoutDragID != nil || reduceMotion ? nil : .easeInOut(duration: 0.25), value: point)
-                        .animation(model.layoutDragID != nil || reduceMotion ? nil : .easeInOut(duration: 0.25), value: card)
-                }
-            }
-            if model.devices.count == 1 {
-                Text(L("将上方设备拖入画布，或直接拖动设备调整方位"))
-                    .font(.caption).foregroundStyle(.secondary).position(x: center.x, y: size.height - 18)
-            }
-        }.frame(width: size.width, height: size.height).clipped()
-        .onAppear { model.layoutCanvasFrame = frame; model.layoutLocalCenter = CGPoint(x: frame.minX + center.x, y: frame.minY + center.y) }
-        .onChange(of: frame) { _, value in model.layoutCanvasFrame = value; model.layoutLocalCenter = CGPoint(x: value.minX + center.x, y: value.minY + center.y) }
-        .onChange(of: center) { _, value in model.layoutLocalCenter = CGPoint(x: frame.minX + value.x, y: frame.minY + value.y) }
+                if positions.isEmpty { Text(L("将上方设备拖入网格，或点击设备调整方位")).font(.caption).foregroundStyle(.secondary) }
+            }.frame(width: layout.contentSize.width, height: layout.contentSize.height)
+             .background(GeometryReader { content in
+                 Color.clear.onAppear { model.layoutContentFrame = content.frame(in: .named("deviceLayout")) }
+                    .onChange(of: content.frame(in: .named("deviceLayout"))) { _, frame in model.layoutContentFrame = frame }
+             })
+        }.onAppear { model.layoutCanvasFrame = viewportFrame; model.layoutGeometry = layout }
+         .onChange(of: viewportFrame) { _, frame in model.layoutCanvasFrame = frame }
+         .onChange(of: layout) { _, value in model.layoutGeometry = value }
     } }
 }
 
@@ -936,7 +1019,7 @@ struct Home: View {
             VStack(alignment: .leading, spacing: 18) {
                 HStack(spacing:12) { Text(L("设备与布局")).font(.system(size: 26, weight: .semibold)); Spacer();if model.clipboardSettings["showShortcuts"] as? Bool ?? false{HStack(spacing:8){ClipboardQuickButton(upload:true){model.clipboardAction("clipboard-upload")};ClipboardQuickButton(upload:false){model.clipboardAction("clipboard-download")}}}; Button(L("＋ 添加设备")) { model.sidebarPage = "information" }.buttonStyle(FlatButtonStyle()) }
                 ScrollView(.horizontal) { HStack(spacing: 10) { ForEach(model.devices) { d in DeviceTile(model: model, device: d, compact: true).opacity(model.layoutDragID == d.id ? 0.35 : 1) } }.padding(1) }.frame(height: 82)
-                Text(L("拖动调整方位，点击设备进行操作。")).font(.caption).foregroundStyle(.secondary)
+                Text(L("同组布局与主控标识自动同步。点击电脑切换主控；拖动调整位置，右键查看更多操作。")).font(.caption).foregroundStyle(.secondary)
                 LayoutCanvas(model: model).padding(10).frame(maxHeight: .infinity).layoutPriority(1).background(Palette.canvas, in: RoundedRectangle(cornerRadius: 20))
                 Divider(); HStack { Text(L("键鼠控制：") + (model.devices.first { $0.id == (model.state["active"] as? String) }?.name ?? "本机")).font(.caption); Spacer(); Button(L("返回本机 · Control + Option + F12")) { model.releaseAll() }.buttonStyle(.plain).font(.caption) }
             }.coordinateSpace(name: "deviceLayout").opacity(settings || model.adbDevice != nil || model.sidebarPage != "devices" ? 0 : 1).allowsHitTesting(!settings && model.adbDevice == nil && model.sidebarPage == "devices").accessibilityHidden(settings || model.adbDevice != nil || model.sidebarPage != "devices")

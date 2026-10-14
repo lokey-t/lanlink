@@ -14,6 +14,7 @@ public final class ShellChannel implements AutoCloseable {
   private BufferedReader input;
   private BufferedWriter output;
   private boolean closed;
+  private int agentVersion;
   public volatile String lastInputError;
   public volatile boolean inputVerified;
   private volatile long lastSuccess;
@@ -73,9 +74,9 @@ public final class ShellChannel implements AutoCloseable {
             new BufferedReader(new InputStreamReader(s.getInputStream(), StandardCharsets.UTF_8));
         BufferedWriter out =
             new BufferedWriter(new OutputStreamWriter(s.getOutputStream(), StandardCharsets.UTF_8));
-        int incomingUid;
+        int incomingUid,incomingVersion;
         try {
-          if (ShellAuth.server(secret, in, out) < 10) {
+          if ((incomingVersion=ShellAuth.server(secret, in, out)) < 10) {
             // Authentication is complete; retire only this bound, obsolete helper.
             out.write("{\"method\":\"exit\"}\n");
             out.flush();
@@ -105,7 +106,7 @@ public final class ShellChannel implements AutoCloseable {
             return;
           }
           if (socket != null) socket.close();
-          socket = s;
+          socket = s;agentVersion=incomingVersion;
           input = in;
           output = out;
           uid = rootWanted ? 0 : 2000;
@@ -146,14 +147,22 @@ public final class ShellChannel implements AutoCloseable {
     return socket != null && !socket.isClosed();
   }
 
+  synchronized boolean supportsInputBatch(){return agentVersion>=12;}
+  static String motionLine(JSONObject message){
+    JSONObject a=message.optJSONObject("args");String kind=a==null?"":a.optString("kind");
+    if(!message.optString("method").equals("input")||!kind.equals("move")&&!kind.equals("relative"))return null;
+    String mode=kind.equals("relative")?"r":a.has("dx")&&a.has("dy")?"m":"a";
+    return "@M "+mode+" "+a.optDouble("x",0)+" "+a.optDouble("y",0)+" "+a.optDouble("dx",0)+" "+a.optDouble("dy",0)+" "+message.optInt("width")+" "+message.optInt("height")+" "+(message.optBoolean("pointer",true)?1:0);
+  }
   public synchronized JSONObject request(JSONObject message) throws Exception {
     if (!ready()) throw new IOException("INPUT_RECOVERING: 输入助手正在恢复连接");
     try {
-      if (message.optString("method").equals("input")) {
+      if ((message.optString("method").equals("input")||message.optString("method").equals("inputBatch"))) {
         android.util.DisplayMetrics m = service.displayMetrics();
         message.put("width", m.widthPixels).put("height", m.heightPixels);
       }
-      output.write(message.toString());
+      String compact=agentVersion>=11?motionLine(message):null;
+      output.write(compact!=null?compact:message.toString());
       output.write('\n');
       output.flush();
       JSONObject reply = new JSONObject(limitedLine(input));
@@ -170,7 +179,7 @@ public final class ShellChannel implements AutoCloseable {
         }
         throw new InputRejected(denied ? reason : "INPUT_RECOVERING: " + reason);
       }
-      if (message.optString("method").equals("input")
+      if (message.optString("method").equals("input")||message.optString("method").equals("inputBatch")
           || message.optString("method").equals("paste")
           || message.optString("method").equals("probe")) {
         lastInputError = null;

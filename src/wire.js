@@ -54,7 +54,7 @@ export class Peer extends EventEmitter {
     }
     if (!this.ready) {
       if (m.kind !== 'auth' || !equal(m.proof, mac(this.secret, 'auth|' + this.keys.transcript + '|' + this.remote.id))) throw new Error('Unauthorized');
-      this.ready = true; clearTimeout(this.timer); this.send({ type: 'identity', name: this.identity.name, platform: this.identity.platform, capabilities: this.identity.capabilities });
+      this.ready = true; clearTimeout(this.timer); this.send({ type: 'identity', name: this.identity.name, platform: this.identity.platform, capabilities: this.identity.capabilities,masterSelection:this.identity.masterSelection,layout:this.identity.layout });
       this.emit('ready'); return;
     }
     if (m.seq !== this.rx || typeof m.body !== 'string') throw new Error('Replay or bad sequence');

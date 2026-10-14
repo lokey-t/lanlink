@@ -37,7 +37,9 @@ export function captureVideo(native, h264, emit, failure, options = {}) {
     const width = Math.max(2, Math.floor(originalWidth * scale / 2) * 2), height = Math.max(2, Math.floor(originalHeight * scale / 2) * 2);
     if (encoder && ['win32', 'darwin'].includes(globalThis.process.platform)) {
       const windows = globalThis.process.platform === 'win32';
-      const source = windows ? ['-f', 'gdigrab', '-framerate', String(fps), '-draw_mouse', '1', '-offset_x', '0', '-offset_y', '0', '-video_size', `${originalWidth}x${originalHeight}`, '-i', 'desktop'] : ['-f', 'image2pipe', '-framerate', String(fps), '-c:v', 'mjpeg', '-i', 'pipe:0'];
+      // JPEG dimensions arrive in the first image. FFmpeg's default stream
+      // analysis otherwise buffers about five seconds before encoding it.
+      const source = windows ? ['-f', 'gdigrab', '-framerate', String(fps), '-draw_mouse', '1', '-offset_x', '0', '-offset_y', '0', '-video_size', `${originalWidth}x${originalHeight}`, '-i', 'desktop'] : ['-probesize', '32', '-analyzeduration', '0', '-f', 'image2pipe', '-framerate', String(fps), '-c:v', 'mjpeg', '-i', 'pipe:0'];
       const args = ['-hide_banner', '-loglevel', 'error', ...source, '-an', '-vf', `scale=${width}:${height}:flags=fast_bilinear,format=yuv420p`, '-c:v', encoder, ...encoderArgs(encoder), '-bf', '0', '-g', String(fps), '-b:v', String(rate), '-maxrate', String(rate), '-bufsize', String(Math.max(100000, Math.round(rate / 6))), '-bsf:v', 'h264_metadata=aud=insert', '-f', 'h264', '-flush_packets', '1', 'pipe:1'];
       process = spawn(exe, args, { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
       let error = ''; process.stderr.on('data', d => { error = (error + d).slice(-1200); }); process.stdin.on('error', () => {});
@@ -63,15 +65,29 @@ export class VideoHost {
     this.sessions.set(id, session);
     const fail = () => this.close(id);
     const startSource=(send,queued)=>{
-      let waitingKey=true,blockedAt=0;
+      let waitingKey=true,blockedAt=0,h264=options.h264===true;
       const emit=frame=>{if(!this.sessions.has(id))return;try{
+        if(frame.codec!=='ping')session.sourceReady=true;
         s.authorize(peer,'screen');const backlog=queued(),budget=Math.max(32768,Math.min(128*1024,session.adaptive.rate/8*.2));
         if(backlog>budget){waitingKey=true;blockedAt||=Date.now();if(session.adaptive.congested(backlog))queueMicrotask(()=>{if(this.sessions.has(id))session.restart?.();});if(Date.now()-blockedAt>5000)fail();return;}
         blockedAt=0;if(waitingKey&&frame.codec==='h264'&&!frame.key)return;
         session.lastSent=Date.now();if(send(frame)===false){waitingKey=true;if(session.adaptive.congested(Math.max(backlog,128*1024)))queueMicrotask(()=>{if(this.sessions.has(id))session.restart?.();});}else if(frame.codec!=='ping')waitingKey=false;
       }catch{fail();}};
       session.ping=()=>emit({codec:'ping',width:1,height:1,key:false,data:Buffer.alloc(0)});
-      session.restart=()=>{const generation=++session.generation;closeCodec(session.source,this.stopping);waitingKey=true;session.source=(s.options.videoSource||captureVideo)(s.native,options.h264===true,frame=>{if(generation===session.generation)emit(frame);},()=>{if(generation===session.generation)fail();},{bitrate:session.adaptive.rate});};session.restart();
+      session.restart=(force=false)=>{
+        // A newly started encoder already owes the receiver a keyframe. Repeated
+        // needKey feedback must not keep cancelling it before its first image.
+        if(!this.sessions.has(id)||!force&&session.source&&!session.sourceReady)return;
+        const generation=++session.generation;closeCodec(session.source,this.stopping);
+        waitingKey=true;session.sourceReady=false;session.sourceRate=session.adaptive.rate;session.keyAt=Date.now();
+        session.source=(s.options.videoSource||captureVideo)(s.native,h264,frame=>{if(generation===session.generation)emit(frame);},error=>{
+          queueMicrotask(()=>{
+            if(generation!==session.generation||!this.sessions.has(id))return;
+            if(h264){h264=false;s.log?.('视频编码不可用，已切换兼容画面：'+(error?.message||'编码器已退出'));session.restart(true);}
+            else fail();
+          });
+        },{bitrate:session.sourceRate});
+      };session.restart();
     };
     session.timer = setInterval(() => { try { if (Date.now() > session.expires) throw Error(); s.authorize(peer, 'screen'); if (Date.now() - (session.lastSent || 0) > 1000) session.ping?.(); } catch { fail(); } }, 500);
     session.server = net.createServer(async socket => {
@@ -93,7 +109,7 @@ export class VideoHost {
       return info; }
     catch (e) { fail(); throw e; }
   }
-  keep(peer, id, feedback) { this.service.authorize(peer, 'screen'); const session = this.sessions.get(id); if (!session || session.peer !== peer) throw Error('串流已结束'); session.expires = Date.now() + 10000;const changed=feedback&&session.adaptive.feedback(feedback,session.rtc?.queued||session.active?.writableLength||0);if(changed || feedback?.needKey && Date.now()-(session.keyAt||0)>1000){session.keyAt=Date.now();session.restart?.();} return { bitrate: session.adaptive.rate }; }
+  keep(peer, id, feedback) { this.service.authorize(peer, 'screen'); const session = this.sessions.get(id); if (!session || session.peer !== peer) throw Error('串流已结束'); session.expires = Date.now() + 10000;const changed=feedback&&session.adaptive.feedback(feedback,session.rtc?.queued||session.active?.writableLength||0);if(changed || session.sourceRate!==undefined&&session.sourceRate!==session.adaptive.rate || feedback?.needKey && Date.now()-(session.keyAt||0)>1000){session.restart?.();} return { bitrate: session.adaptive.rate }; }
   stop(peer, id) { if (this.sessions.get(id)?.peer === peer) this.close(id); return {}; }
   close(id) { const session = this.sessions.get(id); if (!session) return; this.sessions.delete(id); clearInterval(session.timer); closeCodec(session.source,this.stopping);session.rtc?.close(); session.tunnel?.close(); for (const socket of session.sockets) socket.destroy(); session.server?.close(); }
   closePeer(id) { for (const session of this.sessions.values()) if (session.peer.remote.id === id) this.close(session.id); }
@@ -120,7 +136,7 @@ export class VideoViewer {
     this.sessions.set(id, session);
     if(rtc){session.rtc=rtc;session.connection=rtc;rtc.onNeedKey=()=>peer.request('videoKey',{id:info.id},1500).catch(()=>{});}else{session.route = await this.service.links?.videoEndpoint(peer, info);session.connection = await connectVideo(session.route?.host || peer.socket.remoteAddress, session.route?.info || info, session.abort.signal);} check();
     if (this.sessions.get(id) !== session || session.closed) throw Error('CONTROL_ENDED: 画面请求已取消');
-    session.timer = setInterval(async () => { if (this.sessions.get(id) !== session || session.closed || session.keeping) return; if (Date.now() > session.until) { await this.close(id); return; } session.keeping = true; const start = Date.now(); try { const feedback = {...session.feedback.report(),needKey:!!session.rtc?.assembler.needKey}; const result = await peer.request('videoKeep', { id: info.id, feedback }, 3000); session.feedback.rtt = Date.now() - start; session.bitrate = result.bitrate; } catch (e) { this.fail(session, e); } finally { session.keeping = false; } }, 1000);
+    session.timer = setInterval(async () => { if (this.sessions.get(id) !== session || session.closed || session.keeping) return; if (Date.now() > session.until) { await this.close(id); return; } session.keeping = true; const start = Date.now(); try { const feedback = {...session.feedback.report(),needKey:!!session.rtc?.assembler.needKey}; const result = await peer.request('videoKeep', { id: info.id, feedback }, 3000); session.feedback.rtt = Date.now() - start; session.bitrate = result.bitrate; } catch (e) { if (e.code !== 'QUIC_BUSY') this.fail(session, e); } finally { session.keeping = false; } }, 1000);
     const publish = (data, frame) => {
       if (session.closed) return;
       session.frame = { data: data.toString('base64'), width: frame.width, height: frame.height, codec: frame.codec,transport:rtc?.manager?'quic':rtc?'webrtc':'tcp', bitrate: session.bitrate || 4000000 };

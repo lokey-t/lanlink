@@ -27,7 +27,7 @@ createInterface({input:process.stdin}).on('line', line => {
 }).on('close',()=>process.exit(0));
 `);
   const executable = path.join(root, 'probe');
-  await run('xcrun', ['swiftc', '-swift-version', '5', '-D', 'LANLINK_MODEL_TEST', '-module-cache-path', path.join(root, 'modules'), '-framework', 'AppKit', '-framework', 'SwiftUI', '-framework', 'ServiceManagement', 'desktop/macos/LanLink.swift', 'desktop/macos/Localization.swift', 'desktop/macos/SingleInstance.swift', 'desktop/macos/Remote.swift', 'desktop/macos/AdbGuide.swift', 'desktop/macos/Staging.swift', 'tests/MacLanguageUIProbe.swift', '-o', executable], { timeout: 210000 });
+  await run('xcrun', ['swiftc', '-swift-version', '5', '-D', 'LANLINK_MODEL_TEST', '-module-cache-path', path.join(root, 'modules'), '-framework', 'AppKit', '-framework', 'SwiftUI', '-framework', 'ServiceManagement', 'desktop/macos/LanLink.swift', 'desktop/macos/SharedLayout.swift', 'desktop/macos/Localization.swift', 'desktop/macos/SingleInstance.swift', 'desktop/macos/Remote.swift', 'desktop/macos/AdbGuide.swift', 'desktop/macos/Staging.swift', 'tests/MacLanguageUIProbe.swift', '-o', executable], { timeout: 210000 });
   const result = await run(executable, [root], { timeout: 20000 });
   assert.match(result.stdout, /MAC_LANGUAGE_UI_PROBE_OK/, result.stderr);
 });

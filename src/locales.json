@@ -4738,6 +4738,324 @@
     },
     "，打开全屏触控板": {
       "en": ", open full screen touchpad"
+    },
+    "后台运行与自启动": {
+      "en": "Background activity and auto-start"
+    },
+    "设置省电白名单，减少后台连接中断": {
+      "en": "Adjust battery settings to reduce background disconnections"
+    },
+    "省电白名单：已加入": {
+      "en": "Battery optimization exemption: enabled"
+    },
+    "省电白名单：尚未加入": {
+      "en": "Battery optimization exemption: not enabled"
+    },
+    "后台运行：系统当前有限制": {
+      "en": "Background activity: currently restricted by the system"
+    },
+    "后台运行：未检测到系统限制": {
+      "en": "Background activity: no system restriction detected"
+    },
+    "自启动：请在系统设置中确认": {
+      "en": "Auto-start: check in system settings"
+    },
+    "上次后台连接中断，且系统限制了 LanLink 后台运行。这可能与本次中断有关，请检查下方设置。": {
+      "en": "The previous background connection was interrupted, and the system restricted LanLink's background activity. This may be related to the interruption. Please check the settings below."
+    },
+    "上次后台连接意外中断，系统未提供明确原因。可检查省电与自启动设置，减少后台被清理的机会。": {
+      "en": "The previous background connection ended unexpectedly, and the system did not provide a clear reason. Check battery and auto-start settings to reduce the chance of background termination."
+    },
+    "设置省电白名单": {
+      "en": "Set battery optimization exemption"
+    },
+    "设置自启动与后台运行": {
+      "en": "Set auto-start and background activity"
+    },
+    "无法打开系统设置，请手动进入 LanLink 应用信息进行设置": {
+      "en": "Unable to open system settings. Open LanLink's app information in Settings to adjust these options."
+    },
+    "若打开的是应用信息页，请按上方机型说明进入电池或自启动选项。设置后返回即可；这些设置无法保证系统永不清理后台。": {
+      "en": "If the app information screen opens, follow the instructions above to find battery or auto-start options. Return here when finished. These settings cannot guarantee that the system will never stop the app."
+    },
+    "完成 / 稍后设置": {
+      "en": "Done / Set up later"
+    },
+    "小米 / Redmi / POCO：在应用信息的省电策略中选择「无限制」，并在权限或手机管家中允许 LanLink 自启动。菜单名称可能因 MIUI / HyperOS 版本不同而变化。": {
+      "en": "Xiaomi / Redmi / POCO: select No restrictions in the app's battery settings, and allow LanLink to auto-start in Permissions or Security. Menu names vary by MIUI / HyperOS version."
+    },
+    "华为 / 荣耀：在应用启动管理中找到 LanLink，关闭自动管理，并允许自启动、关联启动和后台活动。部分机型在电池设置中提供这些选项。": {
+      "en": "Huawei / Honor: find LanLink in App launch, turn off automatic management, and allow auto-launch, secondary launch, and background activity. Some models list these options under Battery."
+    },
+    "OPPO / realme / 一加：在应用信息的电池管理中允许后台活动，并在自启动管理中允许 LanLink 自启动。菜单名称可能因系统版本不同而变化。": {
+      "en": "OPPO / realme / OnePlus: allow background activity in the app's battery settings and enable LanLink in auto-start management. Menu names vary by system version."
+    },
+    "vivo / iQOO：在电池后台耗电管理中允许 LanLink 后台高耗电，并在权限管理中允许自启动。": {
+      "en": "vivo / iQOO: allow high background power consumption for LanLink in battery settings and enable auto-start in permission management."
+    },
+    "三星：在应用信息的电池选项中选择「不受限制」，并将 LanLink 加入「从不休眠的应用」。如系统没有自启动开关，无需另行设置。": {
+      "en": "Samsung: select Unrestricted in the app's battery settings and add LanLink to Never sleeping apps. If there is no auto-start option, no additional auto-start setting is needed."
+    },
+    "在应用信息的电池设置中允许后台运行或选择「不受限制」。如手机提供自启动管理，请允许 LanLink 自启动；没有此选项时可跳过。": {
+      "en": "Allow background activity or select Unrestricted in the app's battery settings. If your phone has auto-start management, enable it for LanLink; otherwise, skip that step."
+    },
+    "安卓设备连接中断": {
+      "en": "Android device disconnected"
+    },
+    "安卓设备连接已中断，暂时无法确认原因。可能是网络变化或应用被系统停止，请在手机打开 LanLink；重新连接后会核对系统退出记录。": {
+      "en": "The Android device disconnected. The cause is not yet known: the network may have changed or the system may have stopped the app. Open LanLink on the phone; its exit records will be checked after reconnection."
+    },
+    "手机上的 LanLink 已在后台异常停止，且检测到系统限制后台运行，可能与本次中断有关。请在手机重新打开 LanLink，按机型引导设置省电白名单和自启动。": {
+      "en": "LanLink stopped unexpectedly in the background on the phone. A system restriction on background activity was detected and may be related. Reopen LanLink on the phone and follow the instructions for its model to adjust battery and auto-start settings."
+    },
+    "手机上的 LanLink 上次运行已结束，系统未提供明确的退出原因。请重新打开手机上的 LanLink 后连接，并按手机上的提示检查后台运行设置。": {
+      "en": "LanLink previously stopped on the phone, but the system did not provide a clear reason. Reopen LanLink and reconnect, then follow any instructions on the phone to check background activity settings."
+    },
+    "手机已重启，LanLink 连接因此中断。请重新打开手机上的 LanLink；如输入助手未就绪，请通过已信任的调试连接恢复。": {
+      "en": "The phone restarted, interrupting the LanLink connection. Reopen LanLink on the phone. If the input helper is not ready, restore it using a trusted debugging connection."
+    },
+    "安卓系统记录显示 LanLink 因内存不足被停止，导致连接中断。请减少手机上同时运行的应用，然后重新连接。": {
+      "en": "Android records show that LanLink was stopped because of low memory, interrupting the connection. Reduce the number of apps running on the phone and reconnect."
+    },
+    "安卓系统记录显示 LanLink 上次发生崩溃或无响应，导致连接中断。请重新连接；如果反复发生，请检查日志。": {
+      "en": "Android records show that LanLink crashed or stopped responding, interrupting the connection. Reconnect; if this keeps happening, check the logs."
+    },
+    "安卓系统记录显示 LanLink 被用户或系统的停止操作结束，导致连接中断。请重新打开手机上的 LanLink 后连接。": {
+      "en": "Android records show that a user or system stop action ended LanLink, interrupting the connection. Reopen LanLink on the phone and reconnect."
+    },
+    "已检测到这台组内手机，请解锁手机，允许 USB 调试并勾选始终允许此电脑": {
+      "en": "This phone in your group was detected. Unlock it, allow USB debugging, and select Always allow from this computer."
+    },
+    "手机的数据线连接尚未就绪，请重新连接并允许 USB 调试": {
+      "en": "The phone’s USB connection is not ready. Reconnect it and allow USB debugging."
+    },
+    "手机的数据线连接尚未就绪，请重新连接并允许 USB 调试。": {
+      "en": "The phone’s USB connection is not ready. Reconnect it and allow USB debugging."
+    },
+    "已检测到本组手机通过数据线连接，请在手机上允许此电脑进行 USB 调试。": {
+      "en": "A phone in your group was connected by USB. Allow USB debugging from this computer on the phone."
+    },
+    "已检测到本组手机通过数据线连接，请完成 ADB 授权。": {
+      "en": "A phone in your group was connected by USB. Complete ADB authorization."
+    },
+    "请解锁手机，允许 USB 调试并勾选始终允许此电脑，然后打开手机上的 LanLink。": {
+      "en": "Unlock the phone, allow USB debugging, select Always allow from this computer, then open LanLink on the phone."
+    },
+    "请解锁手机，允许 USB 调试并勾选始终允许此电脑。": {
+      "en": "Unlock the phone, allow USB debugging, and select Always allow from this computer."
+    },
+    "主设备": {
+      "en": "Master device",
+      "zh-Hant": "主裝置",
+      "ja": "主デバイス",
+      "ko": "주 장치",
+      "de": "Hauptgerät",
+      "fr": "Appareil principal",
+      "es": "Dispositivo principal",
+      "pt": "Dispositivo principal",
+      "it": "Dispositivo principale",
+      "ru": "Основное устройство"
+    },
+    "主设备 · 离线": {
+      "en": "Master device · Offline",
+      "zh-Hant": "主裝置 · 離線",
+      "ja": "主デバイス · オフライン",
+      "ko": "주 장치 · 오프라인",
+      "de": "Hauptgerät · Offline",
+      "fr": "Appareil principal · Hors ligne",
+      "es": "Dispositivo principal · Sin conexión",
+      "pt": "Dispositivo principal · Offline",
+      "it": "Dispositivo principale · Offline",
+      "ru": "Основное устройство · Не в сети"
+    },
+    "相对设备": {
+      "en": "Relative to device",
+      "zh-Hant": "相對裝置",
+      "ja": "基準デバイス",
+      "ko": "기준 장치",
+      "de": "Bezugsgerät",
+      "fr": "Par rapport à l’appareil",
+      "es": "Con respecto al dispositivo",
+      "pt": "Em relação ao dispositivo",
+      "it": "Rispetto al dispositivo",
+      "ru": "Относительно устройства"
+    },
+    "放到中心": {
+      "en": "Place in the center",
+      "zh-Hant": "放到中央",
+      "ja": "中央に配置",
+      "ko": "가운데 배치",
+      "de": "In der Mitte platzieren",
+      "fr": "Placer au centre",
+      "es": "Colocar en el centro",
+      "pt": "Colocar no centro",
+      "it": "Posiziona al centro",
+      "ru": "Разместить в центре"
+    },
+    "同组设备共用此布局。拖到网格，或点击设备选择相对方位。": {
+      "en": "This layout is shared by the group. Drag to a grid cell, or click a device to choose a relative position.",
+      "zh-Hant": "同組裝置共用此配置。拖到網格，或點按裝置選擇相對方位。",
+      "ja": "この配置はグループで共有されます。マスにドラッグするか、デバイスをクリックして相対位置を選択します。",
+      "ko": "이 배치는 그룹에서 공유됩니다. 격자로 끌거나 장치를 클릭하여 상대 위치를 선택하세요.",
+      "de": "Diese Anordnung gilt für die Gruppe. Auf ein Rasterfeld ziehen oder ein Gerät anklicken, um die relative Position zu wählen.",
+      "fr": "Cette disposition est partagée par le groupe. Glissez sur la grille ou cliquez sur un appareil pour choisir sa position relative.",
+      "es": "El grupo comparte esta disposición. Arrastra a la cuadrícula o haz clic en un dispositivo para elegir su posición relativa.",
+      "pt": "O grupo compartilha este layout. Arraste para a grade ou clique em um dispositivo para escolher sua posição relativa.",
+      "it": "Questa disposizione è condivisa dal gruppo. Trascina nella griglia o fai clic su un dispositivo per scegliere la posizione relativa.",
+      "ru": "Эта схема общая для группы. Перетащите устройство на сетку или нажмите на него, чтобы выбрать относительное положение."
+    },
+    "将上方设备拖入网格，或点击设备调整方位": {
+      "en": "Drag a device above into the grid, or click it to choose its position",
+      "zh-Hant": "將上方裝置拖入網格，或點按裝置調整方位",
+      "ja": "上のデバイスをマスにドラッグするか、クリックして位置を調整します",
+      "ko": "위의 장치를 격자로 끌거나 클릭하여 위치를 조정하세요",
+      "de": "Ein Gerät oben ins Raster ziehen oder anklicken, um seine Position zu wählen",
+      "fr": "Glissez un appareil du haut sur la grille ou cliquez dessus pour choisir sa position",
+      "es": "Arrastra un dispositivo de arriba a la cuadrícula o haz clic para elegir su posición",
+      "pt": "Arraste um dispositivo acima para a grade ou clique para escolher sua posição",
+      "it": "Trascina un dispositivo in alto nella griglia o fai clic per scegliere la posizione",
+      "ru": "Перетащите устройство сверху на сетку или нажмите на него, чтобы выбрать положение"
+    },
+    "点击操作；拖动到网格设置布局": {
+      "en": "Click for actions; drag to the grid to arrange devices",
+      "zh-Hant": "點按操作；拖到網格設定配置",
+      "ja": "クリックして操作、マスにドラッグして配置",
+      "ko": "클릭하여 작업, 격자로 끌어 배치",
+      "de": "Klicken für Aktionen; zum Anordnen ins Raster ziehen",
+      "fr": "Cliquer pour les actions ; glisser sur la grille pour placer",
+      "es": "Haz clic para ver acciones; arrastra a la cuadrícula para colocar",
+      "pt": "Clique para ações; arraste para a grade para organizar",
+      "it": "Fai clic per le azioni; trascina nella griglia per disporre",
+      "ru": "Нажмите для действий; перетащите на сетку для размещения"
+    },
+    "组内布局与主控": {
+      "en": "Group layout and controller"
+    },
+    "查看全组设备，选择主控电脑并调整屏幕位置": {
+      "en": "View every device, select the controller, and arrange screens"
+    },
+    "同一组的设备共享这份布局与主控选择": {
+      "en": "Devices in the same group share this layout and controller selection"
+    },
+    "未选择": {
+      "en": "Not selected"
+    },
+    "主控电脑": {
+      "en": "Controller computer"
+    },
+    "尚未选择主控电脑": {
+      "en": "No controller selected"
+    },
+    "更改": {
+      "en": "Change"
+    },
+    "由这台 Mac 或 Windows 电脑的鼠标跨屏移动；手机可修改组内选择。": {
+      "en": "Use this Mac or Windows computer’s mouse across screens. You can change the group selection from this phone."
+    },
+    "全组设备布局": {
+      "en": "Whole-group layout"
+    },
+    "相邻设备可直接跨屏。点选图中设备作为参考，再选择要摆放的设备和方向。": {
+      "en": "Move the mouse directly between neighboring screens. Select a reference device on the map, then choose a device and direction to place it."
+    },
+    "布局还是空的，请先放置第一台设备。": {
+      "en": "The layout is empty. Place the first device to begin."
+    },
+    "参考设备：": {
+      "en": "Reference device: "
+    },
+    "摆放设备": {
+      "en": "Arrange devices"
+    },
+    "选择要摆放的设备": {
+      "en": "Choose a device to place"
+    },
+    "放置第一台设备": {
+      "en": "Place first device"
+    },
+    "左侧": {
+      "en": "Left"
+    },
+    "右侧": {
+      "en": "Right"
+    },
+    "上方": {
+      "en": "Above"
+    },
+    "下方": {
+      "en": "Below"
+    },
+    "放在参考设备": {
+      "en": "Place relative to reference: "
+    },
+    "设为参考设备": {
+      "en": "Use as reference"
+    },
+    "布局和主控选择只在当前组内同步，已摆放的设备不会随主控切换而移动。": {
+      "en": "Layout and controller selection sync only within this group. Changing the controller does not move devices."
+    },
+    "请先将 Mac 或 Windows 电脑加入当前组": {
+      "en": "Add a Mac or Windows computer to this group first"
+    },
+    "选择主控电脑": {
+      "en": "Choose controller computer"
+    },
+    "移动设备": {
+      "en": "Mobile device"
+    },
+    "设备布局无效，最多支持 64 个位置": {
+      "en": "Invalid layout. Up to 64 devices can be placed."
+    },
+    "布局只能包含本组设备，坐标范围为 -32 到 32": {
+      "en": "Layouts can only contain devices from this group, within the supported grid."
+    },
+    "此位置已有设备": {
+      "en": "This position is occupied"
+    },
+    "布局保存失败": {
+      "en": "Could not save layout"
+    },
+    "主控选择保存失败": {
+      "en": "Could not save controller selection"
+    },
+    "请选择本组的 Windows 或 Mac 电脑": {
+      "en": "Choose a Windows or Mac computer in this group"
+    },
+    "请选择本组设备": {
+      "en": "Choose a device in this group"
+    },
+    "组布局保存失败": {
+      "en": "Could not save group layout"
+    },
+    "请从组内选定的主控电脑移动鼠标": {
+      "en": "Move the mouse from this group’s selected controller computer"
+    },
+    "组已发生变化，请重试": {
+      "en": "The group has changed. Please try again."
+    },
+    "主控设备已切换": {
+      "en": "Controller computer changed",
+      "zh-Hant": "主控裝置已切換"
+    },
+    "设为主控电脑": {
+      "en": "Use as controller computer",
+      "zh-Hant": "設為主控電腦"
+    },
+    "点击设备查看操作": {
+      "en": "Click a device to view actions",
+      "zh-Hant": "點按裝置查看操作"
+    },
+    "点击电脑切换主控，主控标识会同步到同组设备。": {
+      "en": "Click a computer to make it the controller. The controller badge syncs across the group.",
+      "zh-Hant": "點按電腦切換主控，主控標識會同步至同組裝置。"
+    },
+    "同组布局与主控标识自动同步。点击电脑切换主控；拖动调整位置，右键查看更多操作。": {
+      "en": "Layout and controller badges sync across the group. Click a computer to switch the controller; drag to arrange, or right-click for more actions.",
+      "zh-Hant": "同組配置與主控標識自動同步。點按電腦切換主控；拖動調整位置，右鍵查看更多操作。"
+    },
+    "点击电脑切换主控，主控标识会同步到同组设备。长按设备可选为摆放参考。": {
+      "en": "Tap a computer to switch the controller. Its badge syncs across the group. Hold a device to use it as a placement reference.",
+      "zh-Hant": "點按電腦切換主控，主控標識會同步至同組裝置。長按裝置可選為擺放參考。"
     }
   }
 }

@@ -34,6 +34,7 @@ namespace LanLink.Desktop {
     StagingPage stagingPage;Button stagingNavigation;FileDragEdges fileDragEdges;
     readonly Dictionary<string, string> edges = new Dictionary<string, string>();
     readonly StackPanel bubbles = new StackPanel { Orientation = Orientation.Horizontal };
+    ScrollViewer layoutScroll; SharedLayoutGeometry layoutGeometry;
     readonly Canvas canvas = new Canvas { Width = 1000, Height = 590, Background = Brushes.Transparent, AllowDrop = true };
     readonly TextBlock footer = LText("正在连接设备服务…", 12, "#70809C");
     readonly TextBlock notice = Text("", 12, "#506383");
@@ -43,7 +44,9 @@ namespace LanLink.Desktop {
     TextBox settingsName; CheckBox settingsEdgeGlow, settingsHideAway, adminStartupOption; ComboBox settingsMaster, settingsSwitchMode, settingsHotkey, settingsLanguage; bool restoringLanguage; Slider settingsDwell; TextBlock settingsDwellLabel, settingsZeroHint; StackPanel dwellOptions, hotkeyOptions; readonly Dictionary<string, CheckBox> settingsPermissions = new Dictionary<string, CheckBox>();
     TextBlock settingsStatus; bool settingsDirty, loadingSettings, savingSettings; Task immediateSettingsTask = Task.FromResult(0); int immediateSettingsPending; string settingsAccount = "";
     string lastAdbGuide=""; AdbGuideWindow adbGuideWindow; PermissionRequestWindow accessWindow; string lastAccess=""; Window consentWindow, permissionWindow; string consentRequestId = ""; CheckBox startupOption; bool showingFallback;
-    Forms.NotifyIcon tray; bool quitting, busy, dragging, testing; Point canvasOffset; string signature = "", selected = "";
+    Window androidDisconnectWindow; TextBlock androidDisconnectName, androidDisconnectMessage; string androidDisconnectRequestId="";
+    readonly HashSet<string> seenAndroidDisconnectRequests = new HashSet<string>();
+    Forms.NotifyIcon tray; bool quitting, busy, dragging, testing; string signature = "", selected = "";
     public static Brush Brush(string color) { return Theme.Brush(color); }
     public static TextBlock Text(string text, double size = 14, string color = "#18243D") {
       return new TextBlock { Text = text, FontSize = size, Foreground = Brush(color), TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
@@ -91,6 +94,7 @@ namespace LanLink.Desktop {
       try {
         foreach(var remote in Application.Current.Windows.OfType<RemoteWindow>().ToArray()) remote.Close();
         if(adbGuideWindow!=null)adbGuideWindow.End(); if(accessWindow!=null)accessWindow.End();
+        EndAndroidDisconnectNotice();
         if(consentWindow!=null)consentWindow.Close(); if(permissionWindow!=null)permissionWindow.Close();
         await Client.Stop(); await remoteCleanup; if(quitting)return; ConnectClient(); await Client.Start(Root, serviceOptions);
         State = await Client.Call("state"); serviceUnavailable = false; signature = ""; await Refresh();
@@ -143,10 +147,10 @@ namespace LanLink.Desktop {
       foreach(var entry in new[]{new[]{"clipboard-upload",Locale.T("上传文字剪贴板")},new[]{"clipboard-download",Locale.T("下载文字剪贴板")}}){string action=entry[0];var quick=Button("",()=>Run(()=>ManualClipboard(action)));quick.Content=WindowShell.Glyph(action,22);quick.ToolTip=entry[1];System.Windows.Automation.AutomationProperties.SetName(quick,entry[1]);quick.Style=(Style)FindResource("ClipboardQuickButton");quick.Margin=new Thickness(action=="clipboard-download"?8:0,0,0,0);clipboardQuick.Children.Add(quick);}clipboardQuick.Visibility=Visibility.Collapsed;header.Children.Add(clipboardQuick);
       var title = LText("设备与布局", 26); title.FontWeight = FontWeights.SemiBold; header.Children.Add(title); body.Children.Add(header);
       var scroll = new ScrollViewer { Content = bubbles, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, Padding = new Thickness(1, 1, 1, 6) }; Grid.SetRow(scroll, 1); body.Children.Add(scroll);
-      var hint = LText("拖动调整方位，点击设备进行操作", 12, "#8B97AB"); hint.Margin = new Thickness(0, 16, 0, 16); Grid.SetRow(hint, 2); body.Children.Add(hint);
-      var viewbox = new Viewbox { Child = canvas, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Center };
-      var canvasSurface = new Border { CornerRadius = new CornerRadius(20), Background = Brush("#F1F5FC"), Child = viewbox, Padding = new Thickness(10) }; Grid.SetRow(canvasSurface, 3); body.Children.Add(canvasSurface);
-      canvasSurface.SizeChanged += delegate { canvasSurface.Clip = new RectangleGeometry(new Rect(0, 0, canvasSurface.ActualWidth, canvasSurface.ActualHeight), 20, 20); };
+      var hint = LText("同组布局与主控标识自动同步。点击电脑切换主控；拖动调整位置，右键查看更多操作。", 12, "#8B97AB"); hint.TextWrapping = TextWrapping.Wrap; hint.Margin = new Thickness(0, 16, 0, 16); Grid.SetRow(hint, 2); body.Children.Add(hint);
+      layoutScroll = new ScrollViewer { Content = canvas, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+      var canvasSurface = new Border { CornerRadius = new CornerRadius(20), Background = Brush("#F1F5FC"), Child = layoutScroll, Padding = new Thickness(10) }; Grid.SetRow(canvasSurface, 3); body.Children.Add(canvasSurface);
+      canvasSurface.SizeChanged += delegate { canvasSurface.Clip = new RectangleGeometry(new Rect(0, 0, canvasSurface.ActualWidth, canvasSurface.ActualHeight), 20, 20); if (devices.Count > 0 && !dragging) Draw(); };
       var bottom = new DockPanel { Margin = new Thickness(4, 12, 0, 0) }; var back = LButton("返回本机  ·  Ctrl + Alt + F12", () => Run(async () => { await Client.Call("release"); await Refresh(); })); back.Padding = new Thickness(10, 7, 10, 7); back.FontSize = 12; back.BorderThickness = new Thickness(0); back.Background = Brushes.Transparent; DockPanel.SetDock(back, Dock.Right); bottom.Children.Add(back); bottom.Children.Add(footer); Grid.SetRow(bottom, 5); body.Children.Add(bottom);
       WindowShell.Wrap(this, grid);
       canvas.Drop += Dropped; canvas.DragOver += delegate(object sender, DragEventArgs e) { e.Effects = e.Data.GetDataPresent("LanLinkDevice") ? DragDropEffects.Move : DragDropEffects.None; e.Handled = true; };
@@ -208,7 +212,7 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
         footer.Text = Locale.T("键鼠控制：") + (active == "" ? Locale.T("本机") : devices.FirstOrDefault(d => d.Id == active) == null ? Locale.T("远端设备") : devices.First(d => d.Id == active).Name);
         if (Json.Flag(Json.Get(State, "capabilities"), "simulated")) footer.Text += Locale.T("  ·  模拟模式");
         var transfer = Json.Get(State, "transfer"); if (transfer != null) footer.Text += Locale.T("  ·  正在接收 ") + Json.Text(transfer, "name");
-        string sig = new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(new object[] { Json.Get(State, "peers"), Json.Get(State, "knownDevices"), Json.Get(State, "edges"), Json.Get(State, "name"), Json.Get(State, "dwell"), Json.Get(State, "master"), Json.Get(State,"masterId"), Json.Get(State,"masterDevices"), active });
+        string sig = new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(new object[] { Json.Get(State, "peers"), Json.Get(State, "knownDevices"), Json.Get(State, "edges"), Json.Get(State, "layout"), Json.Get(State, "layoutDevices"), Json.Get(State, "name"), Json.Get(State, "dwell"), Json.Get(State, "master"), Json.Get(State,"masterId"), Json.Get(State,"masterDevices"), active });
         if(stagingPage!=null&&stagingPage.Visibility==Visibility.Visible)await stagingPage.Refresh();if(!testing){CheckShareInbox();if(fileDragEdges!=null)fileDragEdges.Update(State);}
         if (sig == signature) return; signature = sig;if(settingsPage!=null && settingsPage.Visibility==Visibility.Visible && !settingsDirty && !savingSettings && immediateSettingsPending==0)LoadSettingsDraft();
         devices.Clear(); edges.Clear(); foreach (var item in Json.Map(Json.Get(State, "edges"))) edges[item.Key] = Convert.ToString(item.Value);
@@ -218,7 +222,16 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
           string id = Json.Text(item, "id"); var d = devices.FirstOrDefault(x => x.Id == id);
           if (d == null) { d = new Device { Id = id }; devices.Add(d); } d.Name = Json.Text(item, "name"); if (d.Name == "") d.Name = Locale.T("已配对设备"); d.Platform = Json.Text(item, "platform"); d.Online = true; d.Transport = Json.Text(item, "transport"); d.Access=Json.Get(item,"access"); d.Width = Json.Number(Json.Get(item, "capabilities"), "width", 1920); d.Height = Json.Number(Json.Get(item, "capabilities"), "height", 1080);
         }
-        foreach (var id in edges.Values.Where(x => x != "")) if (!devices.Any(d => d.Id == id)) devices.Add(new Device { Id = id, Name = Locale.T("已设置设备"), Platform = "" });
+        var members = Json.Get(State, "layoutDevices") as IEnumerable;
+        if (members != null) {
+          var group = new List<Device>();
+          foreach (var member in members) {
+            string id = Json.Text(member, "id"); if (id == "") continue;
+            var d = devices.FirstOrDefault(x => x.Id == id) ?? new Device { Id = id };
+            d.Name = Json.Text(member, "name"); d.Platform = Json.Text(member, "platform"); d.Local = id == Json.Text(State, "id"); d.Online = d.Local || Json.Flag(member, "online"); group.Add(d);
+          }
+          devices.Clear(); devices.AddRange(group);
+        } else foreach (var id in LayoutCells().Keys) if (!devices.Any(d => d.Id == id)) devices.Add(new Device { Id = id, Name = Locale.T("已设置设备"), Platform = "" });
         Draw();
       } catch (Exception ex) { Notify(ex.Message); } finally { busy = false; }
     }
@@ -226,9 +239,21 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
       var drawing = new Canvas { Width = size, Height = size, HorizontalAlignment = HorizontalAlignment.Center };
       var shape = new System.Windows.Shapes.Path { Stroke = Brush("#55709E"), StrokeThickness = 1.7, StrokeLineJoin = PenLineJoin.Round, Data = Geometry.Parse(d.Platform == "android" ? "M 9,2 L 23,2 Q 25,2 25,4 L 25,28 Q 25,30 23,30 L 9,30 Q 7,30 7,28 L 7,4 Q 7,2 9,2 M 13,26 L 19,26" : d.Platform == "darwin" ? "M 5,3 L 27,3 L 27,23 L 5,23 Z M 5,23 L 1,28 L 31,28 L 27,23" : "M 3,3 L 29,3 L 29,22 L 3,22 Z M 16,22 L 16,28 M 10,28 L 22,28"), RenderTransform = new ScaleTransform(size / 32, size / 32) }; drawing.Children.Add(shape); return drawing;
     }
+    bool layoutMasterSaving;
+    async Task ChooseLayoutMaster(Device d) {
+      if (layoutMasterSaving || d.Id == MasterId || (d.Platform != "darwin" && d.Platform != "win32")) return;
+      layoutMasterSaving = true;
+      try {
+        var result = await Client.Call("settings", new { masterId = d.Id });
+        await Refresh();
+        if (Json.Text(result,"warning") != "") Notify(SettingsResult(result,Locale.T("主控设备已切换")));
+        else Toast(Locale.T("主控设备已切换"), 4);
+      } finally { layoutMasterSaving = false; }
+    }
     bool Fusion(Device d){return d.Transport=="USB + 局域网";}
     bool MouseHere(Device d){string active=Json.Text(State,"active");return active==""?d.Local:active==d.Id;}
-    string Status(Device d) { return d.Local ? (Json.Flag(State, "master") ? Locale.T("本机 · 主设备") : Locale.T("本机")) : Json.Text(State, "active") == d.Id ? (Fusion(d)?Locale.T("● 融合控制中"):Locale.T("● 正在控制")) : d.Online ? "● " + (Json.Text(d.Access,"status")==""?Locale.T("未就绪"):Locale.T(Json.Text(d.Access,"status"))) : Locale.T("● 离线"); }
+    string MasterId { get { string id = Json.Text(State, "masterId"); return id != "" ? id : Json.Flag(State, "master") ? Json.Text(State, "id") : ""; } }
+    string Status(Device d) { return d.Id == MasterId ? (d.Local ? Locale.T("本机 · 主设备") : d.Online ? Locale.T("主设备") : Locale.T("主设备 · 离线")) : d.Local ? Locale.T("本机") : Json.Text(State, "active") == d.Id ? (Fusion(d)?Locale.T("● 融合控制中"):Locale.T("● 正在控制")) : d.Online ? "● " + (Json.Text(d.Access,"status")==""?Locale.T("未就绪"):Locale.T(Json.Text(d.Access,"status"))) : Locale.T("● 离线"); }
     string StatusColor(Device d) {
       if(d.Local || !d.Online)return "#8290A7";
       if(Json.Text(State,"active")==d.Id)return "#487AC4";
@@ -244,25 +269,35 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
       var icon = DeviceGlyph(d, compact ? 28 : 42); icon.HorizontalAlignment = HorizontalAlignment.Center; icon.Margin = compact ? new Thickness(0, 0, 14, 0) : new Thickness(0, 0, 0, 8); panel.Children.Add(icon);
       var words = new StackPanel { VerticalAlignment = VerticalAlignment.Center }; var name = Text(d.Name, compact ? 14 : 16); name.MaxWidth = compact ? 136 : 206; name.FontWeight = FontWeights.SemiBold; name.HorizontalAlignment = compact ? HorizontalAlignment.Left : HorizontalAlignment.Center; words.Children.Add(name);
       var status = Text(Status(d), 12, StatusColor(d)); status.Margin = new Thickness(0, 6, 0, 0); status.HorizontalAlignment = compact ? HorizontalAlignment.Left : HorizontalAlignment.Center; words.Children.Add(status); panel.Children.Add(words);
-      var border = new Border { Child = panel, Tag = d.Id, CornerRadius = new CornerRadius(18), BorderThickness = new Thickness(1), BorderBrush = Brush(selected == d.Id ? "#8DA7ED" : "#DFE6F1"), Background = Brush(d.Local ? "#E9F0FE" : "#FFFFFF"), Padding = new Thickness(compact ? 18 : 14), Cursor = Cursors.Hand, Focusable = true, ToolTip = d.Local ? Locale.T("点击管理本机") : Locale.T("点击操作；拖动到主设备四周设置布局") };
+      var border = new Border { Child = panel, Tag = d.Id, CornerRadius = new CornerRadius(18), BorderThickness = new Thickness(1), BorderBrush = Brush(d.Id == MasterId ? "#7B70C5" : selected == d.Id ? "#8DA7ED" : "#DFE6F1"), Background = Brush(d.Local ? "#E9F0FE" : "#FFFFFF"), Padding = new Thickness(compact ? 18 : 14), Cursor = Cursors.Hand, Focusable = true, ToolTip = Locale.T("点击操作；拖动到网格设置布局") };
       System.Windows.Automation.AutomationProperties.SetName(border, d.Name + " " + Status(d));
+      System.Windows.Automation.AutomationProperties.SetAutomationId(border, "layoutDevice-" + d.Id);
+      if (!compact && (d.Platform == "darwin" || d.Platform == "win32")) border.ToolTip = Locale.T("点击电脑切换主控，主控标识会同步到同组设备。");
       if (compact) { border.Width = 212; border.Height = 78; border.Margin = new Thickness(0, 0, 10, 0); }
       else { border.Width = d.Platform == "android" ? 164 : 248; border.Height = d.Platform == "android" ? 170 : 148; }
-      if(!compact && MouseHere(d)) {
+      if(!compact && (MouseHere(d) || d.Id == MasterId)) {
         border.Child=null;var content=new Grid();content.Children.Add(panel);
-        var badge=new Border{Background=Brush("#E6EAF9"),CornerRadius=new CornerRadius(10),Padding=new Thickness(9,3,9,3),HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Top,Margin=new Thickness(0,-27,-5,0),Child=LText("↖ 鼠标在此",12,"#6174AA"),IsHitTestVisible=false};
-        content.Children.Add(badge);border.Child=content;
+        if (MouseHere(d)) { var badge=new Border{Background=Brush("#E6EAF9"),CornerRadius=new CornerRadius(10),Padding=new Thickness(9,3,9,3),HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Top,Margin=new Thickness(0,-27,-5,0),Child=LText("↖ 鼠标在此",12,"#6174AA"),IsHitTestVisible=false};
+        content.Children.Add(badge); }
+        if (d.Id == MasterId) {
+          var masterBadge = new Border { Background=Brush("#EEEBFA"), CornerRadius=new CornerRadius(10), Padding=new Thickness(7,3,7,3), HorizontalAlignment=HorizontalAlignment.Left, VerticalAlignment=VerticalAlignment.Top, Margin=new Thickness(-8,-27,0,0), Child=LText("主控电脑",10,"#6554AC"), IsHitTestVisible=false };
+          System.Windows.Automation.AutomationProperties.SetAutomationId(masterBadge,"layoutMasterBadge"); content.Children.Add(masterBadge);
+        }
+        border.Child=content;
       }
       Point start = new Point(); bool down = false;
       border.MouseLeftButtonDown += delegate(object sender, MouseButtonEventArgs e) { down = true; start = e.GetPosition(border); border.Focus(); };
       border.MouseMove += delegate(object sender, MouseEventArgs e) {
-        if (!down || d.Local || e.LeftButton != MouseButtonState.Pressed) return;
+        if (!down || e.LeftButton != MouseButtonState.Pressed) return;
         if ((e.GetPosition(border) - start).Length < 7) return;
         down = false; dragging = true;
         try { DragDrop.DoDragDrop(border, new DataObject("LanLinkDevice", d.Id), DragDropEffects.Move); }
         finally { dragging = false; }
       };
-      border.MouseLeftButtonUp += delegate { if (down) { down = false; selected = d.Id; OpenMenu(d, border); } };
+      border.MouseLeftButtonUp += delegate { if (down) { down = false;
+        if (!compact && (d.Platform == "darwin" || d.Platform == "win32")) Run(() => ChooseLayoutMaster(d));
+        else { selected = d.Id; OpenMenu(d, border); }
+      } };
       border.MouseRightButtonUp += delegate { OpenMenu(d, border); };
       border.KeyDown += delegate(object sender, KeyEventArgs e) { if (e.Key == Key.Enter || e.Key == Key.Space) { OpenMenu(d, border); e.Handled = true; } };
       if(!d.Local){border.AllowDrop=true;string fileSession=null;bool offered=false;
@@ -272,54 +307,65 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
       }
       return border;
     }
-    static readonly Dictionary<string, Point> positions = new Dictionary<string, Point> { { "local", new Point(376, 214) }, { "left", new Point(41, 214) }, { "right", new Point(711, 214) }, { "top", new Point(376, 12) }, { "bottom", new Point(376, 416) } };
-    public static string Direction(Point point) { var delta = point - new Point(500, 288); return Math.Abs(delta.X) > Math.Abs(delta.Y) ? delta.X < 0 ? "left" : "right" : delta.Y < 0 ? "top" : "bottom"; }
-    readonly Dictionary<string,Point> lastTilePositions=new Dictionary<string,Point>();
-    void TransferLine(Point from,Point to,bool active,bool fusion,bool online,Device device) {
-      Vector delta=to-from;double length=Math.Max(1,delta.Length);Vector normal=new Vector(-delta.Y/length,delta.X/length);
-      foreach(double offset in fusion?new[]{-3.0,3.0}:new[]{0.0}) {
-        var a=from+normal*offset;var b=to+normal*offset;
-        var line=new System.Windows.Shapes.Line{X1=a.X,Y1=a.Y,X2=b.X,Y2=b.Y,Stroke=Brush(online?"#B2BDE1":"#D8DDE7"),StrokeThickness=1.5,IsHitTestVisible=false};canvas.Children.Add(line);AnimateConnection(line,device,offset);
-        if(active){var flow=new System.Windows.Shapes.Line{X1=a.X,Y1=a.Y,X2=b.X,Y2=b.Y,Stroke=Brush("#7B89C9"),StrokeThickness=2,StrokeDashArray=new DoubleCollection(new[]{3.0,8.0}),IsHitTestVisible=false};if(SystemParameters.ClientAreaAnimation)flow.BeginAnimation(System.Windows.Shapes.Shape.StrokeDashOffsetProperty,new DoubleAnimation(0,-11,TimeSpan.FromSeconds(.9)){RepeatBehavior=RepeatBehavior.Forever});canvas.Children.Add(flow);AnimateConnection(flow,device,offset);}
+    Dictionary<string, SharedLayoutCell> LayoutCells() {
+      var result = new Dictionary<string, SharedLayoutCell>(); var layout = Json.Get(State, "layout");
+      if (layout != null) {
+        foreach (var item in Json.Map(Json.Get(layout, "positions"))) {
+          double x = Json.Number(item.Value, "x", 100), y = Json.Number(item.Value, "y", 100);
+          if (x >= -32 && x <= 32 && y >= -32 && y <= 32 && x == Math.Truncate(x) && y == Math.Truncate(y)) result[item.Key] = new SharedLayoutCell((int)x, (int)y);
+        }
+      } else {
+        result[Json.Text(State, "id")] = new SharedLayoutCell(0, 0);
+        foreach (var edge in edges) { var cell = new SharedLayoutCell(0, 0).Adjacent(edge.Key); if (edge.Value != "" && cell.HasValue) result[edge.Value] = cell.Value; }
+      }
+      return result;
+    }
+    void DrawConnection(Point from, Point to, Size fromSize, Size toSize, bool active, bool fusion, bool online) {
+      Vector delta = to - from; double length = Math.Max(1, delta.Length); var normal = new Vector(-delta.Y / length, delta.X / length);
+      bool horizontal = Math.Abs(delta.X) > Math.Abs(delta.Y);
+      var direction = delta / length;
+      from += direction * ((horizontal ? fromSize.Width : fromSize.Height) / 2 + 3);
+      to -= direction * ((horizontal ? toSize.Width : toSize.Height) / 2 + 3);
+      foreach (double offset in fusion ? new[] { -3.0, 3.0 } : new[] { 0.0 }) {
+        var a = from + normal * offset; var b = to + normal * offset;
+        canvas.Children.Add(new System.Windows.Shapes.Line { X1 = a.X, Y1 = a.Y, X2 = b.X, Y2 = b.Y, Stroke = Brush(online ? "#A9BBDD" : "#D8DDE7"), StrokeThickness = 1.5, IsHitTestVisible = false });
+        if (active) {
+          var flow = new System.Windows.Shapes.Line { X1 = a.X, Y1 = a.Y, X2 = b.X, Y2 = b.Y, Stroke = Brush("#7B89C9"), StrokeThickness = 2, StrokeDashArray = new DoubleCollection(new[] { 3.0, 8.0 }), IsHitTestVisible = false };
+          if (SystemParameters.ClientAreaAnimation) flow.BeginAnimation(System.Windows.Shapes.Shape.StrokeDashOffsetProperty, new DoubleAnimation(0, -11, TimeSpan.FromSeconds(.9)) { RepeatBehavior = RepeatBehavior.Forever }); canvas.Children.Add(flow);
+        }
       }
     }
-    void AnimateConnection(System.Windows.Shapes.Line line,Device device,double offset) {
-      Point local,remote;if(!SystemParameters.ClientAreaAnimation || !lastTilePositions.TryGetValue(Json.Text(State,"id"),out local) || !lastTilePositions.TryGetValue(device.Id,out remote))return;
-      local+=new Vector(124,74);remote+=device.Platform=="android"?new Vector(82,85):new Vector(124,74);Vector delta=remote-local;double length=Math.Max(1,delta.Length);var normal=new Vector(-delta.Y/length,delta.X/length)*offset;local+=normal;remote+=normal;
-      double[] before={local.X,local.Y,remote.X,remote.Y},after={line.X1,line.Y1,line.X2,line.Y2};DependencyProperty[] properties={System.Windows.Shapes.Line.X1Property,System.Windows.Shapes.Line.Y1Property,System.Windows.Shapes.Line.X2Property,System.Windows.Shapes.Line.Y2Property};
-      for(int i=0;i<4;i++)if(Math.Abs(before[i]-after[i])>1)line.BeginAnimation(properties[i],new DoubleAnimation(before[i],after[i],TimeSpan.FromMilliseconds(300)){EasingFunction=new CubicEase{EasingMode=EasingMode.EaseOut}});
-    }
+    Size LayoutCardSize(Device d) { return new Size((d.Platform == "android" ? 164 : 248) * layoutGeometry.Scale, (d.Platform == "android" ? 170 : 148) * layoutGeometry.Scale); }
     void Draw() {
       bubbles.Children.Clear(); canvas.Children.Clear();
-      var used = new List<Point> { positions["local"] }; foreach (var edge in edges) if (edge.Value != "" && positions.ContainsKey(edge.Key)) used.Add(positions[edge.Key]);
-      double layoutWidth = used.Max(p => p.X) - used.Min(p => p.X) + 248, layoutHeight = used.Max(p => p.Y) - used.Min(p => p.Y) + 148;
-      canvas.Width = Math.Max(720, layoutWidth + 112); canvas.Height = Math.Max(380, layoutHeight + 96);
-      canvasOffset = new Point((canvas.Width - layoutWidth) / 2 - used.Min(p => p.X), (canvas.Height - layoutHeight) / 2 - used.Min(p => p.Y));
-      for (int x = 15; x < canvas.Width; x += 30) for (int y = 10; y < canvas.Height; y += 30) { var dot = new Ellipse { Width = 1.4, Height = 1.4, Fill = Brush("#D6E0F2"), IsHitTestVisible = false }; Canvas.SetLeft(dot, x); Canvas.SetTop(dot, y); canvas.Children.Add(dot); }
+      var positions = LayoutCells();
+      double width = layoutScroll == null ? 720 : Math.Max(300, layoutScroll.ActualWidth - 18), height = layoutScroll == null ? 420 : Math.Max(260, layoutScroll.ActualHeight - 18);
+      layoutGeometry = new SharedLayoutGeometry(width, height, positions.Values); var geometry = layoutGeometry;
+      canvas.Width = geometry.Width; canvas.Height = geometry.Height;
+      for (int x = geometry.MinX; x <= geometry.MaxX; x++) for (int y = geometry.MinY; y <= geometry.MaxY; y++) {
+        var cell = new SharedLayoutCell(x, y); var outline = new Rectangle { Width = geometry.StepX - 8, Height = geometry.StepY - 8, RadiusX = 12, RadiusY = 12, Stroke = Brush("#D6E0F2"), StrokeThickness = 1, StrokeDashArray = new DoubleCollection(new[] { 3.0, 5.0 }), IsHitTestVisible = false };
+        Canvas.SetLeft(outline, geometry.X(cell) - geometry.StepX / 2 + 4); Canvas.SetTop(outline, geometry.Y(cell) - geometry.StepY / 2 + 4); canvas.Children.Add(outline);
+      }
       foreach (var d in devices) bubbles.Children.Add(DeviceView(d, true));
-      foreach (string edge in new[] { "left", "right", "top", "bottom" }) {
-        string id; edges.TryGetValue(edge, out id); var d = devices.FirstOrDefault(x => x.Id == id && !x.Local);
-        if (d == null) continue; var p = positions[edge];
-        TransferLine(new Point(500+canvasOffset.X,288+canvasOffset.Y),new Point(p.X+124+canvasOffset.X,p.Y+74+canvasOffset.Y),Json.Text(State,"active")==d.Id,Fusion(d),d.Online,d);
+      var ids = positions.Keys.OrderBy(id => id).ToArray();
+      for (int i = 0; i < ids.Length; i++) for (int j = i + 1; j < ids.Length; j++) {
+        var a = positions[ids[i]]; var b = positions[ids[j]];
+        if (Math.Abs(a.X - b.X) + Math.Abs(a.Y - b.Y) != 1) continue;
+        var first = devices.FirstOrDefault(d => d.Id == ids[i]); var second = devices.FirstOrDefault(d => d.Id == ids[j]);
+        if (first != null && second != null) DrawConnection(new Point(geometry.X(a), geometry.Y(a)), new Point(geometry.X(b), geometry.Y(b)), LayoutCardSize(first), LayoutCardSize(second), Json.Text(State, "active") == first.Id || Json.Text(State, "active") == second.Id, Fusion(first) || Fusion(second), first.Online && second.Online);
       }
       foreach (var d in devices) {
-        string edge = d.Local ? "local" : edges.FirstOrDefault(x => x.Value == d.Id).Key;
-        if (string.IsNullOrEmpty(edge) || !positions.ContainsKey(edge)) continue;
-        var tile = DeviceView(d, false);var target=new Point(positions[edge].X+(248-tile.Width)/2+canvasOffset.X,positions[edge].Y+(148-tile.Height)/2+canvasOffset.Y);Canvas.SetLeft(tile,target.X);Canvas.SetTop(tile,target.Y);canvas.Children.Add(tile);
-        Point previous;if(lastTilePositions.TryGetValue(d.Id,out previous) && (previous-target).Length>1){var motion=new TranslateTransform();tile.RenderTransform=motion;var easing=new CubicEase{EasingMode=EasingMode.EaseOut};motion.BeginAnimation(TranslateTransform.XProperty,new DoubleAnimation(previous.X-target.X,0,TimeSpan.FromMilliseconds(300)){EasingFunction=easing});motion.BeginAnimation(TranslateTransform.YProperty,new DoubleAnimation(previous.Y-target.Y,0,TimeSpan.FromMilliseconds(300)){EasingFunction=easing});}lastTilePositions[d.Id]=target;
+        SharedLayoutCell cell; if (!positions.TryGetValue(d.Id, out cell)) continue;
+        var tile = DeviceView(d, false); tile.LayoutTransform = new ScaleTransform(geometry.Scale, geometry.Scale);
+        Canvas.SetLeft(tile, geometry.X(cell) - tile.Width * geometry.Scale / 2); Canvas.SetTop(tile, geometry.Y(cell) - tile.Height * geometry.Scale / 2); canvas.Children.Add(tile);
       }
-      if (devices.Count == 1) { var empty = LText("添加设备后，将顶部气泡拖至本机四周", 14, "#8393AF"); Canvas.SetLeft(empty, canvas.Width / 2 - 160); Canvas.SetTop(empty, canvas.Height / 2 + 115); canvas.Children.Add(empty); }
-    }
-    public static Dictionary<string, string> Place(Dictionary<string, string> current, string id, string edge) {
-      var next = new Dictionary<string, string>(current); string old = next.FirstOrDefault(x => x.Value == id).Key, displaced; next.TryGetValue(edge, out displaced);
-      foreach (var key in next.Keys.ToArray()) if (next[key] == id) next[key] = "";
-      if (!string.IsNullOrEmpty(old) && old != edge) next[old] = displaced ?? ""; next[edge] = id; return next;
+      if (positions.Count == 0) { var empty = LText("将上方设备拖入网格，或点击设备调整方位", 14, "#8393AF"); Canvas.SetLeft(empty, canvas.Width / 2 - 170); Canvas.SetTop(empty, canvas.Height / 2); canvas.Children.Add(empty); }
     }
     void Dropped(object sender, DragEventArgs e) {
-      if (!e.Data.GetDataPresent("LanLinkDevice")) return;
-      string id = Convert.ToString(e.Data.GetData("LanLinkDevice")); if (!devices.Any(d => d.Id == id && !d.Local)) return;
-      var next = Place(edges, id, Direction(new Point(e.GetPosition(canvas).X - canvasOffset.X, e.GetPosition(canvas).Y - canvasOffset.Y))); e.Handled = true;
-      Run(async () => { await Client.Call("settings", new { edges = next, master = true }); signature = ""; dragging = false; await Refresh(); Toast(Locale.T("布局已保存"), 10); });
+      if (!e.Data.GetDataPresent("LanLinkDevice") || layoutGeometry == null) return;
+      string id = Convert.ToString(e.Data.GetData("LanLinkDevice")); if (!devices.Any(d => d.Id == id)) return;
+      var point = e.GetPosition(canvas); var cell = layoutGeometry.Cell(point.X, point.Y); if (!cell.HasValue) return; e.Handled = true;
+      Run(async () => { await Client.Call("layout-place", new { id = id, x = cell.Value.X, y = cell.Value.Y }); signature = ""; dragging = false; await Refresh(); Toast(Locale.T("布局已保存"), 10); });
     }
     MenuItem Menu(string title, Func<Task> action, bool enabled) {
       string icon = title.Contains(Locale.T("关机")) ? "power" : title.Contains(Locale.T("文件")) ? "file" : title.Contains(Locale.T("粘贴")) ? "paste" : title.Contains(Locale.T("布局")) || title.Contains(Locale.T("侧")) || title.Contains(Locale.T("方")) ? "layout" : title.Contains(Locale.T("返回")) ? "return" : title.Contains(Locale.T("键鼠")) ? "pointer" : "devices";
@@ -351,13 +397,30 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
       if(restricted){item.Foreground=Brush("#98A1B1");item.ToolTip=UiLocale.Content("尚未就绪或授权 · 点击查看");}
       return item;
     }
-    Grid PositionPicker(Device d,ContextMenu menu) {
-      var grid=new Grid{Width=234,Height=180,Margin=new Thickness(4)};
-      for(int i=0;i<3;i++){grid.RowDefinitions.Add(new RowDefinition());grid.ColumnDefinitions.Add(new ColumnDefinition());}
-      var center=new Border{Background=Brush("#F0F2F8"),CornerRadius=new CornerRadius(13),Margin=new Thickness(3),Child=LText("本机",12,"#7C879C")};((TextBlock)center.Child).HorizontalAlignment=HorizontalAlignment.Center;((TextBlock)center.Child).VerticalAlignment=VerticalAlignment.Center;Grid.SetRow(center,1);Grid.SetColumn(center,1);grid.Children.Add(center);
-      string[] keys={"top","left","right","bottom"};string[] labels={Locale.T("↑ 上方"),Locale.T("← 左侧"),Locale.T("右侧 →"),Locale.T("↓ 下方")};int[] rows={0,1,1,2},cols={1,0,2,1};
-      for(int i=0;i<4;i++){string edge=keys[i];var button=Button(labels[i],()=>{menu.IsOpen=false;Run(async()=>{await Client.Call("settings",new {edges=Place(edges,d.Id,edge),master=true});await Refresh();});});button.Padding=new Thickness(5);button.Margin=new Thickness(3);button.FontSize=12;button.Background=Brush(edges.ContainsKey(edge)&&edges[edge]==d.Id?"#E4E3F5":"#F5F6FA");Grid.SetRow(button,rows[i]);Grid.SetColumn(button,cols[i]);grid.Children.Add(button);}
-      return grid;
+    FrameworkElement PositionPicker(Device d, ContextMenu menu) {
+      var panel = new StackPanel { Width = 250, Margin = new Thickness(4) }; var positions = LayoutCells();
+      var anchors = devices.Where(device => device.Id != d.Id && positions.ContainsKey(device.Id)).ToArray();
+      if (anchors.Length == 0) {
+        panel.Children.Add(LButton("放到中心", () => { menu.IsOpen = false; Run(async () => { await Client.Call("layout-place", new { id = d.Id, x = 0, y = 0 }); await Refresh(); }); })); return panel;
+      }
+      panel.Children.Add(LText("相对设备", 12, "#7C879C"));
+      var picker = new ComboBox { Margin = new Thickness(0, 6, 0, 8), MinWidth = 220 };
+      foreach (var anchor in anchors) picker.Items.Add(new ComboBoxItem { Content = anchor.Name, Tag = anchor.Id });
+      picker.SelectedIndex = Math.Max(0, Array.FindIndex(anchors, anchor => anchor.Id == MasterId)); panel.Children.Add(picker);
+      var grid = new Grid { Height = 150 };
+      for (int i = 0; i < 3; i++) { grid.RowDefinitions.Add(new RowDefinition()); grid.ColumnDefinitions.Add(new ColumnDefinition()); }
+      string[] keys = { "top", "left", "right", "bottom" }; string[] labels = { Locale.T("↑ 上方"), Locale.T("← 左侧"), Locale.T("右侧 →"), Locale.T("↓ 下方") }; int[] rows = { 0, 1, 1, 2 }, cols = { 1, 0, 2, 1 };
+      var buttons = new List<Button>();
+      for (int i = 0; i < 4; i++) {
+        string edge = keys[i]; var button = Button(labels[i], () => {
+          var selected = picker.SelectedItem as ComboBoxItem; if (selected == null) return;
+          var cell = positions[Convert.ToString(selected.Tag)].Adjacent(edge); if (!cell.HasValue) return;
+          menu.IsOpen = false; Run(async () => { await Client.Call("layout-place", new { id = d.Id, x = cell.Value.X, y = cell.Value.Y }); await Refresh(); });
+        });
+        button.Tag = edge; button.Padding = new Thickness(4); button.Margin = new Thickness(2); button.FontSize = 12; Grid.SetRow(button, rows[i]); Grid.SetColumn(button, cols[i]); grid.Children.Add(button); buttons.Add(button);
+      }
+      Action update = () => { var selected = picker.SelectedItem as ComboBoxItem; foreach (var button in buttons) button.IsEnabled = selected != null && positions[Convert.ToString(selected.Tag)].Adjacent(Convert.ToString(button.Tag)).HasValue; };
+      picker.SelectionChanged += delegate { update(); }; update(); panel.Children.Add(grid); return panel;
     }
     internal void RemoteClosing(Task completion) { remoteCleanup = Task.WhenAll(remoteCleanup, completion); }
     async Task OpenRemote(Device device) {
@@ -372,6 +435,7 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
     public ContextMenu BuildMenu(Device d) {
       var menu = new ContextMenu { Resources = Resources }; WindowShell.GlassMenu(menu, this); menu.Items.Add(new MenuItem { Header = d.Name, FontWeight = FontWeights.SemiBold, FontSize = 15, IsHitTestVisible = false, Focusable = false, Icon = DeviceGlyph(d, 19) }); menu.Items.Add(new Separator());
       menu.Items.Add(Menu(Locale.T("设备详情与权限"), () => { ShowDevicePermissions(); return Task.FromResult(0); }, true));
+      if (d.Platform == "darwin" || d.Platform == "win32") menu.Items.Add(Menu(Locale.T(d.Id == MasterId ? "主控电脑" : "设为主控电脑"), () => ChooseLayoutMaster(d), d.Id != MasterId && !layoutMasterSaving));
       if (d.Local) {
         menu.Items.Add(Menu(Locale.T("返回本机键鼠"), async () => { await Client.Call("release"); }, true));
         menu.Items.Add(Menu(Locale.T("取消关机"), async () => { await Client.Call("cancel-shutdown"); Notify(Locale.T("关机已取消")); }, Json.Number(State, "shutdownAt", 0) > 0));
@@ -389,14 +453,15 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
           var result=await Client.Call("stage-share", new { id = d.Id, files = dialog.FileNames }); Notify(Json.Text(result,"message"));
         }));
         menu.Items.Add(new Separator());
-        var layout = new MenuItem { Header=Locale.T("调整方位"), Icon = WindowShell.Glyph("layout", 18) }; layout.Items.Add(new MenuItem{Header=PositionPicker(d,menu),StaysOpenOnClick=true,Padding=new Thickness(4)});menu.Items.Add(layout);
         menu.Items.Add(Menu(Locale.T("移出设备…"), async () => { if (!Confirm(this,Locale.T("移出设备"),Locale.T("将 ")+d.Name+Locale.T(" 移出组？该设备需要重新配对，其他离线成员会保留身份。"))) return; await Client.Call("device-remove",new { id=d.Id }); await Refresh(); Notify(Locale.T("设备已移出组")); },true));
-        menu.Items.Add(Menu(Locale.T("移出布局"), async () => { var next = new Dictionary<string, string>(edges); foreach (var key in next.Keys.ToArray()) if (next[key] == d.Id) next[key] = ""; await Client.Call("settings", new { edges = next }); await Refresh(); }, edges.ContainsValue(d.Id)));
         if (d.Platform == "win32" || d.Platform == "darwin") {
           menu.Items.Add(new Separator()); menu.Items.Add(Feature(d,Locale.T("关机…"),new[]{"shutdown"}, async () => { if (!Confirm(this, Locale.T("确认关机"), Locale.T("请求 ") + d.Name + Locale.T(" 在 30 秒后关机？请先保存目标设备中的工作。"))) return; await Client.Call("shutdown", new { id = d.Id }); Notify(Locale.T("已发送关机请求，可在设备菜单中取消")); }));
           menu.Items.Add(Menu(Locale.T("取消关机"), async () => { await Client.Call("cancel-shutdown", new { id = d.Id }); Notify(Locale.T("已取消关机请求")); }, d.Online));
         }
       }
+      menu.Items.Add(new Separator());
+      var layout = new MenuItem { Header = Locale.T("调整方位"), Icon = WindowShell.Glyph("layout", 18) }; layout.Items.Add(new MenuItem { Header = PositionPicker(d, menu), StaysOpenOnClick = true, Padding = new Thickness(4) }); menu.Items.Add(layout);
+      menu.Items.Add(Menu(Locale.T("移出布局"), async () => { await Client.Call("layout-remove", new { id = d.Id }); await Refresh(); }, LayoutCells().ContainsKey(d.Id)));
       return menu;
     }
     void OpenMenu(Device d, FrameworkElement anchor) { selected = d.Id; foreach (var card in bubbles.Children.OfType<Border>()) card.BorderBrush = Brush(Convert.ToString(card.Tag) == selected ? "#8DA7ED" : "#E1E7F0"); var menu = BuildMenu(d); menu.VerticalOffset = 8; menu.PlacementTarget = anchor; menu.Placement = PlacementMode.Bottom; menu.IsOpen = true; }
@@ -542,6 +607,7 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
       if (adbGuideWindow != null && (guide == null || adbGuideWindow.RequestId != Json.Text(guide,"requestId"))) { adbGuideWindow.End(); adbGuideWindow = null; }
       if (guide != null && adbGuideWindow == null && lastAdbGuide != Json.Text(guide,"requestId")) { lastAdbGuide=Json.Text(guide,"requestId"); var window = new AdbGuideWindow(this,guide); adbGuideWindow=window; window.Closed += delegate { if(adbGuideWindow==window)adbGuideWindow=null; }; window.Show(); window.Activate(); }
       var fallback = Json.Get(State, "fallbackNotice"); if (fallback != null && !showingFallback) Run(() => HandleFallbackNotice(fallback));
+      RefreshAndroidDisconnectNotice();
       var requests = (Json.Get(State, "consentRequests") as IEnumerable ?? new object[0]).Cast<object>().ToList();
       if (consentWindow != null && !requests.Any(r => Json.Text(r, "requestId") == consentRequestId)) { consentWindow.Close(); consentWindow = null; }
       if (consentWindow == null && requests.Count > 0) {
@@ -576,6 +642,26 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
         timer.Tick += delegate { render(); }; render(); timer.Start();
         window.Closed += delegate { timer.Stop(); permissionWindow = null; Run(async () => { await Client.Call("permission-dismiss"); }); }; window.Show();
       }
+    }
+    void EndAndroidDisconnectNotice() {
+      var window=androidDisconnectWindow;androidDisconnectWindow=null;androidDisconnectRequestId="";
+      if(window!=null)window.Close();
+    }
+    void RefreshAndroidDisconnectNotice() {
+      var request=Json.Get(State,"androidDisconnectNotice");string requestId=Json.Text(request,"requestId");
+      if(androidDisconnectWindow!=null && androidDisconnectRequestId!=requestId)EndAndroidDisconnectNotice();
+      if(request==null || string.IsNullOrEmpty(requestId))return;
+      string name=Json.Text(request,"name"),message=Locale.T(Json.Text(request,"message"));
+      if(string.IsNullOrEmpty(name))name=Locale.T("设备");
+      if(androidDisconnectWindow!=null){androidDisconnectWindow.Title=Locale.T("安卓设备连接中断");androidDisconnectName.Text=name;androidDisconnectMessage.Text=message;return;}
+      if(seenAndroidDisconnectRequests.Contains(requestId))return;
+      var panel=Column();var heading=LText("安卓设备连接中断",22);heading.Margin=new Thickness(0,0,0,16);panel.Children.Add(heading);
+      androidDisconnectName=Text(name);androidDisconnectName.TextWrapping=TextWrapping.Wrap;androidDisconnectName.TextTrimming=TextTrimming.None;panel.Children.Add(androidDisconnectName);
+      androidDisconnectMessage=Text(message,14,"#71819A");androidDisconnectMessage.TextWrapping=TextWrapping.Wrap;androidDisconnectMessage.TextTrimming=TextTrimming.None;androidDisconnectMessage.Margin=new Thickness(0,12,0,24);panel.Children.Add(androidDisconnectMessage);
+      var window=Dialog(Locale.T("安卓设备连接中断"),panel,500);androidDisconnectWindow=window;androidDisconnectRequestId=requestId;seenAndroidDisconnectRequests.Add(requestId);
+      var accept=LButton("确认",()=>window.Close());accept.Style=(Style)FindResource("Primary");accept.HorizontalAlignment=HorizontalAlignment.Right;accept.MinWidth=104;accept.IsDefault=true;accept.IsCancel=true;panel.Children.Add(accept);
+      window.Closed+=delegate {if(androidDisconnectWindow!=window)return;androidDisconnectWindow=null;androidDisconnectRequestId="";if(!quitting && !restartingService)Run(async()=>{await Client.Call("android-disconnect-dismiss",new {requestId=requestId});});};
+      window.Show();window.Activate();
     }
     void ShowDevices() {
       Navigate(homeNavigation);
@@ -747,12 +833,12 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
       if (Json.Text(State, "name") != "工作电脑" || Json.Number(State, "dwell", 0) != 500) throw new Exception("Native settings integration failed");
       var qr = await Client.Call("pairing", new { reveal = true }); if (!System.Text.RegularExpressions.Regex.IsMatch(Json.Text(qr, "code"), "^[0-9]{8}$")) throw new Exception("Pairing failed");
       string image = Json.Text(qr, "qr"); if (DecodeImage(image.Substring(image.IndexOf(',') + 1)).PixelWidth < 100) throw new Exception("QR decode failed");
-      var sample = Place(new Dictionary<string, string> { { "left", "a" }, { "right", "b" } }, "a", "right"); if (sample["left"] != "b" || sample["right"] != "a") throw new Exception("Occupied edge swap failed");
-      if (Direction(new Point(950, 288)) != "right" || Direction(new Point(500, 20)) != "top") throw new Exception("Direction mapping failed");
+      var sample = new SharedLayoutGeometry(840, 520, new[] { new SharedLayoutCell(0, 0), new SharedLayoutCell(1, 0), new SharedLayoutCell(2, 0) }); var tip = new SharedLayoutCell(2, 0);
+      var roundTrip = sample.Cell(sample.X(tip), sample.Y(tip)); if (!roundTrip.HasValue || roundTrip.Value.X != 2 || tip.Adjacent("bottom").Value.Y != 1) throw new Exception("Global chain/branch layout mapping failed");
       devices.Clear(); devices.Add(new Device { Id = Json.Text(State, "id"), Name = "工作电脑", Platform = "win32", Local = true, Online = true });
       devices.Add(new Device { Id = "preview-mac", Name = "MacBook Pro", Platform = "darwin", Online = true }); devices.Add(new Device { Id = "preview-phone", Name = "Pixel 9", Platform = "android", Online = true }); devices.Add(new Device { Id = "preview-offline", Name = "客厅电脑", Platform = "win32" });
       if (BuildMenu(devices[3]).Items.OfType<MenuItem>().Any(m => Convert.ToString(m.Header) == "桌面控制" && m.IsEnabled)) throw new Exception("Offline actions must be disabled");
-      edges["right"] = "preview-mac"; edges["bottom"] = "preview-phone"; selected = "preview-mac"; Draw(); Notify("界面预览 · 示例设备，不代表真实连接");
+      Json.Map(State)["layout"] = new Dictionary<string, object> { { "positions", new Dictionary<string, object> { { Json.Text(State, "id"), new Dictionary<string, object> { { "x", 0 }, { "y", 0 } } }, { "preview-mac", new Dictionary<string, object> { { "x", 1 }, { "y", 0 } } }, { "preview-phone", new Dictionary<string, object> { { "x", 2 }, { "y", 0 } } }, { "preview-offline", new Dictionary<string, object> { { "x", 1 }, { "y", 1 } } } } } }; selected = "preview-mac"; Draw(); Notify("界面预览 · 示例设备，不代表真实连接");
       await Dispatcher.InvokeAsync(delegate { UpdateLayout(); }, DispatcherPriority.Render);
       SavePreview((FrameworkElement)Content, "native-preview.png");
       controlledTitle.Text = "正在被控制\nPixel 9（界面示例）正在操作或查看本机"; controlledBanner.Visibility = Visibility.Visible;
@@ -891,7 +977,7 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
       reopened.ExpandForTest();await reopened.WaitSidebarForTest();reopened.Close();
       var expandedAgain=new RemoteWindow(this,new Device{Id="preview-phone",Name="示例手机",Platform="android",Width=720,Height=1600});expandedAgain.Show();await Dispatcher.InvokeAsync(delegate{expandedAgain.UpdateLayout();},DispatcherPriority.Loaded);if(expandedAgain.SidebarCollapsed)throw new Exception("Saved expanded state must override the initial default");expandedAgain.VerifyFooter();expandedAgain.Close();await EdgeGlow.Verify();
       if(WindowSize.RemoteFile(DataDir,"phone/a")==WindowSize.RemoteFile(DataDir,"phone/b"))throw new Exception("Remote geometry must be isolated by device identity");
-      ShowDevices();devices.Clear();devices.Add(new Device{Id=Json.Text(State,"id"),Name="工作电脑",Platform="win32",Local=true,Online=true});devices.Add(new Device{Id="preview-phone",Name="小米 15 · 界面示例",Platform="android",Online=true});edges.Clear();edges["right"]="preview-phone";var phoneTile=devices.First(d=>d.Platform=="android");phoneTile.Transport="USB + 局域网";var savedActive=Json.Get(State,"active");Json.Map(State)["active"]=phoneTile.Id;Draw();await Task.Delay(350);await Dispatcher.InvokeAsync(delegate{UpdateLayout();},DispatcherPriority.Render);
+      ShowDevices();devices.Clear();devices.Add(new Device{Id=Json.Text(State,"id"),Name="工作电脑",Platform="win32",Local=true,Online=true});devices.Add(new Device{Id="preview-phone",Name="小米 15 · 界面示例",Platform="android",Online=true});edges.Clear();Json.Map(State)["layout"]=new Dictionary<string,object>{{"positions",new Dictionary<string,object>{{Json.Text(State,"id"),new Dictionary<string,object>{{"x",0},{"y",0}}},{"preview-phone",new Dictionary<string,object>{{"x",1},{"y",0}}}}}};var phoneTile=devices.First(d=>d.Platform=="android");phoneTile.Transport="USB + 局域网";var savedActive=Json.Get(State,"active");Json.Map(State)["active"]=phoneTile.Id;Draw();await Task.Delay(350);await Dispatcher.InvokeAsync(delegate{UpdateLayout();},DispatcherPriority.Render);
       if(Status(phoneTile)!="● 融合控制中" || canvas.Children.OfType<System.Windows.Shapes.Line>().Count(l=>l.StrokeDashArray.Count>0)!=2)throw new Exception("Active USB + LAN must show fusion state and twin transfer animations");
       var androidMenu=BuildMenu(phoneTile);if(!androidMenu.Items.OfType<MenuItem>().Any(i=>Convert.ToString(i.Header)=="管理此设备对本机的权限") || !androidMenu.Items.OfType<MenuItem>().Any(i=>Convert.ToString(i.Header)=="撤销此设备的本机权限"))throw new Exception("Android members need the same persistent local permission controls as desktops");
       SavePreview((FrameworkElement)Content,"native-fusion-layout.png");Json.Map(State)["active"]=savedActive;phoneTile.Transport="";Draw();
@@ -900,7 +986,7 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
       await Dispatcher.InvokeAsync(delegate { consentWindow.UpdateLayout(); }, DispatcherPriority.Render);
       SavePreview((FrameworkElement)consentWindow.Content, "native-consent.png"); consentWindow.Close();
       State = realState;
-      File.WriteAllText(System.IO.Path.Combine(DataDir, "passed.txt"), "Native WPF: settings IPC, pairing QR decode, direction/swap, offline menu, rounded menu/submenu, embedded settings navigation/draft/save, Gaussian popup background, dynamic code + skeleton/reveal/hide QR + inline join validation, compact window, maximize/restore, tray hide/restore, controlled banner above identity, embedded ADB transport states and explicit selection, compact Android viewer with locked aspect at all eight resize edges and persistent bottom navigation, four-line metrics, sidebar folding and per-device window restore, staging cards, file share chooser and shell share inbox passed. Preview uses labeled fixtures."); await Quit(0);
+      File.WriteAllText(System.IO.Path.Combine(DataDir, "passed.txt"), "Native WPF: settings IPC, pairing QR decode, global chain/branch grid, offline menu, rounded menu/submenu, embedded settings navigation/draft/save, Gaussian popup background, dynamic code + skeleton/reveal/hide QR + inline join validation, compact window, maximize/restore, tray hide/restore, controlled banner above identity, embedded ADB transport states and explicit selection, compact Android viewer with locked aspect at all eight resize edges and persistent bottom navigation, four-line metrics, sidebar folding and per-device window restore, staging cards, file share chooser and shell share inbox passed. Preview uses labeled fixtures."); await Quit(0);
     }
     void SavePreview(FrameworkElement target, string name) {
       int width = Math.Max(1, (int)Math.Ceiling(target.ActualWidth)), height = Math.Max(1, (int)Math.Ceiling(target.ActualHeight));

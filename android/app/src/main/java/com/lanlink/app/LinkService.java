@@ -37,7 +37,9 @@ public class LinkService extends Service implements Wire.Listener {
   private final ScheduledExecutorService clock = Executors.newScheduledThreadPool(2);
   private final Handler main = new Handler(Looper.getMainLooper());
   private SharedPreferences prefs;
+  BackgroundRecovery backgroundRecovery;
   GroupKeys group;
+  final GroupLayout groupLayout = new GroupLayout(this);
   private EdgeGlow edgeGlow;
   private final Set<String> pausedPeers = ConcurrentHashMap.newKeySet();
   public volatile String endedPeer;
@@ -447,6 +449,7 @@ public class LinkService extends Service implements Wire.Listener {
     captureHandler = new Handler(captureThread.getLooper());
     instance = this;
     prefs = getSharedPreferences("identity", MODE_PRIVATE);
+    backgroundRecovery = new BackgroundRecovery(this);
     pausedPeers.addAll(prefs.getStringSet("paused_peers", new HashSet<>()));
     consent = new DeviceConsent(prefs.getString("device_grants", "{}"));
     deviceId = prefs.getString("id", UUID.randomUUID().toString());
@@ -535,6 +538,7 @@ public class LinkService extends Service implements Wire.Listener {
       return START_NOT_STICKY;
     }
     if (i != null && "stop".equals(i.getAction())) {
+      backgroundRecovery.stopped();
       stopSelf();
       return START_NOT_STICKY;
     }
@@ -544,6 +548,10 @@ public class LinkService extends Service implements Wire.Listener {
   public JSONObject capabilities() {
     android.util.DisplayMetrics m = displayMetrics();
     return obj(
+        "backgroundSessionId", backgroundRecovery == null ? "" : backgroundRecovery.sessionId,
+        "backgroundPolicy", backgroundRecovery == null ? JSONObject.NULL : backgroundRecovery.policy(),
+        "backgroundRecovery", backgroundRecovery == null || backgroundRecovery.recovery() == null
+            ? JSONObject.NULL : backgroundRecovery.recovery(),
         "staging",1,"quic",quic.enabled?1:0,"bulk",1,"rtcVideo",1,"dualLink",
         true,
         "controlPrepare",
@@ -564,6 +572,7 @@ public class LinkService extends Service implements Wire.Listener {
         m.widthPixels,
         "height",
         m.heightPixels,
+        "motionV2", quic!=null&&quic.nativeEngine!=null&&quic.nativeEngine.binaryMotion?2:0,
         "inputMode",
         shell != null && shell.ready() ? "adb/root" : "unavailable",
         "inputWarning",
@@ -583,7 +592,7 @@ public class LinkService extends Service implements Wire.Listener {
         caps.put("memberKey", group.own().getString("key"));
       } catch (Exception ignored) {
       }
-    return obj("id", deviceId, "name", name, "capabilities", caps);
+    return groupLayout.attach(obj("id", deviceId, "name", name, "capabilities", caps));
   }
 
   public JSONObject knownDevices() {
@@ -693,6 +702,7 @@ public class LinkService extends Service implements Wire.Listener {
     try {
       server = new ServerSocket(45831);
       group = new GroupKeys(this, prefs);
+      groupLayout.reconcile();
       JSONObject pendingJoin = new JSONObject(prefs.getString("pending_group_join", "{}"));
       if (group.isDissolved()
           || group.dissolvedGroups().has(pendingJoin.optString("previousGroup"))) {
@@ -832,6 +842,7 @@ public class LinkService extends Service implements Wire.Listener {
   }
 
   public synchronized void ready(Wire p) {
+    if (!p.matchesGroupToken(token)) { p.close(); return; }
     if (group != null && group.excluded(p.id)) {
       p.close();
       return;
@@ -847,6 +858,7 @@ public class LinkService extends Service implements Wire.Listener {
         return;
       }
     } else peers.put(p.id, p);
+    backgroundRecovery.connected(true);
     status = "已连接同组设备";
     try{groupClipboard.inventory(p);JSONObject current=groupClipboard.latest();if(current!=null && canShareClipboard(p.id) && deviceId.equals(current.optString("source")))p.send(obj("type","clipboard","offer",current));}catch(Exception ignored){}
 
@@ -873,6 +885,7 @@ public class LinkService extends Service implements Wire.Listener {
     synchronized (this) {
       removed = p.id != null && peers.remove(p.id, p);
       if (removed) {
+        if (backgroundRecovery != null) backgroundRecovery.connected(!peers.isEmpty());
         screenViewers.remove(p.id);
         endViewing(p.id);
         if (p.id.equals(outgoingPending)) outgoingCancelled = true;
@@ -897,7 +910,8 @@ public class LinkService extends Service implements Wire.Listener {
       inputJobs.execute(() -> {
         try {
           synchronized (LinkService.this) {
-            if (peers.get(p.id) == p && p.id.equals(owner)) shell.request(obj("method", "release"));
+            if (peers.get(p.id) == p && p.fastPath == null && p.id.equals(owner))
+              shell.request(obj("method", "release"));
           }
         } catch (Exception ignored) {}
       });
@@ -907,6 +921,7 @@ public class LinkService extends Service implements Wire.Listener {
   public void message(Wire p, JSONObject m) { message(p, m, p); }
 
   void message(Wire p, JSONObject m, Wire reply) {
+    if (p.id == null || peers.get(p.id) != p || !p.connected || !p.matchesGroupToken(token)) return;
     String type = m.optString("type");
     try {
       if(type.equals("edge-glow")){inboundEdge(p,m,false);return;}
@@ -936,12 +951,21 @@ public class LinkService extends Service implements Wire.Listener {
         group.merge(m);
         return;
       }
+      if (type.equals("layout-update") || type.equals("master-selection")) {
+        if (peers.get(p.id) != p || !p.connected) return;
+        if (type.equals("layout-update")) groupLayout.applyLayout(m.optJSONObject("layout"));
+        else groupLayout.applyMaster(m.optJSONObject("choice"));
+        return;
+      }
       if (type.equals("group-removed")) {
         join(Wire.token(), null);
         status = "本设备已移出组，需要重新配对";
         return;
       }
       if (type.equals("control-ended")) {
+        // Android only initiates manual viewing/touchpad sessions. A tagged
+        // desktop edge-session end cannot belong to those sessions.
+        if (m.has("session")) return;
         synchronized (this) {
           endedPeer = p.id;
           endedAt = System.currentTimeMillis();
@@ -974,20 +998,24 @@ public class LinkService extends Service implements Wire.Listener {
           group.publish();
         }
         // Consent is requested for an operation, never simply for joining the group.
+        groupLayout.receive(m);
         return;
       }
       if (type.equals("ping")) {
-        p.send(obj("type", "pong"));
+        if (peers.get(p.id) != p || !p.connected) return;
+        groupLayout.noteVersion(p, m);
+        groupLayout.receive(m);
+        p.send(groupLayout.heartbeat(p, "pong"));
         return;
       }
-      if (type.equals("pong")) return;
+      if (type.equals("pong")) { if (peers.get(p.id) == p && p.connected) { groupLayout.noteVersion(p, m); groupLayout.receive(m); } return; }
       if(type.equals("clipboard")){groupClipboard.receive(p,m.getJSONObject("offer"));return;}
       if(type.equals("clipboard-inventory")){groupClipboard.mergeInventory(p,m.optJSONArray("ids"));return;}
       if(type.equals("clipboard-record")){groupClipboard.record(p,m.getJSONObject("record"));return;}
       if (type.equals("request")) {
         String operation = m.optString("method");
         ExecutorService executor =
-            AuxLink.CONTROL.contains(operation)
+            (AuxLink.CONTROL.contains(operation) || operation.equals("prepare"))
                 ? inputJobs
                 : jobs;
         if (executor instanceof ThreadPoolExecutor
@@ -1031,7 +1059,8 @@ public class LinkService extends Service implements Wire.Listener {
     if (!allowed(k)) throw new IOException("安卓端未允许此功能：" + k);
   }
 
-  private synchronized void requireOwner(Wire p) throws Exception {
+  synchronized void requireOwner(Wire p) throws Exception {
+    groupLayout.requireMaster(p.id, p.id.equals(owner) && ownerPointer);
     requireInputPermission(p);
     if (!p.id.equals(owner) || ownerUntil < System.currentTimeMillis())
       throw new IOException("请先取得控制权");
@@ -1039,7 +1068,7 @@ public class LinkService extends Service implements Wire.Listener {
   }
 
   JSONObject handle(Wire p, String method, JSONObject a) throws Exception {
-    if (p.id == null || peers.get(p.id) != p) throw new IOException("设备连接已结束");
+    if (p.id == null || peers.get(p.id) != p || !p.matchesGroupToken(token)) throw new IOException("设备连接已结束");
     if (group != null && group.excluded(p.id)) throw new IOException("设备已移出组");
     if(method.equals("quicOpen"))return quic.offer(p);
     if(method.equals("stage-cancel"))return staging.remoteStopped(p,a.optString("id"),false,"");
@@ -1204,6 +1233,9 @@ public class LinkService extends Service implements Wire.Listener {
       case "acquire":
         synchronized (this) {
           requireIncomingDirection();
+          groupLayout.requireMaster(p.id, a.optBoolean("pointer", !a.optBoolean("screen")));
+          if (owner != null && !owner.equals(p.id) && ownerUntil > System.currentTimeMillis())
+            throw new IOException("CONTROL_CONFLICT: 本设备正在被另一台设备控制");
         }
         if (a.optBoolean("newSession") && pausedPeers.remove(p.id)) {
           // Ending a session blocks retries, but does not revoke the saved grant.
@@ -1214,6 +1246,7 @@ public class LinkService extends Service implements Wire.Listener {
         synchronized (this) {
           if (peers.get(p.id) != p) throw new IOException("设备连接已结束");
           requireIncomingDirection();
+          groupLayout.requireMaster(p.id, a.optBoolean("pointer", !a.optBoolean("screen")));
           if (owner != null && !owner.equals(p.id) && ownerUntil > System.currentTimeMillis())
             throw new IOException("CONTROL_CONFLICT: 本设备正在被另一台设备控制");
           boolean pointerMode = a.optBoolean("pointer", !a.optBoolean("screen"));
@@ -1353,6 +1386,14 @@ public class LinkService extends Service implements Wire.Listener {
     return f.get(8, TimeUnit.SECONDS);
   }
 
+  synchronized void motionInputs(Wire peer,java.util.List<JSONObject> inputs)throws Exception{
+    if(inputs.size()<2||!shell.supportsInputBatch()){for(JSONObject a:inputs)handle(peer,"input",a);return;}
+    requireOwner(peer);if(!shell.ready())throw new IOException("INPUT_RECOVERING: 输入助手正在恢复连接");
+    if(inputs.size()>64)throw new IOException("批量输入过多");org.json.JSONArray batch=new org.json.JSONArray();
+    for(JSONObject a:inputs){String kind=a.optString("kind");if(!kind.equals("move")&&!kind.equals("relative"))throw new IOException("无效批量输入");batch.put(a);}
+    try{shell.request(obj("method","inputBatch","inputs",batch,"pointer",ownerPointer));}
+    catch(Exception error){if(shell.lastInputError!=null)needPermission(peer,"input");throw error;}
+  }
   private synchronized void input(Wire peer, JSONObject a) throws Exception {
     requireOwner(peer);
     if (!shell.ready()) throw new IOException("INPUT_RECOVERING: 输入助手正在恢复连接");
@@ -1541,7 +1582,7 @@ public class LinkService extends Service implements Wire.Listener {
     try {
       destination.request("input", a);
     } catch (Exception error) {
-      if (target.equals(active)) releaseControl();
+      if (!QuicNative.isBusy(error) && target.equals(active)) releaseControl();
       throw error;
     }
   }
@@ -1556,6 +1597,7 @@ public class LinkService extends Service implements Wire.Listener {
     if(staging!=null)staging.poll();
     groupClipboard.poll();for(Wire peer:peers.values())try{groupClipboard.inventory(peer);}catch(Exception ignored){}
     if (!running) return;
+    if (backgroundRecovery != null) backgroundRecovery.sample(false);
     main.post(this::updateProjectionIdle);
     if(System.currentTimeMillis()-lastAccessPoll>3000){lastAccessPoll=System.currentTimeMillis();for(Wire p:peers.values())if(accessPolling.add(p.id))jobs.execute(()->{try{JSONObject report=p.request("permission-status",obj());if(peers.get(p.id)==p)peerAccess.put(p.id,report);}catch(Exception ignored){peerAccess.remove(p.id);}finally{accessPolling.remove(p.id);}});}
     String controller = controlledBy();
@@ -1580,7 +1622,7 @@ public class LinkService extends Service implements Wire.Listener {
       for (Wire p : peers.values())
         try {
           if (System.currentTimeMillis() - p.lastSeen > 10000) p.close();
-          else p.send(obj("type", "ping"));
+          else p.send(groupLayout.heartbeat(p, "ping"));
         } catch (Exception e) {
           p.close();
         }
@@ -1591,7 +1633,7 @@ public class LinkService extends Service implements Wire.Listener {
               try {
                 peer(id).request("keepControl", obj());
               } catch (Exception e) {
-                if (id.equals(active)) active = null;
+                if (!QuicNative.isBusy(e) && id.equals(active)) active = null;
               }
             });
       }
@@ -1970,6 +2012,8 @@ public class LinkService extends Service implements Wire.Listener {
   }
 
   public void groupChanged() {
+    peers.clear(); // Old-key traffic is no longer authorized while its update reply drains.
+    try { groupLayout.reconcile(); } catch (IOException error) { status = error.getMessage(); }
     if(staging!=null)try{staging.clearExports();}catch(Exception ignored){}
     quic.reset();
     closeVideoHosts();
@@ -2007,6 +2051,22 @@ public class LinkService extends Service implements Wire.Listener {
     return p == null ? null : p.info.optString("name", "已配对设备");
   }
 
+  void masterSelectionChanged() {
+    try { inputJobs.execute(() -> {
+      synchronized (LinkService.this) {
+        JSONObject selected = groupLayout.master();
+        if (selected == null || owner == null || !ownerPointer || owner.equals(selected.optString("id"))) return;
+        Wire previous = peers.get(owner); String session = ownerEdgeSession;
+        owner = null; ownerEdgeSession = null; releaseInput();
+        if (previous != null) try {
+          JSONObject message = obj("type", "control-ended");
+          if (session != null) message.put("session", session);
+          previous.send(message);
+        } catch (Exception ignored) {}
+      }
+    }); } catch (RejectedExecutionException ignored) {}
+  }
+
   public void stopInbound() {
     Set<String> ids = new HashSet<>();
     if (owner != null) ids.add(owner);
@@ -2030,6 +2090,7 @@ public class LinkService extends Service implements Wire.Listener {
   }
 
   public void onDestroy() {
+    if (backgroundRecovery != null) backgroundRecovery.stopped();
     if(staging!=null)staging.close();
     quic.close();
     bulk.close();

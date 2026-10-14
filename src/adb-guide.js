@@ -1,13 +1,25 @@
 import { randomUUID } from 'node:crypto';
 
 // Keep input local until setup has passed. Status polling is read-only; an
-// explicit connection/setup attempt may ask the phone for missing ADB consent.
+// explicit setup or a verified USB insertion may ask for missing ADB consent.
 export class AdbGuide {
   constructor(service) { this.service = service; this.notice = null; this.generation = 0; }
   async open(id) {
     const peer=this.service.getPeer(id);if(peer.info?.platform!=='android')throw Error('请选择安卓设备');
     if(this.notice && this.notice.id!==id)throw Error('请先关闭当前连接引导');
     this.notice ||= {id,name:peer.info.name,requestId:randomUUID(),setupOnly:true};await this.status(this.notice.requestId);this.service.emit('change');return {};
+  }
+  async usbDetected({ id, name, serial, usbUnauthorized, report }) {
+    if (this.notice) return false;
+    const engine = report?.engine;
+    const notice = this.notice = { id, name, serial, trigger: 'usb', requestId: randomUUID(), setupOnly: true,
+      usbUnauthorized, revoked: engine?.revoked === true && !engine.root,
+      unauthorized: engine?.authorized === false && !engine.root,
+      message: usbUnauthorized ? '已检测到本组手机通过数据线连接，请在手机上允许此电脑进行 USB 调试。' : '已检测到本组手机通过数据线连接，请完成 ADB 授权。' };
+    const peer = this.service.peers.get(id);
+    if (peer && !peer.closed) await this.promptRevoked(peer, notice);
+    if (this.notice === notice) this.service.emit('change');
+    return true;
   }
   async check(peer, intent) {
     if (peer.info?.platform !== 'android') return;
@@ -38,15 +50,22 @@ export class AdbGuide {
   async status(requestId) {
     const notice = this.notice;
     if (!notice || notice.requestId !== requestId) return { ended: true };
+    if (notice.trigger === 'usb') {
+      const device = await this.service.adb.usbDevice(notice.serial);
+      if (this.notice !== notice) return { ended: true };
+      notice.usbUnauthorized = device?.status === 'unauthorized';
+      if (!device || device.status !== 'device' && !notice.usbUnauthorized) return { ready: false, message: '手机的数据线连接尚未就绪，请重新连接并允许 USB 调试。' };
+    }
     const peer = this.service.peers.get(notice.id);
-    if (!peer || peer.closed) return { ready: false, message: '手机暂时离线，请打开手机上的 LanLink，并保持与电脑在同一网络。' };
+    if (!peer || peer.closed) return { ready: false, usbUnauthorized: notice.usbUnauthorized, message: notice.usbUnauthorized ? '请解锁手机，允许 USB 调试并勾选始终允许此电脑，然后打开手机上的 LanLink。' : '手机暂时离线，请打开手机上的 LanLink，并保持与电脑在同一网络。' };
     const report = await peer.request('permission-status', {}, 4000);
     if (this.notice !== notice || this.service.peers.get(notice.id) !== peer) return { ended: true };
     notice.revoked=report?.engine?.revoked===true && !report?.engine?.root;
     notice.unauthorized=report?.engine?.authorized===false && !report?.engine?.root;
     await this.promptRevoked(peer,notice);
-    const ready = report?.engine?.ready === true && !notice.revoked && !notice.unauthorized;
-    return { ready, revoked:notice.revoked, unauthorized:notice.unauthorized, message: ready ? '手机助手已就绪，本组设备可直接使用，无需重新连接数据线。' : notice.revoked?'请在手机上允许 ADB 授权，允许后可继续连接':report?.engine?.root ? 'Root 助手正在准备，请在手机上检查 Root 授权。' : notice.unauthorized?'手机尚未完成 ADB 授权。请连接数据线，在手机允许系统 USB 调试后点击连接。':report?.engine?.message || '已保存授权，等待已信任的调试连接恢复手机助手。' };
+    const ready = report?.engine?.ready === true && !notice.revoked && !notice.unauthorized && !notice.usbUnauthorized;
+    return { ready, revoked:notice.revoked, unauthorized:notice.unauthorized, usbUnauthorized: notice.usbUnauthorized,
+      message: ready ? '手机助手已就绪，本组设备可直接使用，无需重新连接数据线。' : notice.usbUnauthorized ? '请解锁手机，允许 USB 调试并勾选始终允许此电脑。' : notice.revoked?'请在手机上允许 ADB 授权，允许后可继续连接':report?.engine?.root ? 'Root 助手正在准备，请在手机上检查 Root 授权。' : notice.unauthorized?'手机尚未完成 ADB 授权。请连接数据线，在手机允许系统 USB 调试后点击连接。':report?.engine?.message || '已保存授权，等待已信任的调试连接恢复手机助手。' };
   }
   async complete(requestId) {
     const notice = this.notice;

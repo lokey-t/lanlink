@@ -30,7 +30,7 @@ final class GroupConsentProbe {
           .putBoolean("root_mode", false).putBoolean("adb_revoked", false).commit();
       service.consent = new DeviceConsent("{}");
       for (String platform : new String[] {"darwin", "win32", "android", "android"}) {
-        Wire peer = new Wire(new Socket(), Wire.obj(), new byte[32], service);
+        Wire peer = new Wire(new Socket(), Wire.obj(), Wire.parseToken(service.token), service);
         peer.id = UUID.randomUUID().toString();
         peer.info = Wire.obj("name", "组内测试 " + platform, "platform", platform);
         peers.add(peer);
@@ -52,7 +52,7 @@ final class GroupConsentProbe {
             (service.shell.healthy() && service.shell.lastInputError == null && service.adbAuthorized()), "engine readiness remains dependent on live system helper");
       }
       Wire a = peers.get(0), b = peers.get(1);
-      Wire replacement = new Wire(new Socket(), Wire.obj(), new byte[32], service);
+      Wire replacement = new Wire(new Socket(), Wire.obj(), Wire.parseToken(service.token), service);
       replacement.id = a.id; replacement.info = a.info;
       service.peers.put(a.id, replacement);
       boolean staleDenied = false;

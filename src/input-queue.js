@@ -1,7 +1,7 @@
 import {performance} from 'node:perf_hooks';
 const motion = (method, args) => method === 'input' && ['move', 'relative'].includes(args.kind);
 const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
-export const MOTION_INTERVAL = { min: 8, max: 24 };
+export const MOTION_INTERVAL = { min: 4, max: 24 };
 // These lightweight operations reflect input responsiveness. File pacing,
 // encoder startup and text insertion are application work, not network RTT.
 export const motionRttSample = (method, args = {}) => method === 'linkPing' || method === 'keepControl' || method === 'input' && ['move', 'relative', 'button', 'key', 'wheel'].includes(args.kind);
@@ -39,7 +39,7 @@ export class AdaptiveMotion {
     const backlog = now - this.queueAt <= 500 ? this.queued : 0;
     const delay = now - this.delayAt <= 500 ? this.delay : 0;
     const target = backlog >= 65536 || delay >= 80 ? 24 : backlog >= 16384 ? 20
-      : backlog >= 4096 || excess >= 40 || delay >= 35 ? 16 : excess >= 15 || delay >= 15 ? 12 : 8;
+      : backlog >= 4096 || excess >= 40 || delay >= 35 ? 16 : excess >= 15 || delay >= 15 ? 12 : MOTION_INTERVAL.min;
     if (target > this.interval) {
       this.good = 0; this.recoverSince = null;
       if (now - this.changedAt >= 120) { this.interval = backlog >= 131072 ? MOTION_INTERVAL.max : Math.min(target, this.interval + 4); this.changedAt = now; }
@@ -92,17 +92,26 @@ export class InputQueue {
           if (wait <= 0) break;
           await new Promise(resolve => { const timer = setTimeout(done, wait); const self = this; function done() { clearTimeout(timer); self.wake = null; resolve(); } this.wake = done; });
         }
+        // Only movement may overlap a reliable input acknowledgement. A second
+        // button/key/session boundary still waits, so reliable inputs cannot reorder.
+        if(this.inflight&&(!motion(job.method,job.args)||!this.options.overlap?.('input',job.args))){await this.inflight;continue;}
         job = this.queue.shift();
         if (job.samples.length) {
           const fresh = job.samples.filter(sample => this.now() - sample.at <= 120), limit = job.args.kind === 'relative' ? 1000 : 32000;
           job.args = {...job.args, dx: clamp(fresh.reduce((sum, s) => sum + s.dx, 0), -limit, limit), dy: clamp(fresh.reduce((sum, s) => sum + s.dy, 0), -limit, limit)};
         }
         const start = this.now(); if (motion(job.method, job.args)) this.lastMotionAt = start;
-        try {
-          const result = await this.send(job.method, job.args, job.timeout);
-          if (this.pacing && (!this.options.measure || this.options.measure(job.method, job.args))) this.feedback({rttMs: this.now() - start});
-          for (const waiter of job.waiters) waiter.resolve(result);
-        } catch (error) { for (const waiter of job.waiters) waiter.reject(error); }
+        const complete=async()=>{
+          try {
+            const result=await this.send(job.method,job.args,job.timeout);
+            if(this.pacing&&(!this.options.measure||this.options.measure(job.method,job.args)))this.feedback({rttMs:this.now()-start});
+            for(const waiter of job.waiters)waiter.resolve(result);
+          }catch(error){for(const waiter of job.waiters)waiter.reject(error);}
+        };
+        if(this.options.overlap?.(job.method,job.args)&&!motion(job.method,job.args)){
+          const pending=complete();this.inflight=pending;
+          pending.finally(()=>{if(this.inflight===pending)this.inflight=null;});
+        }else await complete();
       }
     } finally { this.running = false; }
   }

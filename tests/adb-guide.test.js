@@ -6,6 +6,7 @@ import { Service } from '../src/service.js';
 
 function fixture(engine = {ready:false}) {
   const service = new EventEmitter(), calls=[];
+  service.config={};service.group={data:{id:'group'}};service.entryPosition=Service.prototype.entryPosition;
   const peer={info:{platform:'android',name:'Phone'},request:async method=>{calls.push(method);return {engine};}};
   service.peers=new Map([['phone',peer]]);service.getPeer=id=>{if(!service.peers.has(id))throw Error('offline');return service.peers.get(id);};
   let leave=0; service.edge={waitForLeave:()=>leave++};

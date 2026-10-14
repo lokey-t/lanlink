@@ -31,6 +31,21 @@ function sample(x,y) {
   for(let j=0;j<2;j++)for(let i=0;i<2;i++){const k=(Math.max(0,Math.min(source.height-1,iy+j))*source.width+Math.max(0,Math.min(source.width-1,ix+i)))*4,weight=(i?fx:1-fx)*(j?fy:1-fy),a=source.pixels[k+3]/255;for(let c=0;c<3;c++)rgba[c]+=source.pixels[k+c]*a*weight;rgba[3]+=a*weight;}
   if(rgba[3])for(let c=0;c<3;c++)rgba[c]/=rgba[3];return rgba;
 }
+// Explicit wave strokes stay legible at menu-bar sizes, independent of the
+// pale artwork's saturation. Coordinates follow the approved upper/lower arcs.
+const menuWaves = [[.22,.20,.5,.01,.78,.20],[.33,.27,.5,.12,.67,.27],
+                   [.33,.77,.5,.88,.67,.77],[.22,.82,.5,1,.78,.82]];
+function menuWave(x,y) {
+  return menuWaves.some(([ax,ay,cx,cy,bx,by]) => {
+    for(let i=0;i<32;i++) {
+      const point=t=>[(1-t)*(1-t)*ax+2*(1-t)*t*cx+t*t*bx,(1-t)*(1-t)*ay+2*(1-t)*t*cy+t*t*by];
+      const [px,py]=point(i/32),[qx,qy]=point((i+1)/32),dx=qx-px,dy=qy-py;
+      const t=Math.max(0,Math.min(1,((x-px)*dx+(y-py)*dy)/(dx*dx+dy*dy)));
+      if(Math.hypot(x-px-t*dx,y-py-t*dy)<=.023)return true;
+    }
+    return false;
+  });
+}
 function render(size,mode='color') {
   const output=Buffer.alloc(size*size*4),ss=size<=128?8:size<=512?3:2;
   for(let y=0;y<size;y++)for(let x=0;x<size;x++){
@@ -41,9 +56,10 @@ function render(size,mode='color') {
       if(Math.hypot(Math.max(qx,0),Math.max(qy,0))+Math.min(Math.max(qx,qy),0)>tile.radius)continue;
       const color=sample(tile.x+u*tile.size,tile.y+v*tile.size);
       if(mode!=='color'){
-        // Small monochrome system glyphs use the device/cursor silhouette, omitting faint waves.
+        // Extract the device/cursor silhouette; the menu bar adds readable wireless arcs.
         const max=Math.max(...color.slice(0,3)),min=Math.min(...color.slice(0,3));
         color[3]*=Math.max(0,Math.min(1,((max-min)/Math.max(1,max)-.3)/.12));
+        if(mode==='menu' && menuWave((x+(sx+.5)/ss)/size,(y+(sy+.5)/ss)/size))color[3]=1;
         const shade=mode==='white'?255:0;color[0]=color[1]=color[2]=shade;
       }
       for(let c=0;c<3;c++)accum[c]+=color[c]*color[3];accum[3]+=color[3];
@@ -58,7 +74,7 @@ const sizes=[16,24,32,48,64,128,256],head=Buffer.alloc(6+16*sizes.length);head.w
 for(let i=0;i<sizes.length;i++){const size=sizes[i],b=images.get(size),k=6+16*i;head[k]=head[k+1]=size===256?0:size;head.writeUInt16LE(1,k+4);head.writeUInt16LE(32,k+6);head.writeUInt32LE(b.length,k+8);head.writeUInt32LE(offset,k+12);offset+=b.length;}
 await writeFile(`${out}/LanLink.ico`,Buffer.concat([head,...sizes.map(s=>images.get(s))]));
 const icns=[];for(const [type,size]of [['icp4',16],['icp5',32],['icp6',64],['ic07',128],['ic08',256],['ic09',512],['ic10',1024],['ic11',32],['ic12',64],['ic13',256],['ic14',512]]){const h=Buffer.alloc(8);h.write(type);h.writeUInt32BE(8+images.get(size).length,4);icns.push(h,images.get(size));}const ih=Buffer.alloc(8);ih.write('icns');ih.writeUInt32BE(8+icns.reduce((s,b)=>s+b.length,0),4);await writeFile(`${out}/LanLink.icns`,Buffer.concat([ih,...icns]));
-for(const size of [18,36])await writeFile(`${out}/MenuBarTemplate${size===36?'@2x':''}.png`,png(size,size,render(size,'black')));
+for(const size of [18,36])await writeFile(`${out}/MenuBarTemplate${size===36?'@2x':''}.png`,png(size,size,render(size,'menu')));
 await mkdir(`${res}/drawable-nodpi`,{recursive:true});
 await writeFile(`${res}/drawable-nodpi/lanlink_artwork.png`,images.get(1024));
 await writeFile(`${res}/drawable-nodpi/lanlink_monochrome.png`,png(432,432,render(432,'white')));

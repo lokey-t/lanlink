@@ -34,6 +34,16 @@ test('QUIC manager uses Datagram for movement and keeps permission checks and re
     for(let i=0;i<8;i++)await pa.lanRequest('input',{kind:'move',x:.5,y:1,dx:0,dy:300});
     await pa.lanRequest('input',{kind:'button',button:0,down:true}); // Recovers final missing packets.
     const moves=calls.slice(first,-1);assert.ok(moves.every(m=>m.kind==='move'&&m.y===1));assert.equal(moves.reduce((sum,m)=>sum+m.dy,0),2400);
+    const connection=pa.quicConn,beforeBusy=calls.length;
+    a.quic.native.call=async(method,args,...rest)=>{
+      if(method==='datagram')throw Object.assign(Error('local queue is busy'),{code:'QUIC_BUSY'});
+      return originalCall(method,args,...rest);
+    };
+    await pa.lanRequest('input',{kind:'move',x:.5,y:1,dx:0,dy:15});
+    assert.equal(pa.quicConn,connection,'local FFI pressure must not tear down an authenticated peer');
+    await pa.lanRequest('input',{kind:'button',button:0,down:false});
+    assert.deepEqual(calls.slice(beforeBusy),[{kind:'move',x:.5,y:1,dx:0,dy:15},{kind:'button',button:0,down:false}],'the reliable click recovers the latest motion exactly once');
+    a.quic.native.call=originalCall;
     const beforeDenied=calls.length;
     b.denied=true;await pa.lanRequest('input',{kind:'relative',dx:9,dy:1});await assert.rejects(pa.lanRequest('input',{kind:'button',button:0,down:false}),/未授权/);assert.equal(calls.length,beforeDenied);
     await a.quic.reset();assert.equal(pa.quicConn,0);assert.equal(a.quic.connections.size,0);

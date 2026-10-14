@@ -78,3 +78,18 @@ for(const transport of ['tcp','auxiliary','quic']) {
     }
   });
 }
+
+test('local QUIC admission pressure delays renewal without ending the lease; a real failure still ends it',async t=>{
+  const {a,b,peer}=await pair(t,'tcp');await a.switchTo(b.config.id,'right',false);
+  const request=peer.request;let pressure=true;
+  peer.request=(method,...args)=>method==='keepControl'&&pressure
+    ?Promise.reject(Object.assign(Error('QUIC 通道繁忙，请稍后重试'),{code:'QUIC_BUSY'}))
+    :request(method,...args);
+  const releases=b.native.calls.filter(call=>call.method==='release').length;
+  await a.tick();assert.equal(a.active,b.config.id);assert.equal(b.owner.id,a.config.id);
+  assert.equal(b.native.calls.filter(call=>call.method==='release').length,releases);
+  pressure=false;await a.tick();
+  assert.ok(b.native.calls.some(call=>call.method==='heartbeat'));
+  peer.request=(method,...args)=>method==='keepControl'?Promise.reject(Error('连接已断开')):request(method,...args);
+  await a.tick();assert.equal(a.active,null);assert.equal(b.owner,null);
+});

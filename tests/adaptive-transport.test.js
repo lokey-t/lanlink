@@ -11,18 +11,18 @@ import {VideoHost} from '../src/video.js';
 test('stable high RTT without backlog does not add mouse pacing latency', () => {
   for (const rttMs of [10, 150, 200, 600]) {
     let now=0;const pacing=new AdaptiveMotion(()=>now);
-    for(let i=0;i<50;i++){now+=100;pacing.feedback({rttMs,queued:0});assert.equal(pacing.interval,8);}
+    for(let i=0;i<50;i++){now+=100;pacing.feedback({rttMs,queued:0});assert.equal(pacing.interval,4);}
   }
 });
 
-test('mouse congestion is bounded to 24ms and continuous clean Datagram feedback restores 8ms within one second', () => {
+test('mouse congestion is bounded to 24ms and continuous clean Datagram feedback restores 4ms within two seconds', () => {
   let now=0;const slow=new AdaptiveMotion(()=>now),fast=new AdaptiveMotion(()=>now);
-  slow.feedback({rttMs:10,queued:131072});assert.equal(slow.interval,24);assert.equal(fast.interval,8);
+  slow.feedback({rttMs:10,queued:131072});assert.equal(slow.interval,24);assert.equal(fast.interval,4);
   slow.feedback({rttMs:NaN,queued:0});assert.equal(slow.interval,24);
-  for(let i=0;i<64;i++){now+=16;slow.feedback({queued:0});}
-  assert.equal(slow.interval,8,'healthy movements must not keep resetting recovery');
+  for(let i=0;i<100;i++){now+=16;slow.feedback({queued:0});}
+  assert.equal(slow.interval,4,'healthy movements must not keep resetting recovery');
+  now+=120;slow.feedback({rttMs:250});assert.equal(slow.interval,8);
   now+=120;slow.feedback({rttMs:250});assert.equal(slow.interval,12);
-  now+=120;slow.feedback({rttMs:250});assert.equal(slow.interval,16);
   for(let i=0;i<20;i++){now+=120;slow.feedback({rttMs:1000});assert.ok(slow.interval<=16,'RTT alone must not invoke the severe backlog limit');}
 });
 
@@ -32,13 +32,13 @@ test('partial and invalid feedback cannot hide fresh queue pressure; stale sampl
   for(let i=0;i<4;i++){now+=100;pacing.feedback({rttMs:10});assert.equal(pacing.interval,24);}
   pacing.feedback({});pacing.feedback({queued:-1});pacing.feedback({delayMs:Infinity});assert.equal(pacing.interval,24);
   for(let i=0;i<25;i++){now+=100;pacing.feedback({rttMs:10});}
-  assert.equal(pacing.interval,8);
+  assert.equal(pacing.interval,4);
 });
 
 test('a stable slower route replaces the old RTT baseline instead of throttling the peer forever', () => {
   let now=0;const pacing=new AdaptiveMotion(()=>now);pacing.feedback({rttMs:8});
   for(let i=0;i<120;i++){now+=100;pacing.feedback({rttMs:200,queued:0});}
-  assert.equal(pacing.baseRtt,200);assert.equal(pacing.interval,8);
+  assert.equal(pacing.baseRtt,200);assert.equal(pacing.interval,4);
   assert.ok(pacing.rttBuckets.length<=20,'RTT history remains bounded during continuous input');
 });
 
@@ -146,6 +146,9 @@ test('two viewers have independent bitrate controllers, source lifetimes and con
   const a={remote:{id:randomUUID()},quicConn:1},b={remote:{id:randomUUID()},quicConn:2};
   const first=await host.open(a,{quic:1,h264:true}),second=await host.open(b,{quic:1,h264:true});
   const slow=host.sessions.get(first.id),fast=host.sessions.get(second.id);
+  // Bitrate restarts apply to running encoders. An encoder still waiting for
+  // its first image is deliberately kept alive to avoid a startup retry loop.
+  for(const source of sources)source.emit({codec:'h264',key:true,width:1,height:1,data:Buffer.from('first frame')});
   assert.equal(host.keep(a,first.id,{delayMs:200,rttMs:30}).bitrate,2600000);
   assert.equal(fast.adaptive.rate,4000000);assert.equal(sources[0].closed,true);assert.equal(sources[1].closed,false);
   assert.throws(()=>host.keep(b,first.id,{delayMs:0,rttMs:10}));

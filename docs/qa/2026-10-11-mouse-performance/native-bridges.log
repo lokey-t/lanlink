@@ -1,0 +1,13 @@
+✔ macOS bridge producers remain responsive under output backpressure and preserve reliable replies (1132.193167ms)
+ℹ MAC_BRIDGE_OUTPUT_OK enqueueMs=12.513333331298782 replies=100 cursorUpdates=2 motionBarriers=preserved
+✔ Windows bridge dispatch and workers run independently with ordered bounded output (359.964458ms)
+ℹ WINDOWS_BRIDGE_WORK_OK dispatchTurns=4 replies=100 cursorUpdates=2 motionBarriers=preserved
+✔ Windows native bridge compiles against shipping Framework 4.8 and C# 5 (368.750291ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1903.300208

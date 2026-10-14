@@ -113,3 +113,44 @@ test('higher-latency auxiliary route leaves LAN as the selected input path',asyn
   await a.links.candidate(b.config.id,'127.0.0.1');
   assert.equal(p.fastLink,undefined);assert.equal(a.links.status(p),'局域网');
 });
+
+test('a late heartbeat failure on a retired route cannot reset the replacement route',async t=>{
+  const {a,b,p}=await pair(t);await link(a,b,p);await a.switchTo(b.config.id,'right',false);
+  const old=p.fastLink, request=old.peer.request.bind(old.peer);
+  let fail, started;
+  const entered=new Promise(resolve=>started=resolve);
+  old.peer.request=(method,...args)=>method==='keepControl'?new Promise((_,reject)=>{fail=reject;started();}):request(method,...args);
+  const heartbeat=a.tick();
+  await entered;
+  // Both links still authenticate to the same primary, as during network/USB replacement.
+  a.links.forward=async(_serial,port)=>({port,close:async()=>{}});
+  await a.links.candidate(b.config.id,null,'fixture-usb');
+  const replacement=[...a.links.links].find(candidate=>candidate!==old);
+  assert.ok(replacement);
+  await replacement.peer.request('linkUse');a.links.activate(p,replacement);
+  await p.request('input',{kind:'key',code:'KeyA',down:true});
+  const releases=b.native.calls.filter(c=>c.method==='release').length;
+  fail(Error('设备响应超时'));await heartbeat;
+  assert.equal(p.fastLink,replacement);
+  assert.equal(a.active,b.config.id,'renewal confirms the new route before ending the active session');
+  assert.equal(b.native.calls.filter(c=>c.method==='release').length,releases,'old heartbeat must not release a newly held key');
+  await p.request('input',{kind:'key',code:'KeyA',down:false});
+});
+
+test('failed renewal on both the retired auxiliary and current LAN routes still ends control',async t=>{
+  const {a,b,p}=await pair(t);await link(a,b,p);await a.switchTo(b.config.id,'right',false);
+  let attempts=0;
+  const fast=p.fastLink.peer,auxRequest=fast.request.bind(fast),lanRequest=p.lanRequest;
+  const fail=()=>{attempts++;return Promise.reject(Error('设备响应超时'));};
+  fast.request=(method,...args)=>method==='keepControl'?fail():auxRequest(method,...args);
+  p.lanRequest=(method,...args)=>method==='keepControl'?fail():lanRequest(method,...args);
+  await a.tick();
+  assert.equal(attempts,2,'only one renewal retry is allowed across a route change');
+  assert.equal(a.active,null);assert.equal(b.owner,null);
+});
+
+test('local QUIC capacity pressure during comparison does not retire a healthy auxiliary route',async t=>{
+  const {a,b,p}=await pair(t);await link(a,b,p);const active=p.fastLink,request=p.lanRequest;
+  p.lanRequest=(method,...args)=>method==='linkPing'?Promise.reject(Object.assign(Error('busy'),{code:'QUIC_BUSY'})):request(method,...args);
+  await a.links.tick();assert.equal(p.fastLink,active);assert.equal(active.peer.closed,false);
+});

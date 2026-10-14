@@ -14,7 +14,7 @@ test('macOS saves Dock visibility offline and reopens its window through the men
   const root = await mkdtemp(path.join(os.tmpdir(), 'lanlink-dock-probe-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const executable = path.join(root, 'probe');
-  await run('xcrun', ['swiftc', '-swift-version', '5', '-D', 'LANLINK_MODEL_TEST', '-module-cache-path', path.join(root, 'modules'), '-framework', 'AppKit', '-framework', 'SwiftUI', '-framework', 'ServiceManagement', 'desktop/macos/LanLink.swift', 'desktop/macos/Localization.swift', 'desktop/macos/SingleInstance.swift', 'desktop/macos/Remote.swift', 'desktop/macos/AdbGuide.swift', 'desktop/macos/Staging.swift', 'tests/MacDockProbe.swift', '-o', executable], { timeout: 210000 });
+  await run('xcrun', ['swiftc', '-swift-version', '5', '-D', 'LANLINK_MODEL_TEST', '-module-cache-path', path.join(root, 'modules'), '-framework', 'AppKit', '-framework', 'SwiftUI', '-framework', 'ServiceManagement', 'desktop/macos/LanLink.swift', 'desktop/macos/SharedLayout.swift', 'desktop/macos/Localization.swift', 'desktop/macos/SingleInstance.swift', 'desktop/macos/Remote.swift', 'desktop/macos/AdbGuide.swift', 'desktop/macos/Staging.swift', 'tests/MacDockProbe.swift', '-o', executable], { timeout: 210000 });
   const result = await run(executable, [], { timeout: 25000 });
   assert.match(result.stdout, /MAC_DOCK_PROBE_OK/, result.stderr);
 });

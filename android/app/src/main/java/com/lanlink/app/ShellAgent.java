@@ -228,6 +228,10 @@ public final class ShellAgent {
     lease = SystemClock.uptimeMillis() + 3500;
     String method = m.getString("method");
     if (method.equals("heartbeat")) return;
+    if(method.equals("inputBatch")){
+      org.json.JSONArray inputs=m.getJSONArray("inputs");if(inputs.length()<1||inputs.length()>64)throw new IOException("批量输入过多");
+      for(int i=0;i<inputs.length();i++){JSONObject a=inputs.getJSONObject(i);String kind=a.getString("kind");if(!kind.equals("move")&&!kind.equals("relative"))throw new IOException("无效批量输入");handle(obj("method","input","args",a,"width",m.getInt("width"),"height",m.getInt("height"),"pointer",m.optBoolean("pointer",true)));}return;
+    }
     if (method.equals("startVideo")) {
       int port = m.getInt("port");
       String secret = m.getString("secret");
@@ -372,6 +376,12 @@ public final class ShellAgent {
     }
   }
 
+  static JSONObject compactInput(String line)throws Exception {
+    String[] p=line.split(" ");if(p.length!=9||!p[0].equals("@M")||!p[1].equals("m")&&!p[1].equals("r")&&!p[1].equals("a"))throw new IOException("鼠标消息无效");
+    JSONObject a=obj("kind",p[1].equals("r")?"relative":"move");String[] keys={"x","y","dx","dy"};
+    for(int i=0;i<4;i++){double n=Double.parseDouble(p[i+2]);if(!Double.isFinite(n))throw new IOException("鼠标数值无效");if(i<2||!p[1].equals("a"))a.put(keys[i],n);}
+    return obj("method","input","args",a,"width",Integer.parseInt(p[6]),"height",Integer.parseInt(p[7]),"pointer",p[8].equals("1"));
+  }
   public static void main(String[] args) throws Exception {
     if (args.length == 1 && args[0].equals("--check-hid")) {
       android.os.Looper.prepare();
@@ -461,7 +471,8 @@ public final class ShellAgent {
           JSONObject result;
           try {
             if (line.length() > 6000000) throw new IOException("消息过大");
-            JSONObject message = new JSONObject(line);
+            JSONObject message;
+            message=line.startsWith("@M ")?compactInput(line):new JSONObject(line);
             if (message.optString("method").equals("exit")) {
               release();
               System.exit(0);

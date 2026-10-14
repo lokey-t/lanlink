@@ -24,6 +24,7 @@ public class MainActivity extends Activity {
   private Ui ui;
   private LinearLayout root, layout, devices, detail, noticeBox, navigation;
   private TextView status, mode;
+  private GroupLayoutPanel groupLayoutPanel;
   private final Map<String, Switch> permissionSwitches = new HashMap<>();
   private final Set<Dialog> sheets = new HashSet<>();
   private String page = "devices", selected = "local", noticeSignature = "";
@@ -36,6 +37,8 @@ public class MainActivity extends Activity {
   private java.util.ArrayList<android.net.Uri> pendingShareUris;
   private Dialog consentDialog;
   private Dialog permissionDialog;
+  private Dialog backgroundGuide;
+  private TextView backgroundGuideStatus;
   private String permissionDialogKey = "";
   private String consentRequestId = "";
   private final Map<Button, java.util.function.BooleanSupplier> permissionRows = new HashMap<>();
@@ -96,6 +99,7 @@ public class MainActivity extends Activity {
             .replace("CONSENT_DENIED: ", "")
             .replace("PERMISSION_REQUIRED: ", "")
             .replace("CONTROL_CONFLICT: ", "")
+            .replace("MASTER_REQUIRED: ", "")
             .replace("CONTROL_ENDED: ", "")
             .replace("FALLBACK_CONFIRMATION: ", "");
   }
@@ -460,6 +464,7 @@ public class MainActivity extends Activity {
   }
 
   private void renderPage() {
+    groupLayoutPanel = null;
     permissionSwitches.clear();
     signature = "";
     noticeSignature = "";
@@ -474,7 +479,8 @@ public class MainActivity extends Activity {
     layout.setPadding(ui.dp(22), ui.dp(22), ui.dp(22), ui.dp(24));
     scroll.addView(layout);
     root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, page.equals("center")?3:1));
-    if (page.equals("permissions")) devicePermissionsPage();
+    if (page.equals("layout")) groupLayoutPage();
+    else if (page.equals("permissions")) devicePermissionsPage();
     else if (page.equals("settings")) settingsPage();
     else if(page.equals("center")||page.equals("clipboard")){page="center";controlCenter(scroll);}
     else devicesPage();
@@ -485,7 +491,7 @@ public class MainActivity extends Activity {
     navigation.setBackground(ui.shape(Ui.CARD, 26));
     navigation.setElevation(ui.dp(4));
     for (String tab : new String[] {"devices", "center", "settings"}) {
-      boolean on = tab.equals(page) || tab.equals("settings") && page.equals("permissions");
+      boolean on = tab.equals(page) || tab.equals("settings") && page.equals("permissions") || tab.equals("devices") && page.equals("layout");
       LinearLayout nav = ui.column();
       nav.setGravity(Gravity.CENTER);
       nav.setPadding(0, ui.dp(6), 0, ui.dp(6));
@@ -552,6 +558,10 @@ public class MainActivity extends Activity {
     detail = ui.column();
     layout.addView(detail);
     ui.gap(layout, 16);
+    LinearLayout arrangement = ui.card();
+    arrangement.addView(ui.item("monitor", Language.t("组内布局与主控"), Language.t("查看全组设备，选择主控电脑并调整屏幕位置"), null, () -> { page = "layout"; renderPage(); }));
+    layout.addView(arrangement);
+    ui.gap(layout, 16);
     LinearLayout local = ui.card();
     local.setBackground(ui.touch(Ui.MINT, 22));
     local.addView(
@@ -577,6 +587,15 @@ public class MainActivity extends Activity {
     ui.gap(layout, 24);
     layout.addView(ui.title(label, 14));
     ui.gap(layout, 12);
+  }
+
+  private void groupLayoutPage() {
+    layout.addView(ui.button(Language.t("返回设备"), false, () -> { page = "devices"; renderPage(); }));
+    ui.gap(layout, 16);
+    heading(Language.t("组内布局与主控"), Language.t("同一组的设备共享这份布局与主控选择"));
+    LinkService service = LinkService.instance;
+    if (service == null || service.group == null) { layout.addView(ui.text(Language.t("服务正在启动…"), 14, Ui.MUTED)); return; }
+    groupLayoutPanel = new GroupLayoutPanel(this, ui, service); layout.addView(groupLayoutPanel);
   }
 
   private void finishPairing() {
@@ -708,6 +727,8 @@ public class MainActivity extends Activity {
             }));
     ui.line(options);
     options.addView(ui.item("link", Language.t("使用说明"), Language.t("配对、授权与常见问题"), null, this::showUsage));
+    ui.line(options);
+    options.addView(ui.item("settings", Language.t("后台运行与自启动"), Language.t("设置省电白名单，减少后台连接中断"), null, () -> showBackgroundGuide(null)));
     layout.addView(options);
     clipboardSettingsCard();
     settingsFooter();
@@ -2017,6 +2038,7 @@ public class MainActivity extends Activity {
 
   private void update() {
     if (ui == null) return;
+    if (page.equals("layout") && groupLayoutPanel != null) groupLayoutPanel.refresh();
     if(page.equals("center")&&!centerSignature.equals(centerKey()))refreshCenter();
     LinkService s = LinkService.instance;
     if (page.equals("settings") && !settingsSignature.equals(settingsState(s))) {
@@ -2033,6 +2055,7 @@ public class MainActivity extends Activity {
             ? Language.t("输入助手已连接 · ADB / Root")
             : Language.t("输入助手待连接 · 可在电脑端恢复"));
     if (s != null) {
+      if (s.backgroundRecovery != null) s.backgroundRecovery.foreground(resumed);
       s.uiVisible = resumed && pairDialog == null && viewer == null;
       for (Map.Entry<String, Switch> e : permissionSwitches.entrySet()) {
         boolean on = s.allowed(e.getKey());
@@ -2055,6 +2078,68 @@ public class MainActivity extends Activity {
     }
     updateDevices(s);
     refreshPermissionNotice(s);
+    refreshBackgroundGuide(s);
+  }
+
+  private void refreshBackgroundGuide(LinkService service) {
+    if (service == null || service.backgroundRecovery == null) return;
+    if (backgroundGuideStatus != null) backgroundGuideStatus.setText(backgroundStatus());
+    if (!resumed || !alive || isFinishing() || !hasWindowFocus() || backgroundGuide != null
+        || permissionDialog != null || consentDialog != null || pairDialog != null || viewer != null
+        || !sheets.isEmpty() || service.consent.peek() != null
+        || service.permissionNotice.peek(System.currentTimeMillis()) != null) return;
+    JSONObject pending = service.backgroundRecovery.pendingGuide();
+    if (pending != null) showBackgroundGuide(pending);
+  }
+
+  private String backgroundStatus() {
+    JSONObject policy = BackgroundRecovery.readPolicy(this);
+    String battery = policy.optBoolean("batteryExempt")
+        ? Language.t("省电白名单：已加入") : Language.t("省电白名单：尚未加入");
+    String restricted = policy.optBoolean("backgroundRestricted")
+        ? Language.t("后台运行：系统当前有限制") : Language.t("后台运行：未检测到系统限制");
+    return battery + "\n" + restricted + "\n" + Language.t("自启动：请在系统设置中确认");
+  }
+
+  private void showBackgroundGuide(JSONObject recovery) {
+    if (!alive || isFinishing() || backgroundGuide != null) return;
+    LinkService service = LinkService.instance;
+    if (recovery == null && service != null && service.backgroundRecovery != null)
+      recovery = service.backgroundRecovery.pendingGuide();
+    LinearLayout box = sheet(Language.t("后台运行与自启动"));
+    Dialog dialog = (Dialog) box.getTag();
+    backgroundGuide = dialog;
+    dialog.setCanceledOnTouchOutside(false);
+    dialog.setOnDismissListener(ignored -> {
+      sheets.remove(dialog);
+      if (backgroundGuide == dialog) { backgroundGuide = null; backgroundGuideStatus = null; }
+    });
+    if (recovery != null) {
+      box.addView(ui.text(recovery.optString("reason").equals("restricted")
+          ? Language.t("上次后台连接中断，且系统限制了 LanLink 后台运行。这可能与本次中断有关，请检查下方设置。")
+          : Language.t("上次后台连接意外中断，系统未提供明确原因。可检查省电与自启动设置，减少后台被清理的机会。"), 14, Ui.INK));
+      ui.gap(box, 14);
+    }
+    box.addView(ui.title(Build.MANUFACTURER + " · " + Build.MODEL, 16));
+    ui.gap(box, 10);
+    box.addView(ui.text(BackgroundRecovery.guidance(), 14, Ui.MUTED));
+    ui.gap(box, 16);
+    backgroundGuideStatus = ui.text(backgroundStatus(), 13, Ui.MUTED);
+    box.addView(backgroundGuideStatus);
+    ui.gap(box, 16);
+    box.addView(ui.button(Language.t("设置省电白名单"), true, () -> {
+      if (!BackgroundRecovery.openBatterySettings(this)) toast(Language.t("无法打开系统设置，请手动进入 LanLink 应用信息进行设置"));
+    }));
+    ui.gap(box, 10);
+    box.addView(ui.button(Language.t("设置自启动与后台运行"), false, () -> {
+      if (!BackgroundRecovery.openStartupSettings(this)) toast(Language.t("无法打开系统设置，请手动进入 LanLink 应用信息进行设置"));
+    }));
+    ui.gap(box, 10);
+    box.addView(ui.text(Language.t("若打开的是应用信息页，请按上方机型说明进入电池或自启动选项。设置后返回即可；这些设置无法保证系统永不清理后台。"), 12, Ui.MUTED));
+    ui.gap(box, 14);
+    box.addView(ui.button(Language.t("完成 / 稍后设置"), false, dialog::dismiss));
+    if (recovery != null && service != null && service.backgroundRecovery != null)
+      service.backgroundRecovery.guideShown(recovery.optString("id"));
   }
 
   protected void onSaveInstanceState(Bundle state) {
@@ -2080,6 +2165,8 @@ public class MainActivity extends Activity {
     if (Language.refresh(this)) renderPage();
     if(awaitingEdgeGlowPermission){awaitingEdgeGlowPermission=false;if(Settings.canDrawOverlays(this))getSharedPreferences("identity",0).edit().putBoolean("edge_glow",true).apply();if("settings".equals(page))renderPage();}
     if (LinkService.instance != null){LinkService.instance.uiVisible=true;LinkService.instance.groupClipboard.poll();}
+    if (LinkService.instance != null && LinkService.instance.backgroundRecovery != null)
+      LinkService.instance.backgroundRecovery.sample(true);
     update();
   }
 
@@ -2382,19 +2469,21 @@ public class MainActivity extends Activity {
     JSONObject remoteCapabilities = p.info.optJSONObject("capabilities");
     fullscreen[0] = new RemoteFullscreen(this, session, outer, box, videoStage, videoBox,
         keyboard, touchpad, remoteCapabilities != null && remoteCapabilities.optBoolean("relativeInput"),
-        event -> link().remoteInput(p.id, event),
+        event -> {
+          LinkService service = link();
+          try { service.remoteInput(p.id, event); }
+          catch (Exception error) {
+            // A failed button release must also end the lease, even under temporary queue pressure.
+            if ("button".equals(event.optString("kind")) && !event.optBoolean("down")
+                && p.id.equals(service.active)) service.releaseControl();
+            throw error;
+          }
+        },
         error -> main.post(() -> {
           if (viewer == session) {
             frameStatus.setText(displayError(error.getMessage()));
             control.setText(Language.t("重新请求"));
           }
-        }),
-        (x,y) -> run(() -> {
-          LinkService service = link();
-          service.remoteInput(p.id, obj("kind", "move", "x", x, "y", y));
-          service.remoteInput(p.id, obj("kind", "button", "button", 0, "down", true));
-          try { service.remoteInput(p.id, obj("kind", "button", "button", 0, "down", false)); }
-          catch (Exception error) { service.releaseControl(); throw error; }
         }),
         () -> applyInsets(outer, session.getWindow()));
     frameStatus.addTextChangedListener(new android.text.TextWatcher() {
@@ -2591,6 +2680,8 @@ public class MainActivity extends Activity {
   protected void onPause() {
     super.onPause();
     resumed = false;
+    if (LinkService.instance != null && LinkService.instance.backgroundRecovery != null)
+      LinkService.instance.backgroundRecovery.foreground(false);
     if (LinkService.instance != null) LinkService.instance.uiVisible = false;
     if (pairDialog != null) pairDialog.dismiss();
     if (LinkService.instance != null) LinkService.instance.releaseControl();

@@ -17,9 +17,10 @@ export class NativeBridge extends EventEmitter {
     this.child.stdin.on('error', e => this.fail(e));
     this.child.stderr.on('data', d => this.emit('diagnostic', String(d).slice(0, 1000)));
     createInterface({ input: this.child.stdout }).on('line', line => {
-      try { const m = JSON.parse(line); if (m.replyTo) { const p = this.pending.get(m.replyTo); if (p) { clearTimeout(p.timer); this.pending.delete(m.replyTo); m.error ? p.reject(new Error(m.error)) : p.resolve(m.result); } } else this.emit('event', m); } catch {}
+      try { if(line.startsWith('@D ')){const parts=line.split(' '),dx=Number(parts[1]),dy=Number(parts[2]);if(parts.length===3&&Number.isFinite(dx)&&Number.isFinite(dy))this.emit('event',{type:'input',kind:'move',dx,dy});return;}const m = JSON.parse(line); if (m.replyTo) { const p = this.pending.get(m.replyTo); if (p) { clearTimeout(p.timer); this.pending.delete(m.replyTo); m.error ? p.reject(new Error(m.error)) : p.resolve(m.result); } } else this.emit('event', m); } catch {}
     });
     this.capabilities = await this.call('capabilities', {}, 25000);
+    if(this.capabilities.compactMotion===1)await this.call('compactMotion',{enabled:true});
   }
   fail(e) { for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(e); } this.pending.clear(); this.emit('diagnostic', e.message); }
   call(method, args = {}, timeout = 8000) {
@@ -29,7 +30,10 @@ export class NativeBridge extends EventEmitter {
       return Promise.resolve(method === 'clipboardGet' ? this.simulatedClip || { text: '', files: [] } : method === 'capabilities' ? { simulated: true } : {});
     }
     if (!this.child || this.child.exitCode !== null) return Promise.reject(new Error('原生模块不可用'));
-    return new Promise((resolve, reject) => { const id = String(++this.seq); const timer = setTimeout(() => { this.pending.delete(id); reject(new Error('原生操作超时')); }, timeout); this.pending.set(id, { resolve, reject, timer }); this.child.stdin.write(JSON.stringify({ id, method, args }) + '\n'); });
+    return new Promise((resolve, reject) => { const id = String(++this.seq); const timer = setTimeout(() => { this.pending.delete(id); reject(new Error('原生操作超时')); }, timeout); this.pending.set(id, { resolve, reject, timer }); const moving=method==='input'&&['move','relative'].includes(args.kind)&&this.capabilities.compactMotion===1;
+      const values=[args.x??0,args.y??0,args.dx??0,args.dy??0];
+      if(moving&&values.every(Number.isFinite))this.child.stdin.write(`@M ${id} ${args.kind==='move'?'m':'r'} ${values.join(' ')}\n`);
+      else this.child.stdin.write(JSON.stringify({id,method,args})+'\n'); });
   }
   close() { this.child?.kill(); this.fail(new Error('服务停止')); }
 }

@@ -26,27 +26,54 @@ final class VideoViewport extends FrameLayout {
   private boolean remoteGestures, pinchEnabled;
   private boolean keyboardGesture;
   private TapListener tapListener;
+  private DragListener dragListener;
   private Runnable keyboardListener;
+  private boolean dragging;
+  private float dragX, dragY;
+  private final TouchHaptics haptics = new TouchHaptics(this);
+  final Runnable hold = () -> {
+    if (!remoteGestures || !gestureActive || multi || moved || keyboardGesture
+        || dragging || dragListener == null) return;
+    float[] point = sourcePoint(downX, downY, false);
+    if (point == null) return;
+    dragging = true;
+    dragX = point[0];
+    dragY = point[1];
+    haptics.dragStart();
+    dragListener.start(point[0], point[1]);
+  };
 
   interface TapListener {
     /** Source-image coordinates, normalized to the inclusive range [0, 1]. */
     void tap(float x, float y);
   }
 
+  interface DragListener {
+    void start(float x, float y);
+    void move(float x, float y);
+    void end(float x, float y);
+  }
+
   /** Switching modes resets the transform; updating fullscreen options preserves it. */
   void setRemoteGestures(
       boolean enabled, boolean pinchEnabled, TapListener tap, Runnable keyboard) {
+    setRemoteGestures(enabled, pinchEnabled, tap, keyboard, null);
+  }
+
+  void setRemoteGestures(boolean enabled, boolean pinchEnabled, TapListener tap,
+      Runnable keyboard, DragListener drag) {
     boolean changed = remoteGestures != enabled;
     endGesture();
     lastTap = 0;
     remoteGestures = enabled;
     this.pinchEnabled = enabled && pinchEnabled;
     tapListener = enabled ? tap : null;
+    dragListener = enabled ? drag : null;
     keyboardListener = enabled ? keyboard : null;
     if (changed) reset();
     setContentDescription(
         enabled
-            ? "全屏远程画面，单指轻点点击，双指缩放移动，三指打开键盘"
+            ? "全屏远程画面，单指轻点点击，长按拖动鼠标，双指缩放移动，三指打开键盘"
             : interactive ? "远程画面，可拖动、双指缩放，双击复位" : "远程手机画面");
   }
 
@@ -86,6 +113,7 @@ final class VideoViewport extends FrameLayout {
   void fit(int width, int height) {
     if (width > 0 && height > 0) {
       if (sourceWidth != width || sourceHeight != height) {
+        endGesture();
         sourceWidth = width;
         sourceHeight = height;
         reset();
@@ -95,6 +123,7 @@ final class VideoViewport extends FrameLayout {
   }
 
   void reset() {
+    endGesture();
     zoom = 1;
     panX = panY = 0;
     apply();
@@ -103,6 +132,7 @@ final class VideoViewport extends FrameLayout {
   @Override
   protected void onSizeChanged(int w, int h, int oldW, int oldH) {
     super.onSizeChanged(w, h, oldW, oldH);
+    if (w != oldW || h != oldH) endGesture();
     apply();
   }
 
@@ -152,6 +182,7 @@ final class VideoViewport extends FrameLayout {
         y = count > 1 ? (e.getY(0) + e.getY(1)) / 2 : e.getY();
     float span = count > 1 ? (float) Math.hypot(e.getX(1) - e.getX(0), e.getY(1) - e.getY(0)) : 0;
     if (action == MotionEvent.ACTION_DOWN) {
+      endGesture();
       gestureActive = true;
       disallowParentIntercept(true);
       lastX = downX = x;
@@ -198,6 +229,7 @@ final class VideoViewport extends FrameLayout {
   private boolean onRemoteTouchEvent(MotionEvent e) {
     int action = e.getActionMasked(), count = e.getPointerCount();
     if (action == MotionEvent.ACTION_DOWN) {
+      endGesture();
       gestureActive = true;
       disallowParentIntercept(true);
       downX = lastX = e.getX();
@@ -205,6 +237,8 @@ final class VideoViewport extends FrameLayout {
       downAt = e.getEventTime();
       lastSpan = 0;
       moved = multi = keyboardGesture = false;
+      if (dragListener != null && sourcePoint(downX, downY, false) != null)
+        postDelayed(hold, ViewConfiguration.getLongPressTimeout());
       return true;
     }
     // Configuration changes and cancelled gestures cannot turn leftover events into a click.
@@ -214,8 +248,14 @@ final class VideoViewport extends FrameLayout {
       return true;
     }
     if (action == MotionEvent.ACTION_UP) {
+      if (dragging) {
+        lastX = e.getX();
+        lastY = e.getY();
+        updateDragPoint(lastX, lastY);
+      }
       boolean tapped =
-          !multi
+          !dragging
+              && !multi
               && !moved
               && !keyboardGesture
               && Math.hypot(e.getX() - downX, e.getY() - downY) <= touchSlop
@@ -226,6 +266,8 @@ final class VideoViewport extends FrameLayout {
       return true;
     }
     if (count >= 3) {
+      removeCallbacks(hold);
+      endDrag();
       multi = true;
       lastSpan = 0;
       if (!keyboardGesture) {
@@ -236,6 +278,8 @@ final class VideoViewport extends FrameLayout {
     // After a three-finger gesture, consume every remaining finger until the final ACTION_UP.
     if (keyboardGesture) return true;
     if (action == MotionEvent.ACTION_POINTER_DOWN) {
+      removeCallbacks(hold);
+      endDrag();
       multi = true;
       if (count == 2) rebasePinch(e);
       return true;
@@ -248,7 +292,15 @@ final class VideoViewport extends FrameLayout {
     }
     if (action == MotionEvent.ACTION_MOVE) {
       if (count == 1) {
-        if (Math.hypot(e.getX() - downX, e.getY() - downY) > touchSlop) moved = true;
+        lastX = e.getX();
+        lastY = e.getY();
+        if (dragging) {
+          updateDragPoint(lastX, lastY);
+          if (dragListener != null) dragListener.move(dragX, dragY);
+        } else if (Math.hypot(lastX - downX, lastY - downY) > touchSlop) {
+          moved = true;
+          removeCallbacks(hold);
+        }
         return true;
       }
       multi = true;
@@ -280,24 +332,32 @@ final class VideoViewport extends FrameLayout {
   }
 
   private void dispatchRemoteTap(float x, float y) {
-    if (tapListener == null
-        || sourceWidth < 1
+    if (tapListener == null) return;
+    float[] point = sourcePoint(x, y, false);
+    if (point == null) return;
+    tapListener.tap(point[0], point[1]);
+    haptics.tap(false);
+    performClick();
+  }
+
+  private float[] sourcePoint(float x, float y, boolean clamp) {
+    if (sourceWidth < 1
         || sourceHeight < 1
         || getWidth() < 1
         || getHeight() < 1
-        || x < 0
+        || !Float.isFinite(x) || !Float.isFinite(y)) return null;
+    if (!clamp && (x < 0
         || x > getWidth()
         || y < 0
-        || y > getHeight()) return;
+        || y > getHeight())) return null;
     float scale = baseScale() * zoom;
     float dw = sourceWidth * scale, dh = sourceHeight * scale;
     float left = (getWidth() - dw) / 2 + panX, top = (getHeight() - dh) / 2 + panY;
     // Letterbox touches never produce remote input.
-    if (x < left || x > left + dw || y < top || y > top + dh) return;
-    tapListener.tap(
+    if (!clamp && (x < left || x > left + dw || y < top || y > top + dh)) return null;
+    return new float[] {
         Math.max(0, Math.min(1, (x - left) / dw)),
-        Math.max(0, Math.min(1, (y - top) / dh)));
-    performClick();
+        Math.max(0, Math.min(1, (y - top) / dh))};
   }
 
   private void disallowParentIntercept(boolean disallow) {
@@ -306,10 +366,32 @@ final class VideoViewport extends FrameLayout {
   }
 
   private void endGesture() {
+    removeCallbacks(hold);
+    endDrag();
     gestureActive = false;
     keyboardGesture = false;
     lastSpan = 0;
     disallowParentIntercept(false);
+    haptics.reset();
+  }
+
+  private void endDrag() {
+    if (!dragging) return;
+    dragging = false;
+    // Keep the last source point even if a rotation/detach temporarily gives us zero size.
+    if (dragListener != null) dragListener.end(dragX, dragY);
+    haptics.dragEnd();
+  }
+
+  private void updateDragPoint(float x, float y) {
+    float[] point = sourcePoint(x, y, true);
+    if (point != null) { dragX = point[0]; dragY = point[1]; }
+  }
+
+  @Override
+  public void onWindowFocusChanged(boolean hasWindowFocus) {
+    super.onWindowFocusChanged(hasWindowFocus);
+    if (!hasWindowFocus) endGesture();
   }
 
   @Override

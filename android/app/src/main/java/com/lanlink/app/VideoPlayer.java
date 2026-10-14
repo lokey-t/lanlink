@@ -32,6 +32,7 @@ final class VideoPlayer implements AutoCloseable {
   MediaCodec decoder;
   int decoderWidth, decoderHeight;
   volatile boolean needKey = true;
+  volatile boolean receivingH264;
   volatile String session;
   volatile String codecLabel="";
   long fpsAt,fpsFrames;
@@ -64,6 +65,8 @@ final class VideoPlayer implements AutoCloseable {
             renderedFrames++;
           }
         });
+    // A view restored/reparented before the player is attached may already own its texture.
+    if (texture.isAvailable()) surface = new Surface(texture.getSurfaceTexture());
   }
 
   void start() {
@@ -85,9 +88,17 @@ final class VideoPlayer implements AutoCloseable {
   }
 
   void render(VideoWire.Frame frame) throws Exception {
+    if (frame.heartbeat) {
+      // Static desktops can stop producing image frames while the final codec output is pending.
+      if (decoder != null) drainOutput();
+      return;
+    }
     width = frame.width;
     height = frame.height;
     if (!frame.h264) {
+      receivingH264 = false;
+      stopDecoder();
+      needKey = false;
       if (!painting.compareAndSet(false, true)) return;
       Bitmap bitmap = BitmapFactory.decodeByteArray(frame.data, 0, frame.data.length);
       main.post(
@@ -105,6 +116,7 @@ final class VideoPlayer implements AutoCloseable {
           });
       return;
     }
+    receivingH264 = true;
     Surface target = surface;
     if (target == null) return;
     if (decoder != null && (decoderWidth != width || decoderHeight != height)) stopDecoder();
@@ -167,10 +179,23 @@ final class VideoPlayer implements AutoCloseable {
     needKey = true;
   }
 
+  boolean needsKeyFrame(VideoTransport transport) {
+    // Waiting for the first image is normal encoder startup; JPEG never needs an IDR.
+    return receivingH264 && (needKey || transport != null && transport.needsKey());
+  }
+
+  static void keepaliveFailed(Throwable error, VideoWire connection, VideoTransport transport) {
+    // Local QUIC admission pressure is transient; the next scheduled keepalive can retry.
+    if (QuicNative.isBusy(error)) return;
+    if (connection != null) connection.close();
+    if (transport != null) transport.close();
+  }
+
   void run() {
     boolean jpegOnly = false, legacy = false, h264Only = false;
     try {
       while (!closed) {
+        final AtomicBoolean startupTimedOut = new AtomicBoolean();
         try {
           LinkService service = LinkService.instance;
           if (requireControl) {
@@ -208,10 +233,13 @@ final class VideoPlayer implements AutoCloseable {
           feedback.reset();
           final java.util.concurrent.ScheduledExecutorService keeper=java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
           final String keepSession=session;final Wire keepPeer=peer;final VideoWire keepConnection=connection;final VideoTransport keepRtc=rtc;
+          final long connectedAt=SystemClock.elapsedRealtime(), initialFrames=renderedFrames;
+          final boolean allowJpegFallback=!jpegOnly&&!h264Only;
           keeper.scheduleWithFixedDelay(()->{
             if(closed||keepSession==null||!keepSession.equals(session))return;
-            try{long sent=SystemClock.elapsedRealtime();JSONObject result=keepPeer.request("videoKeep",Wire.obj("id",keepSession,"feedback",feedback.report().put("needKey",needKey||keepRtc!=null&&keepRtc.needsKey())));if(keepSession.equals(session)){feedback.rtt=SystemClock.elapsedRealtime()-sent;bitrate=result.optInt("bitrate",4000000);}}
-            catch(Exception error){if(keepConnection!=null)keepConnection.close();if(keepRtc!=null)keepRtc.close();}
+            if(allowJpegFallback&&renderedFrames==initialFrames&&SystemClock.elapsedRealtime()-connectedAt>=8000){startupTimedOut.set(true);if(keepConnection!=null)keepConnection.close();if(keepRtc!=null)keepRtc.close();return;}
+            try{long sent=SystemClock.elapsedRealtime();JSONObject result=keepPeer.request("videoKeep",Wire.obj("id",keepSession,"feedback",feedback.report().put("needKey",needsKeyFrame(keepRtc))));if(keepSession.equals(session)){feedback.rtt=SystemClock.elapsedRealtime()-sent;bitrate=result.optInt("bitrate",4000000);}}
+            catch(Exception error){keepaliveFailed(error,keepConnection,keepRtc);}
           },1,1,java.util.concurrent.TimeUnit.SECONDS);
           try {
           while (!closed) {
@@ -230,7 +258,10 @@ final class VideoPlayer implements AutoCloseable {
               frame =rtc!=null?rtc.next():connection.next();
               feedback.receive(frame);
             }
-            if (frame.heartbeat) continue;
+            if (frame.heartbeat) {
+              render(frame);
+              continue;
+            }
             codecLabel=frame.h264?(rtc instanceof QuicVideo?"H.264 · QUIC":rtc!=null?"H.264 · WebRTC":"H.264 · TCP"):legacy?"截图兼容模式":"兼容串流";
             render(frame);
             if (legacy) Thread.sleep(50);
@@ -238,7 +269,7 @@ final class VideoPlayer implements AutoCloseable {
           } finally {keeper.shutdownNow();}
         } catch (Exception error) {
           if(rtc!=null)rtcCooldown=System.currentTimeMillis()+30000;
-          String reason = error.getMessage() == null ? "串流连接暂不可用" : error.getMessage();
+          String reason = startupTimedOut.get() ? "画面解码超时，正在切换兼容串流" : error.getMessage() == null ? "串流连接暂不可用" : error.getMessage();
           main.post(
               () -> {
                 if (!closed)
@@ -277,6 +308,7 @@ final class VideoPlayer implements AutoCloseable {
 
   void disconnect() {
     codecLabel="";
+    receivingH264=false;
     VideoTransport rtcOld=rtc;rtc=null;if(rtcOld!=null)rtcOld.close();
     VideoWire old = connection;
     connection = null;

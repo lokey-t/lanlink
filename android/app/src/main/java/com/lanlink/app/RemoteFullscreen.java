@@ -1,5 +1,6 @@
 package com.lanlink.app;
 
+import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.app.Dialog;
 import android.content.SharedPreferences;
@@ -7,8 +8,17 @@ import android.content.pm.ActivityInfo;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.Insets;
+import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.Drawable;
 import android.os.Build;
+import android.transition.ChangeBounds;
+import android.transition.Fade;
+import android.transition.Transition;
+import android.transition.TransitionListenerAdapter;
+import android.transition.TransitionManager;
+import android.transition.TransitionSet;
 import android.view.*;
+import android.view.animation.PathInterpolator;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.*;
 import java.util.IdentityHashMap;
@@ -16,7 +26,7 @@ import java.util.Map;
 
 /** Changes layout in place so the decoder Surface and the control lease survive fullscreen. */
 final class RemoteFullscreen implements AutoCloseable {
-  private static final int BACKGROUND = 0xff10141f, PANEL = 0xff202736, TEXT = 0xffeef0fa;
+  private static final int BACKGROUND = Color.BLACK, PANEL = 0xff202736, TEXT = 0xffeef0fa;
   private final Activity activity;
   private final Dialog dialog;
   private final Ui ui;
@@ -26,7 +36,7 @@ final class RemoteFullscreen implements AutoCloseable {
   private final RemoteKeyboardView keyboard;
   private final TouchpadView normalPad, leftPad, rightPad;
   private final Runnable restoreInsets;
-  private final VideoViewport.TapListener tap;
+  final RemotePointer pointer;
   private final SharedPreferences prefs;
   private final Map<View, Integer> previousVisibility = new IdentityHashMap<>();
   private final LinearLayout menu, menuHome, settings;
@@ -37,6 +47,9 @@ final class RemoteFullscreen implements AutoCloseable {
   private int orientation, oldFlags, oldSystemUi, oldStatusColor, oldNavColor;
   private boolean active, menuVisible, closed, oldFollowCursor, oldClipToOutline;
   private boolean leftEnabled, rightEnabled, pinchEnabled;
+  private boolean transitioning;
+  private int transitionGeneration;
+  private Drawable oldViewportBackground, oldOuterBackground, oldStageBackground;
   private WindowInsetsController.OnControllableInsetsChangedListener barsListener;
   private int oldBarsBehavior, oldAppearance;
   private android.window.OnBackInvokedCallback backCallback;
@@ -44,7 +57,7 @@ final class RemoteFullscreen implements AutoCloseable {
   RemoteFullscreen(Activity activity, Dialog dialog, LinearLayout outer, LinearLayout box,
       FrameLayout stage, VideoViewport viewport, RemoteKeyboardView keyboard,
       TouchpadView normalPad, boolean supportedPads, TouchpadView.Sender sender,
-      java.util.function.Consumer<Exception> onError, VideoViewport.TapListener tap,
+      java.util.function.Consumer<Exception> onError,
       Runnable restoreInsets) {
     this.activity = activity;
     this.dialog = dialog;
@@ -55,7 +68,7 @@ final class RemoteFullscreen implements AutoCloseable {
     this.keyboard = keyboard;
     this.normalPad = normalPad;
     this.supportedPads = supportedPads;
-    this.tap = tap;
+    pointer = new RemotePointer(sender, onError);
     this.restoreInsets = restoreInsets;
     ui = new Ui(activity);
     prefs = activity.getSharedPreferences("remote_fullscreen", 0);
@@ -72,7 +85,7 @@ final class RemoteFullscreen implements AutoCloseable {
     rightPad.setContentDescription(Language.t("右触控板：移动鼠标，轻点单击，双指滚动，长按拖动"));
     stage.addView(leftPad);
     stage.addView(rightPad);
-    hint = ui.text(Language.t("轻点画面点击 · 双指缩放 · 三指打开键盘"), 12, 0xffbcc5dc);
+    hint = ui.text(Language.t("轻点点击 · 长按拖动 · 双指缩放 · 三指键盘"), 12, 0xffbcc5dc);
     hint.setGravity(Gravity.CENTER);
     hint.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
     stage.addView(hint);
@@ -115,7 +128,10 @@ final class RemoteFullscreen implements AutoCloseable {
     stage.addView(menuScroll);
     hideOverlays();
     stage.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob) -> {
-      if (active && (r-l != or-ol || b-t != ob-ot)) layoutStage();
+      if (active && (r-l != or-ol || b-t != ob-ot)) {
+        endPresentationTransition();
+        layoutStage();
+      }
     });
   }
 
@@ -186,12 +202,17 @@ final class RemoteFullscreen implements AutoCloseable {
     hideKeyboard();
     oldFollowCursor = viewport.followCursor;
     oldClipToOutline = viewport.getClipToOutline();
+    oldViewportBackground = viewport.getBackground();
+    oldOuterBackground = outer.getBackground();
+    oldStageBackground = stage.getBackground();
     viewport.followCursor = false;
     viewport.setClipToOutline(false);
+    // A fresh drawable preserves saved ColorDrawable instances for ordinary-view restoration.
+    viewport.setBackground(new ColorDrawable(BACKGROUND));
     viewport.reset();
     box.setPadding(0,0,0,0);
-    outer.setBackgroundColor(BACKGROUND);
-    stage.setBackgroundColor(BACKGROUND);
+    outer.setBackground(new ColorDrawable(BACKGROUND));
+    stage.setBackground(new ColorDrawable(BACKGROUND));
     window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     window.setStatusBarColor(Color.BLACK);
     window.setNavigationBarColor(Color.BLACK);
@@ -231,9 +252,13 @@ final class RemoteFullscreen implements AutoCloseable {
   }
 
   private void configureGestures() {
-    viewport.setRemoteGestures(active, active && !menuVisible && pinchEnabled,
-        (x,y) -> { if (!menuVisible && active) tap.tap(x,y); },
-        () -> { if (!menuVisible && active) showKeyboard(); });
+    boolean controls = active && !menuVisible && !transitioning;
+    viewport.setRemoteGestures(active, controls && pinchEnabled,
+        controls ? pointer::tap : null,
+        () -> { if (active && !menuVisible && !transitioning) showKeyboard(); },
+        controls ? pointer : null);
+    leftPad.setEnabled(controls);
+    rightPad.setEnabled(controls);
   }
 
   private void showKeyboard() {
@@ -261,13 +286,12 @@ final class RemoteFullscreen implements AutoCloseable {
   }
 
   void showMenu() {
-    if (!active) return;
+    if (!active || menuVisible) return;
     menuVisible = true;
     leftPad.cancelGesture(); rightPad.cancelGesture();
     hideKeyboard();
     showSettings(false);
-    configureGestures();
-    layoutStage();
+    animatePresentation();
     menuHome.requestFocus();
   }
 
@@ -278,11 +302,48 @@ final class RemoteFullscreen implements AutoCloseable {
   }
 
   void resume() {
-    if (!active) return;
+    if (!active || !menuVisible) return;
     menuVisible = false;
-    configureGestures();
-    layoutStage();
+    animatePresentation();
     viewport.requestFocus();
+  }
+
+  private void animatePresentation() {
+    endPresentationTransition();
+    if (!stage.isLaidOut() || !stage.isAttachedToWindow() || !ValueAnimator.areAnimatorsEnabled()) {
+      layoutStage();
+      return;
+    }
+    // Only animate existing view bounds and overlays. The decoder's TextureView stays attached.
+    TransitionSet transition = new TransitionSet().setOrdering(TransitionSet.ORDERING_TOGETHER);
+    transition.addTransition(new ChangeBounds().addTarget(viewport)
+        .addTarget(viewport.texture).addTarget(viewport.image));
+    Fade overlays = new Fade(Fade.IN | Fade.OUT);
+    for (View view : new View[]{menuScroll,leftPad,rightPad,hint,connection}) overlays.addTarget(view);
+    transition.addTransition(overlays);
+    transition.setDuration(260);
+    transition.setInterpolator(new PathInterpolator(.2f, 0f, 0f, 1f));
+    final int generation = transitionGeneration;
+    transitioning = true;
+    configureGestures();
+    transition.addListener(new TransitionListenerAdapter() {
+      private void finished() {
+        if (generation != transitionGeneration) return;
+        transitioning = false;
+        configureGestures();
+      }
+      @Override public void onTransitionEnd(Transition ignored) { finished(); }
+      @Override public void onTransitionCancel(Transition ignored) { finished(); }
+    });
+    TransitionManager.beginDelayedTransition(stage, transition);
+    layoutStage();
+  }
+
+  private void endPresentationTransition() {
+    transitionGeneration++;
+    TransitionManager.endTransitions(stage);
+    transitioning = false;
+    configureGestures();
   }
 
   void connectionStatus(CharSequence value) { connection.setText(value); }
@@ -304,18 +365,20 @@ final class RemoteFullscreen implements AutoCloseable {
     } else viewport.setLayoutParams(new FrameLayout.LayoutParams(-1, -1));
     int padWidth = Math.min(ui.dp(158), Math.round(width * .19f));
     int padHeight = Math.min(ui.dp(204), Math.round(height * .52f));
-    FrameLayout.LayoutParams left = new FrameLayout.LayoutParams(padWidth,padHeight,Gravity.LEFT|Gravity.CENTER_VERTICAL);
+    FrameLayout.LayoutParams left = new FrameLayout.LayoutParams(padWidth,padHeight,Gravity.LEFT|Gravity.BOTTOM);
     left.leftMargin = margin;
+    left.bottomMargin = margin;
     leftPad.setLayoutParams(left);
-    FrameLayout.LayoutParams right = new FrameLayout.LayoutParams(padWidth,padHeight,Gravity.RIGHT|Gravity.CENTER_VERTICAL);
+    FrameLayout.LayoutParams right = new FrameLayout.LayoutParams(padWidth,padHeight,Gravity.RIGHT|Gravity.BOTTOM);
     right.rightMargin = margin;
+    right.bottomMargin = margin;
     rightPad.setLayoutParams(right);
     leftPad.setVisibility(!menuVisible && supportedPads && leftEnabled ? View.VISIBLE : View.GONE);
     rightPad.setVisibility(!menuVisible && supportedPads && rightEnabled ? View.VISIBLE : View.GONE);
     menuScroll.setVisibility(menuVisible ? View.VISIBLE : View.GONE);
-    hint.setText(pinchEnabled ? Language.t("轻点画面点击 · 双指缩放 · 三指打开键盘") : Language.t("轻点画面点击 · 三指打开键盘"));
+    hint.setText(pinchEnabled ? Language.t("轻点点击 · 长按拖动 · 双指缩放 · 三指键盘") : Language.t("轻点点击 · 长按拖动 · 三指键盘"));
     FrameLayout.LayoutParams caption = new FrameLayout.LayoutParams(-1,ui.dp(32),Gravity.BOTTOM|Gravity.CENTER_HORIZONTAL);
-    caption.leftMargin=margin; caption.rightMargin=margin; caption.bottomMargin=ui.dp(4);
+    caption.leftMargin=padWidth+margin*2; caption.rightMargin=padWidth+margin*2; caption.bottomMargin=ui.dp(4);
     hint.setLayoutParams(caption);
     hint.setVisibility(menuVisible ? View.GONE : View.VISIBLE);
     FrameLayout.LayoutParams status = new FrameLayout.LayoutParams(Math.max(1,width-ui.dp(224)),ui.dp(44),Gravity.TOP|Gravity.CENTER_HORIZONTAL);
@@ -328,19 +391,21 @@ final class RemoteFullscreen implements AutoCloseable {
     if (!active) return;
     active = false;
     menuVisible = false;
+    endPresentationTransition();
     dialog.setOnKeyListener(null);
     leftPad.cancelGesture(); rightPad.cancelGesture();
     hideKeyboard();
     viewport.setRemoteGestures(false, true, null, null);
     viewport.followCursor = oldFollowCursor;
     viewport.setClipToOutline(oldClipToOutline);
+    viewport.setBackground(oldViewportBackground);
     viewport.setLayoutParams(new FrameLayout.LayoutParams(-1,-1));
     hideOverlays();
     for (Map.Entry<View,Integer> entry : previousVisibility.entrySet()) entry.getKey().setVisibility(entry.getValue());
     previousVisibility.clear();
     box.setPadding(boxPadding[0],boxPadding[1],boxPadding[2],boxPadding[3]);
-    outer.setBackgroundColor(Ui.BG);
-    stage.setBackgroundColor(Color.TRANSPARENT);
+    outer.setBackground(oldOuterBackground);
+    stage.setBackground(oldStageBackground);
     Window window = dialog.getWindow();
     if (Build.VERSION.SDK_INT >= 33 && backCallback != null) {
       dialog.getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(backCallback);
@@ -370,6 +435,8 @@ final class RemoteFullscreen implements AutoCloseable {
   public void close() {
     exit();
     closed = true;
+    endPresentationTransition();
+    pointer.close();
     leftPad.close(); rightPad.close();
   }
 }

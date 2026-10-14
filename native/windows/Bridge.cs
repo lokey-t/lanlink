@@ -45,8 +45,11 @@ namespace LanLink {
   [StructLayout(LayoutKind.Sequential)] struct MI { public int dx,dy; public uint data,flags,time; public UIntPtr extra; }
   [StructLayout(LayoutKind.Sequential)] struct KI { public ushort vk,scan; public uint flags,time; public UIntPtr extra; }
   static readonly JavaScriptSerializer Json = new JavaScriptSerializer { MaxJsonLength = 12000000 };
-  static readonly object OutputLock = new object();
-  static readonly ConcurrentQueue<string> Queue = new ConcurrentQueue<string>();
+  static readonly JavaScriptSerializer OutputJson = new JavaScriptSerializer { MaxJsonLength = 12000000 };
+  static volatile bool CompactMotion;
+  static readonly BridgeOutput Output = new BridgeOutput(delegate(object value){Console.Out.WriteLine(OutputJson.Serialize(value));Console.Out.Flush();},null,delegate(double dx,double dy){if(CompactMotion)Console.Out.WriteLine("@D "+dx.ToString("R",System.Globalization.CultureInfo.InvariantCulture)+" "+dy.ToString("R",System.Globalization.CultureInfo.InvariantCulture));else Console.Out.WriteLine(OutputJson.Serialize(new{type="input",kind="move",dx=dx,dy=dy}));Console.Out.Flush();});
+  static readonly BridgeWorker Screens = new BridgeWorker("LanLink screen",false), ClipboardWork = new BridgeWorker("LanLink clipboard",true);
+  static readonly Semaphore CommandCapacity = new Semaphore(128,128);
   static readonly HashSet<int> Held = new HashSet<int>();
   static readonly HashSet<int> Buttons = new HashSet<int>();
   static Hook MouseCallback = MouseHook, KeyCallback = KeyHook;
@@ -85,15 +88,16 @@ namespace LanLink {
    var mouse=(RAWMOUSE)Marshal.PtrToStructure(IntPtr.Add(data,Marshal.SizeOf(typeof(RAWHEADER))),typeof(RAWMOUSE));int dx=mouse.dx,dy=mouse.dy;
    if(mouse.extra==InputMarker)return;
    if((mouse.flags&1)!=0) { var bounds=(mouse.flags&2)!=0?SystemInformation.VirtualScreen:Screen.PrimaryScreen.Bounds;var point=new POINT{x=bounds.Left+(int)((long)mouse.dx*(bounds.Width-1)/65535),y=bounds.Top+(int)((long)mouse.dy*(bounds.Height-1)/65535)};POINT before;bool known=AbsoluteMouse.TryGetValue(header.device,out before);AbsoluteMouse[header.device]=point;if(!known)return;dx=point.x-before.x;dy=point.y-before.y; }
-   if(dx!=0 || dy!=0)Emit(new{type="input",kind="move",dx=dx,dy=dy});
+   if(dx!=0 || dy!=0)Output.Move(dx,dy);
   }
   static void StopCapture() { Remote=false;if(Clipped){if(ClipCursor(ref OriginalClip)||ClearClipCursor(IntPtr.Zero))Clipped=false;}AbsoluteMouse.Clear();Release(); }
   static DateTime Lease = DateTime.MinValue;
   static DateTime InputLease = DateTime.MinValue;
-  static uint ClipboardSequence;
+  static volatile uint ClipboardSequence;
   static int TickCount;
   static double RelativeX, RelativeY;
-  static void Emit(object m) { lock(OutputLock) { Console.Out.WriteLine(Json.Serialize(m)); Console.Out.Flush(); } }
+  static void Emit(object m) { Output.Post(m,false); }
+  static void Reply(object value,bool wait){if(!wait){Output.Post(value,false,delegate{CommandCapacity.Release();});return;}using(var sent=new ManualResetEvent(false)){Output.Post(value,false,delegate{CommandCapacity.Release();sent.Set();});sent.WaitOne();}}
   static string Code(int vk) {
    if(vk>=65 && vk<=90) return "Key"+(char)vk;
    if(vk>=48 && vk<=57) return "Digit"+(char)vk;
@@ -130,7 +134,8 @@ namespace LanLink {
   static bool Bool(Dictionary<string,object>a,string key) { object v;return a.TryGetValue(key,out v)&&Convert.ToBoolean(v); }
   static object Execute(string method,Dictionary<string,object>a) {
    Rectangle r=Screen.PrimaryScreen.Bounds;
-   if(method=="capabilities")return new {relativeInput=true,input=MouseHandle!=IntPtr.Zero&&KeyHandle!=IntPtr.Zero,screen=true,clipboard=true,shutdown=true,host=MouseHandle!=IntPtr.Zero&&KeyHandle!=IntPtr.Zero,width=r.Width,height=r.Height};
+   if(method=="compactMotion"){CompactMotion=Bool(a,"enabled");return new {}; }
+   if(method=="capabilities")return new {inputBatch=1,compactMotion=1,relativeInput=true,input=MouseHandle!=IntPtr.Zero&&KeyHandle!=IntPtr.Zero,screen=true,clipboard=true,shutdown=true,host=MouseHandle!=IntPtr.Zero&&KeyHandle!=IntPtr.Zero,width=r.Width,height=r.Height};
    if(method=="cursor") { POINT cursor; if(!GetCursorPos(out cursor)) throw new IOException("无法读取鼠标位置"); return new {x=cursor.x,y=cursor.y,width=r.Width,height=r.Height}; }
    if(method=="mode") { bool capture=Bool(a,"remote");
     if(capture && !Remote){LocalModifierUps.Clear();foreach(int vk in PhysicalModifiers)LocalModifierUps.Add(vk);}
@@ -142,6 +147,10 @@ namespace LanLink {
    if(method=="heartbeat") {Lease=DateTime.UtcNow.AddSeconds(3);InputLease=DateTime.UtcNow.AddSeconds(3);return new {};}
    if(method=="release") { Release();return new {}; }
    if(method=="warp") {SetCursorPos(r.Left+(int)(Num(a,"x",0.5)*(r.Width-1)),r.Top+(int)(Num(a,"y",0.5)*(r.Height-1)));return new {};}
+   if(method=="inputBatch") {
+    var inputs=(System.Collections.IEnumerable)a["inputs"];int count=0;
+    foreach(object value in inputs){if(++count>64)throw new IOException("批量输入过多");var input=(Dictionary<string,object>)value;if(Str(input,"kind")!="move"&&Str(input,"kind")!="relative")throw new IOException("无效批量输入");Execute("input",input);}return new {};
+   }
    if(method=="input") {
     InputLease=DateTime.UtcNow.AddSeconds(3);string kind=Str(a,"kind");
      if(kind=="relative") { RelativeX+=Num(a,"dx",0);RelativeY+=Num(a,"dy",0);int dx=(int)RelativeX,dy=(int)RelativeY;RelativeX-=dx;RelativeY-=dy;if(dx!=0||dy!=0){INPUT movement=new INPUT();movement.u.mi.dx=dx;movement.u.mi.dy=dy;movement.u.mi.flags=1;Send(movement);} }
@@ -170,21 +179,41 @@ namespace LanLink {
    if(method=="shutdown") { Process.Start(new ProcessStartInfo("shutdown.exe","/s /t 0") {UseShellExecute=false,CreateNoWindow=true});return new {}; }
    throw new Exception("不支持的原生操作");
   }
+  static void Request(string line) {
+   if(line=="EXIT"){Application.Exit();return;}
+   string id="";
+   try {
+    Dictionary<string,object> message;
+    if(line.StartsWith("@M ",StringComparison.Ordinal)){
+     string[] p=line.Split(' ');if(p.Length!=7||(p[2]!="m"&&p[2]!="r"))throw new IOException("无效鼠标消息");
+     var a=new Dictionary<string,object>();a["kind"]=p[2]=="m"?"move":"relative";string[] keys={"x","y","dx","dy"};
+     for(int i=0;i<4;i++){double n=double.Parse(p[i+3],System.Globalization.CultureInfo.InvariantCulture);if(double.IsNaN(n)||double.IsInfinity(n))throw new IOException("无效鼠标数值");a[keys[i]]=n;}
+     message=new Dictionary<string,object>{{"id",p[1]},{"method","input"},{"args",a}};
+    }else message=Json.Deserialize<Dictionary<string,object>>(line);id=Convert.ToString(message["id"]);
+    string method=Convert.ToString(message["method"]),requestId=id;var args=(Dictionary<string,object>)message["args"];
+    bool background=method=="screen"||method=="clipboardGet"||method=="clipboardSet";
+    Action execute=delegate {try{Reply(new{replyTo=requestId,result=Execute(method,args)},background);}catch(Exception error){Reply(new{replyTo=requestId,error=error.Message},background);}};
+    if(method=="screen")Screens.Post(execute);
+    else if(method=="clipboardGet"||method=="clipboardSet")ClipboardWork.Post(execute);
+    else execute();
+   }catch(Exception error){Reply(new{replyTo=id,error=error.Message},false);}
+  }
   [STAThread] public static void Run() {
    Console.InputEncoding=new System.Text.UTF8Encoding(false);Console.OutputEncoding=new System.Text.UTF8Encoding(false);
    SetProcessDPIAware();Application.EnableVisualStyles();
    IntPtr module=GetModuleHandle(null);MouseHandle=SetWindowsHookEx(14,MouseCallback,module,0);KeyHandle=SetWindowsHookEx(13,KeyCallback,module,0);
    ClipboardSequence=GetClipboardSequenceNumber();
-   Thread reader=new Thread(delegate() {string line;while((line=Console.ReadLine())!=null)Queue.Enqueue(line);Queue.Enqueue("EXIT");});reader.IsBackground=true;reader.Start();
+   var dispatcher=new Control();dispatcher.CreateControl();
+   var commands=new BridgeDispatch(delegate(Action work){dispatcher.BeginInvoke(work);});
+   Thread reader=new Thread(delegate() {string line;while((line=Console.ReadLine())!=null){CommandCapacity.WaitOne();string request=line;commands.Post(delegate{Request(request);});}commands.Post(delegate{Request("EXIT");});});reader.IsBackground=true;reader.Start();
    var timer=new System.Windows.Forms.Timer();timer.Interval=16;timer.Tick+=delegate {
     UpdateDesktopAvailability(InputDesktopAvailable());
     if(Remote){RECT clip;if(!GetClipCursor(out clip)||clip.left!=Anchor.x||clip.top!=Anchor.y||clip.right!=Anchor.x+1||clip.bottom!=Anchor.y+1){StopCapture();Emit(new{type="input-interrupted",blocked=false,reason="系统已解除鼠标捕获"});}}
-    string line;int count=0;while(count++<100 && Queue.TryDequeue(out line)) {if(line=="EXIT"){Application.Exit();return;}string id="";try {var m=Json.Deserialize<Dictionary<string,object>>(line);id=Convert.ToString(m["id"]);var result=Execute(Convert.ToString(m["method"]),(Dictionary<string,object>)m["args"]);Emit(new {replyTo=id,result=result});}catch(Exception e){Emit(new {replyTo=id,error=e.Message});}}
     if(Remote&&DateTime.UtcNow>Lease){StopCapture();Emit(new {type="emergency"});}
     if((Held.Count>0||Buttons.Count>0)&&DateTime.UtcNow>InputLease)Release();
-    if(!Remote && !DesktopBlocked) {POINT p;if(GetCursorPos(out p)){Rectangle r=Screen.PrimaryScreen.Bounds;Emit(new {type="cursor",x=p.x-r.Left,y=p.y-r.Top,width=r.Width,height=r.Height,synthetic=SyntheticCursor});}}
+    if(!Remote && !DesktopBlocked) {POINT p;if(GetCursorPos(out p)){Rectangle r=Screen.PrimaryScreen.Bounds;Output.Post(new {type="cursor",x=p.x-r.Left,y=p.y-r.Top,width=r.Width,height=r.Height,synthetic=SyntheticCursor},true);}}
     if(++TickCount%30==0){uint seq=GetClipboardSequenceNumber();if(seq!=ClipboardSequence){ClipboardSequence=seq;Emit(new {type="clipboardChanged"});}}
-   };timer.Start();try{Application.Run();}finally{timer.Stop();StopCapture();if(Raw!=null){Raw.Dispose();Raw=null;}UnhookWindowsHookEx(MouseHandle);UnhookWindowsHookEx(KeyHandle);}
+   };timer.Start();try{Application.Run();}finally{timer.Stop();StopCapture();dispatcher.Dispose();if(Raw!=null){Raw.Dispose();Raw=null;}UnhookWindowsHookEx(MouseHandle);UnhookWindowsHookEx(KeyHandle);}
   }
  }
 }

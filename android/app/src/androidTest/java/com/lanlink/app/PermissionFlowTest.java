@@ -129,6 +129,7 @@ public final class PermissionFlowTest extends Instrumentation {
     Bundle result = new Bundle();
     Activity activity = null;
     Wire peer = null;
+    ProbeGroup probeGroup = null;
     android.content.SharedPreferences languagePrefs = getTargetContext().getSharedPreferences("identity", 0);
     String previousLanguage = languagePrefs.getString("language", null);
     boolean pinnedLanguage = false;
@@ -161,9 +162,11 @@ public final class PermissionFlowTest extends Instrumentation {
         return;
       }
       long end = System.currentTimeMillis() + 10000;
-      while (LinkService.instance == null && System.currentTimeMillis() < end) Thread.sleep(50);
+      while ((LinkService.instance == null || LinkService.instance.group == null) && System.currentTimeMillis() < end) Thread.sleep(50);
       LinkService service = LinkService.instance;
       check(service != null, "service started");
+      if (options != null) for (String key : new String[] {"multiComputerToken", "adbSmokeToken", "touchpadToken", "stagingSmokeToken", "clipboardSmokeToken"})
+        if (options.containsKey(key)) { probeGroup = new ProbeGroup(service, options.getString(key)); break; }
       if(options!=null&&options.containsKey("fullscreenGestureProbe")){result.putString("stream",FullscreenGestureProbe.run(this)+"\n");finish(Activity.RESULT_OK,result);return;}
       if(options!=null&&options.containsKey("fullscreenUiProbe")){result.putString("stream",FullscreenGestureProbe.runUi(this,activity)+"\n");finish(Activity.RESULT_OK,result);return;}
       if(options!=null&&options.containsKey("inputOnlyTouchpadProbe")){result.putString("stream",InputOnlyTouchpadProbe.run(this,service)+"\n");finish(Activity.RESULT_OK,result);return;}
@@ -171,6 +174,8 @@ public final class PermissionFlowTest extends Instrumentation {
       if(options!=null&&options.containsKey("remoteInteractionProbe")){RemoteInteractionProbe.run(this,activity,service);result.putString("stream","PASS: existing remote viewport, cursor-follow and control lifecycle regressions\n");finish(Activity.RESULT_OK,result);return;}
       if(options!=null&&options.containsKey("groupConsentProbe")){result.putString("stream",GroupConsentProbe.run(service)+"\n");finish(Activity.RESULT_OK,result);return;}
       if(options!=null&&options.containsKey("adaptiveTransportProbe")){result.putString("stream",AdaptiveTransportProbe.run()+"\n");finish(Activity.RESULT_OK,result);return;}
+      if(options!=null&&options.containsKey("auxIsolationProbe")){result.putString("stream",AuxIsolationProbe.run(service)+"\n");finish(Activity.RESULT_OK,result);return;}
+      if(options!=null&&options.containsKey("groupLayoutProbe")){result.putString("stream",GroupLayoutProbe.run(this,activity,service)+"\n");finish(Activity.RESULT_OK,result);return;}
       if(options!=null&&options.containsKey("multiComputerPorts")){result.putString("stream",MultiComputerProbe.run(this,activity,service,options)+"\n");finish(Activity.RESULT_OK,result);return;}
       if(options!=null&&options.containsKey("pairJoinCode")){result.putString("stream",PairJoinProbe.run(this,service,options)+"\n");finish(Activity.RESULT_OK,result);return;}
       if(options!=null&&options.containsKey("udpProbePort")){result.putString("stream",UdpBroadcastProbe.run(this,options)+"\n");finish(Activity.RESULT_OK,result);return;}
@@ -263,7 +268,7 @@ public final class PermissionFlowTest extends Instrumentation {
       service.setAllowed("clipboard", false);
       service.permissionNotice.reset();
       service.consent.reset();
-      peer = new Wire(new Socket(), Wire.obj(), new byte[32], service);
+      peer = new Wire(new Socket(), Wire.obj(), Wire.parseToken(service.token), service);
       peer.id = "11111111-1111-4111-8111-111111111111";
       // A previous run deliberately stops this same fixture peer. This case models
       // a new requester, so remove only its persisted stop marker before first consent.
@@ -521,6 +526,7 @@ public final class PermissionFlowTest extends Instrumentation {
       result.putString("stream", "\nFAIL: " + android.util.Log.getStackTraceString(failure) + "\n");
       finish(Activity.RESULT_CANCELED, result);
     } finally {
+      if (probeGroup != null) try { probeGroup.close(); } catch (Exception ignored) {}
       if (pinnedLanguage) {
         if (previousLanguage == null) languagePrefs.edit().remove("language").commit();
         else languagePrefs.edit().putString("language", previousLanguage).commit();

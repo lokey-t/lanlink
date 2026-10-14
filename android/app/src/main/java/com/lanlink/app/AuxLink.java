@@ -33,7 +33,7 @@ final class AuxLink implements AutoCloseable, Wire.Listener {
   }
   boolean valid() {
     return !closed && primary.connected && service.peers.get(primary.id) == primary
-        && !service.group.excluded(primary.id);
+        && primary.matchesGroupToken(service.token) && !service.group.excluded(primary.id);
   }
   JSONObject info() { return Wire.obj("port", server.getLocalPort(), "secret", secret); }
   public void ready(Wire peer) { if (!valid() || !primary.id.equals(peer.id)) close(); }
@@ -43,7 +43,12 @@ final class AuxLink implements AutoCloseable, Wire.Listener {
     String method = message.optString("method");
     try {
       if (method.equals("linkPing") || method.equals("linkUse")) {
-        if (method.equals("linkUse")) primary.fastPath = peer;
+        if (method.equals("linkUse")) synchronized (service) {
+          synchronized (this) {
+            if (!valid() || wire != peer) throw new java.io.IOException("辅助通道已结束");
+            primary.useFastPath(peer);
+          }
+        }
         peer.send(Wire.obj("type", "response", "id", message.optString("id"), "result", Wire.obj()));
       } else if (CONTROL.contains(method)) service.message(primary, message, peer);
       else peer.send(Wire.obj("type", "response", "id", message.optString("id"), "error", "辅助通道不支持此操作"));
@@ -53,10 +58,7 @@ final class AuxLink implements AutoCloseable, Wire.Listener {
   public synchronized void close() {
     if (closed) return;
     closed = true;
-    if (primary.fastPath == wire) {
-      primary.fastPath = null;
-      service.auxInputLost(primary);
-    }
+    if (primary.clearFastPath(wire)) service.auxInputLost(primary);
     if (wire != null) wire.close();
     try { server.close(); } catch (Exception ignored) {}
     service.auxLinks.remove(this);

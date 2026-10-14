@@ -1,0 +1,1 @@
+PASS: binary JNI, event-driven wait, shared desktop/Android binary fixture, fractional loss recovery; Android JNI QUIC handshake, raw boundary loss recovery, bounded burst recovery, duplicate/reorder suppression, reliable click barrier and production uinput command output

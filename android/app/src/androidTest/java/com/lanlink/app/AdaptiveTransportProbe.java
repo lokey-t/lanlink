@@ -37,18 +37,18 @@ final class AdaptiveTransportProbe {
     check(adaptive.rate==8000000,"healthy link gradually recovers within upper bound");
     motionPacing();
     InputHeartbeatProbe.run();
-    return "PASS: short/long mouse loss, stale click, reordered queue, per-viewer bitrate, 8-24ms adaptive mouse pacing and independent encrypted TCP/USB heartbeats";
+    return "PASS: short/long mouse loss, stale click, reordered queue, per-viewer bitrate, 4-24ms adaptive mouse pacing and independent encrypted TCP/USB heartbeats";
   }
 
   static void motionPacing() {
     long[] now={0};
     QuicMotion.Pacing stable=new QuicMotion.Pacing(()->now[0]);
     for(int i=0;i<20;i++){now[0]+=200;stable.feedback(200d,0L);}
-    check(stable.interval==8,"stable propagation RTT does not slow mouse");
+    check(stable.interval==4,"stable propagation RTT does not slow mouse");
     QuicMotion.Pacing newRoute=new QuicMotion.Pacing(()->now[0]);
     newRoute.feedback(8d,0L);
     for(int i=0;i<120;i++){now[0]+=100;newRoute.feedback(200d,0L);}
-    check(newRoute.interval==8&&newRoute.rttBuckets.size()<=20,"stable replacement route recovers within 12s with bounded RTT history");
+    check(newRoute.interval==4&&newRoute.rttBuckets.size()<=20,"stable replacement route recovers within 12s with bounded RTT history");
     QuicMotion.Pacing queue=new QuicMotion.Pacing(()->now[0]);
     queue.feedback(null,131072L);check(queue.interval==24,"severe queue pressure has a 24ms ceiling");
     now[0]+=150;queue.feedback(10d,null);check(queue.interval==24,"RTT-only report cannot erase fresh queue pressure");
@@ -56,21 +56,21 @@ final class AdaptiveTransportProbe {
     queue.feedback(null,null);check(queue.good==good&&queue.queueAt==queueAt&&queue.rttAt==rttAt,"empty report preserves all feedback state");
     queue.feedback(Double.NaN,0L);check(queue.queueAt==queueAt,"invalid sample cannot clear valid queue pressure");
     for(int i=0;i<20;i++){now[0]+=100;queue.feedback(null,0L);}
-    check(queue.interval==8,"healthy Datagram queue reports recover without reliable RPC samples");
+    check(queue.interval==4,"healthy Datagram queue reports recover without reliable RPC samples");
     QuicMotion.Pacing spike=new QuicMotion.Pacing(()->now[0]);
     spike.feedback(10d,0L);now[0]+=200;spike.feedback(210d,null);
-    check(spike.interval==12,"rising RTT adds one bounded pacing step");
-    now[0]+=200;spike.feedback(210d,null);check(spike.interval==16,"sustained RTT growth reaches modest coalescing delay");
+    check(spike.interval==8,"rising RTT adds one bounded pacing step");
+    now[0]+=200;spike.feedback(210d,null);check(spike.interval==12,"sustained RTT growth reaches modest coalescing delay");
     for(int i=0;i<35;i++){now[0]+=100;spike.feedback(null,0L);}
-    check(spike.interval==8,"expired RTT sample cannot prevent queue-led recovery");
+    check(spike.interval==4,"expired RTT sample cannot prevent queue-led recovery");
     QuicMotion.Pacing expiredQueue=new QuicMotion.Pacing(()->now[0]);
     expiredQueue.feedback(null,131072L);
-    for(int i=0;i<15;i++){now[0]+=150;expiredQueue.feedback(20d,null);}
-    check(expiredQueue.interval==8,"expired queue pressure does not survive fresh healthy RTT indefinitely");
+    for(int i=0;i<20;i++){now[0]+=150;expiredQueue.feedback(20d,null);}
+    check(expiredQueue.interval==4,"expired queue pressure does not survive fresh healthy RTT indefinitely");
     check(QuicMotion.rttSample("keepControl",Wire.obj())&&QuicMotion.rttSample("linkPing",Wire.obj()),"lightweight lease and ping are RTT samples");
     for(String kind:new String[]{"move","relative","button","key","wheel"})check(QuicMotion.rttSample("input",Wire.obj("kind",kind)),"input RTT sample "+kind);
     for(String method:new String[]{"videoOpen","videoKeep","fileBytes","text","acquire"})check(!QuicMotion.rttSample(method,Wire.obj()),"application work is not RTT: "+method);
     check(!QuicMotion.rttSample("input",Wire.obj("kind","navigation")),"slow navigation action is not RTT");
-    check(TouchpadView.nextPollDelay(0)==8&&TouchpadView.nextPollDelay(4)==4&&TouchpadView.nextPollDelay(8)==0&&TouchpadView.nextPollDelay(200)==0,"touchpad subtracts RPC duration instead of adding fixed latency");
+    check(TouchpadView.nextPollDelay(0)==4&&TouchpadView.nextPollDelay(4)==0&&TouchpadView.nextPollDelay(8)==0&&TouchpadView.nextPollDelay(200)==0,"touchpad subtracts RPC duration instead of adding fixed latency");
   }
 }

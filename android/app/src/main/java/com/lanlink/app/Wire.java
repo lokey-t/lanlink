@@ -23,14 +23,17 @@ public final class Wire implements AutoCloseable {
   public final Socket socket;
   public volatile String id;
   public volatile JSONObject info = new JSONObject();
+  volatile JSONObject peerLayoutVersion;
   public volatile long lastSeen = System.currentTimeMillis();
   public volatile boolean connected;
   public volatile String failure;
   public boolean outgoing;
   public volatile Wire fastPath;
+  private final Object fastPathOrder = new Object();
   volatile QuicManager quic;volatile long quicConn,quicRetry;
   QuicMotion.Sender quicTx;QuicMotion.Receiver quicRx;
   QuicInputQueue quicInputs;
+  long inputTx,inputRx;JSONObject heldMotion;CompletableFuture<JSONObject> inputPending;
   private final Object controlOrder = new Object();
   private final Object heartbeatOrder = new Object();
   private FutureTask<JSONObject> heartbeat;
@@ -101,6 +104,11 @@ public final class Wire implements AutoCloseable {
     return "lanlink1:" + Base64.getUrlEncoder().withoutPadding().encodeToString(b);
   }
 
+  boolean matchesGroupToken(String token) {
+    try { return MessageDigest.isEqual(secret, parseToken(token)); }
+    catch (IllegalArgumentException ignored) { return false; }
+  }
+
   private static byte[] derive(byte[] key, byte[] salt, String info) throws Exception {
     byte[] prk = hmac(salt, key);
     ByteArrayOutputStream b = new ByteArrayOutputStream();
@@ -156,7 +164,9 @@ public final class Wire implements AutoCloseable {
               "platform",
               "android",
               "capabilities",
-              identity.optJSONObject("capabilities")));
+              identity.optJSONObject("capabilities"),
+              "layout", identity.optJSONObject("layout"),
+              "masterSelection", identity.optJSONObject("masterSelection")));
       listener.ready(this);
       while (!closed) {
         JSONObject packet = read(input);
@@ -234,11 +244,27 @@ public final class Wire implements AutoCloseable {
 
   void receiveNotify(JSONObject message){listener.message(this,message);}
 
+  void useFastPath(Wire next) throws IOException {
+    synchronized (fastPathOrder) {
+      if (closed || !connected || next == null || !next.connected)
+        throw new IOException("辅助通道已结束");
+      fastPath = next;
+    }
+  }
+
+  boolean clearFastPath(Wire expected) {
+    synchronized (fastPathOrder) {
+      if (expected == null || fastPath != expected) return false;
+      fastPath = null;
+      return true;
+    }
+  }
+
   public JSONObject request(String method, JSONObject args) throws Exception {
     if (method.equals("keepControl")) {
       FutureTask<JSONObject> task;
       synchronized (heartbeatOrder) {
-        if (heartbeat == null) heartbeat = new FutureTask<>(() -> requestControl(method, args));
+        if (heartbeat == null) heartbeat = new FutureTask<>(() -> requestHeartbeat(args));
         task = heartbeat;
       }
       task.run(); // FutureTask executes only once, including concurrent renewals.
@@ -252,10 +278,24 @@ public final class Wire implements AutoCloseable {
       }
     }
     if (AuxLink.CONTROL.contains(method)) synchronized (controlOrder) {
+      boolean moving=method.equals("input")&&(args.optString("kind").equals("move")||args.optString("kind").equals("relative"));
+      if(inputPending!=null&&(!moving||fastPath!=null||quicConn==0)){inputPending.get(15500,TimeUnit.MILLISECONDS);inputPending=null;}
       return requestControl(method, args);
     }
     int timeout=method.equals("paste")?120000:15000;
     return quicConn!=0&&!method.equals("quicOpen")?quic.request(this,method,args,timeout):requestDirect(method,args,timeout);
+  }
+
+  private JSONObject requestHeartbeat(JSONObject args) throws Exception {
+    Wire path = fastPath;
+    long connection = quicConn;
+    try { return requestControl("keepControl", args); }
+    catch (Exception error) {
+      // Renewal is idempotent; an old route's failure cannot terminate its replacement.
+      if (connected && (fastPath != path || quicConn != connection))
+        return requestControl("keepControl", args);
+      throw error;
+    }
   }
 
   private JSONObject requestControl(String method, JSONObject args) throws Exception {
@@ -264,11 +304,12 @@ public final class Wire implements AutoCloseable {
         try { return fast.requestDirect(method, args, 1500); }
         catch (Exception error) {
           if (!fast.connected || error instanceof TimeoutException) {
-            fastPath = null;
+            boolean selected = clearFastPath(fast);
             fast.close();
             // Transport recovery remains ordered even when a lease detected it.
-            synchronized (controlOrder) {
-              try { requestDirect("inputReset", obj(), 1500); } catch (Exception ignored) {}
+            if (selected) synchronized (controlOrder) {
+              if (fastPath == null)
+                try { requestDirect("inputReset", obj(), 1500); } catch (Exception ignored) {}
             }
           }
           throw error;
@@ -295,8 +336,8 @@ public final class Wire implements AutoCloseable {
     if(quic!=null)quic.drop(this);
     closed = true;
     connected = false;
-    Wire fast = fastPath;
-    fastPath = null;
+    Wire fast;
+    synchronized (fastPathOrder) { fast = fastPath; fastPath = null; }
     if (fast != null) fast.close();
     try {
       socket.close();

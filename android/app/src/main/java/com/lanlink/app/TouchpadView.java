@@ -14,6 +14,7 @@ final class TouchpadView extends View implements AutoCloseable {
 
   final Sender sender;
   final java.util.function.Consumer<Exception> onError;
+  final TouchHaptics haptics = new TouchHaptics(this);
   long errorAt;
   final ScheduledExecutorService worker = Executors.newSingleThreadScheduledExecutor();
   final Paint paint = new Paint(3);
@@ -32,6 +33,7 @@ final class TouchpadView extends View implements AutoCloseable {
         if (touching && !multi && !moved && !closed) {
           drag = true;
           button(0, true);
+          haptics.dragStart();
           invalidate();
         }
       };
@@ -191,10 +193,12 @@ final class TouchpadView extends View implements AutoCloseable {
       multi = true;
       maxFingers = Math.max(maxFingers, e.getPointerCount());
       removeCallbacks(hold);
+      haptics.reset();
       if (drag) {
         button(0, false);
         drag = false;
         moved = true;
+        haptics.dragEnd();
       }
       if (e.getPointerCount() == 2) {
         scrollX = scrollStartX = (e.getX(0) + e.getX(1)) / 2;
@@ -210,6 +214,7 @@ final class TouchpadView extends View implements AutoCloseable {
         float cy = (e.getY(0) + e.getY(1)) / 2;
         if (Math.hypot(cx - scrollStartX, cy - scrollStartY) > 4 * density) moved = true;
         scrollRemainder += (cy - scrollY) * 3 / density;
+        float scrollDistanceDp = (cy - scrollY) / density;
         int delta = Math.round(scrollRemainder);
         scrollRemainder -= delta;
         scrollX = cx;
@@ -219,6 +224,7 @@ final class TouchpadView extends View implements AutoCloseable {
           synchronized (this) {
             wheel = Math.max(-2400, Math.min(2400, wheel + delta));
           }
+          haptics.scroll(scrollDistanceDp);
         }
       } else if (!multi) {
         int index = e.findPointerIndex(primaryId);
@@ -255,11 +261,14 @@ final class TouchpadView extends View implements AutoCloseable {
       if (drag) {
         button(0, false);
         drag = false;
+        haptics.dragEnd();
       } else if (!moved && maxFingers <= 2 && e.getEventTime() - downAt < 400) {
         button(multi ? 2 : 0, true);
         button(multi ? 2 : 0, false);
+        haptics.tap(multi);
         performClick();
       }
+      haptics.reset();
       primaryId = -1;
       starts.clear();
       intercept(false);
@@ -278,6 +287,7 @@ final class TouchpadView extends View implements AutoCloseable {
     maxFingers = 0;
     starts.clear();
     scrollRemainder = 0;
+    haptics.reset();
     synchronized (this) {
       dx = dy = 0;
       wheel = 0;

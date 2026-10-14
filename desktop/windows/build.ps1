@@ -8,6 +8,7 @@ $refs = @('System.dll','System.Core.dll','Microsoft.CSharp.dll','System.Xml.dll'
 $refs += @('WindowsBase.dll','PresentationCore.dll','PresentationFramework.dll') | ForEach-Object { '/reference:' + (Join-Path $framework ('WPF/' + $_)) }
 $refs += (Join-Path $PSScriptRoot 'Theme.cs')
 $refs += (Join-Path $PSScriptRoot 'UiText.cs')
+$refs += (Join-Path $PSScriptRoot 'SharedLayout.cs')
 $refs += (Join-Path $PSScriptRoot 'LanguageRules.cs')
 $refs += (Join-Path $PSScriptRoot 'Locale.cs')
 $refs += (Join-Path $PSScriptRoot 'UiLocale.cs')

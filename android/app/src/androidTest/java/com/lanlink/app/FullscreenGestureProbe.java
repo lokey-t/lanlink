@@ -8,6 +8,7 @@ import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
+import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.drawable.ShapeDrawable;
@@ -404,9 +405,87 @@ final class FullscreenGestureProbe {
 
   static String run(Instrumentation test) throws Exception {
     viewportGestures(test);
+    viewportDragging(test);
     touchpadGestures(test);
+    TouchHapticsProbe.run(test);
+    RemotePointerProbe.run();
     return "PASS: fullscreen coordinate mapping, letterbox exclusion, pinch/pan, gesture settings,"
-        + " three-finger keyboard, cancellation, native touchpad movement/scroll/click and drag release";
+        + " three-finger keyboard, fullscreen long-press drag, native input ordering,"
+        + " cancellation, touchpad movement/scroll/click, haptics and drag release";
+  }
+
+  private static void viewportDragging(Instrumentation test) {
+    test.runOnMainSync(() -> {
+      ViewportFixture f = new ViewportFixture(test.getTargetContext(), true);
+      VideoViewport v = f.viewport;
+      List<float[]> dragEvents = new ArrayList<>();
+      VideoViewport.DragListener listener = new VideoViewport.DragListener() {
+        public void start(float x, float y) { dragEvents.add(new float[] {0, x, y}); }
+        public void move(float x, float y) { dragEvents.add(new float[] {1, x, y}); }
+        public void end(float x, float y) { dragEvents.add(new float[] {2, x, y}); }
+      };
+      v.setRemoteGestures(true, true, (x,y) -> f.taps.add(new float[] {x,y}),
+          f.keyboards::incrementAndGet, listener);
+      new Gesture(v).send(MotionEvent.ACTION_DOWN, 300, 300);
+      v.hold.run();
+      check(dragEvents.isEmpty(), "no drag before source dimensions arrive");
+      v.fit(1920, 1080);
+      Gesture drag = new Gesture(v).send(MotionEvent.ACTION_DOWN, 150, 215.625f);
+      v.hold.run();
+      v.hold.run();
+      drag.send(MotionEvent.ACTION_MOVE, 450, 384.375f).send(MotionEvent.ACTION_UP, 600, 600);
+      check(dragEvents.size() == 3, "hold starts once, moves, then ends without an extra click");
+      near(dragEvents.get(0)[1], .25f, "drag starts at normalized source x");
+      near(dragEvents.get(0)[2], .25f, "drag starts at normalized source y");
+      near(dragEvents.get(1)[1], .75f, "drag follows normalized source x");
+      near(dragEvents.get(1)[2], .75f, "drag follows normalized source y");
+      near(dragEvents.get(2)[1], 1, "release includes final x");
+      near(dragEvents.get(2)[2], 1, "release outside source clamps to screen edge");
+      check(f.taps.isEmpty(), "drag release never synthesizes a click");
+      near(v.zoom, 1, "remote drag does not change zoom");
+      near(v.panX, 0, "remote drag does not pan the image");
+
+      dragEvents.clear();
+      drag = new Gesture(v).send(MotionEvent.ACTION_DOWN, 300, 50);
+      v.hold.run();
+      drag.send(MotionEvent.ACTION_UP, 300, 50);
+      check(dragEvents.isEmpty(), "holding black bars never presses the remote mouse");
+      drag = new Gesture(v).send(MotionEvent.ACTION_DOWN, 150, 300)
+          .send(MotionEvent.ACTION_MOVE, 450, 300);
+      v.hold.run();
+      drag.send(MotionEvent.ACTION_UP, 450, 300);
+      check(dragEvents.isEmpty(), "moving before hold timeout cancels drag recognition");
+
+      for (int interruption = 0; interruption < 6; interruption++) {
+        v.setRemoteGestures(true, true, (x,y) -> f.taps.add(new float[] {x,y}),
+            f.keyboards::incrementAndGet, listener);
+        dragEvents.clear();
+        drag = new Gesture(v).send(MotionEvent.ACTION_DOWN, 300, 300);
+        v.hold.run();
+        switch (interruption) {
+          case 0: drag.send(MotionEvent.ACTION_CANCEL, 300, 300); break;
+          case 1: drag.send(SECOND_DOWN, 300, 300, 400, 300); break;
+          case 2: v.onWindowFocusChanged(false); break;
+          case 3: v.setRemoteGestures(true, false, null, null, null); break;
+          case 4: v.setRemoteGestures(false, true, null, null, null); break;
+          default: v.reset();
+        }
+        drag.send(MotionEvent.ACTION_CANCEL, 300, 300);
+        v.hold.run();
+        check(dragEvents.size() == 2 && dragEvents.get(1)[0] == 2,
+            "interruption releases drag exactly once: " + interruption);
+      }
+      v.setRemoteGestures(true, true, null, null, listener);
+      v.zoom = 2;
+      v.panX = 50;
+      v.fit(1920, 1080);
+      dragEvents.clear();
+      drag = new Gesture(v).send(MotionEvent.ACTION_DOWN, 450, 300);
+      v.hold.run();
+      drag.send(MotionEvent.ACTION_UP, 450, 300);
+      near(dragEvents.get(0)[1], 7f/12f, "drag inverts zoom and pan into source coordinates");
+      check(f.taps.isEmpty(), "interruptions and zoomed drags never emit clicks");
+    });
   }
 
   private static View findVisible(View root, String label) {
@@ -527,7 +606,6 @@ final class FullscreenGestureProbe {
     final TextView header, hiddenFooter;
     final RemoteFullscreen fullscreen;
     final Bitmap frame;
-    final List<float[]> taps = new ArrayList<>();
     final List<JSONObject> input = new CopyOnWriteArrayList<>();
     final List<Exception> errors = new CopyOnWriteArrayList<>();
     final AtomicInteger restoredInsets = new AtomicInteger();
@@ -566,8 +644,7 @@ final class FullscreenGestureProbe {
       box.addView(keyboard, new LinearLayout.LayoutParams(1, 1));
       dialog.setContentView(outer);
       fullscreen = new RemoteFullscreen(activity, dialog, outer, box, stage, viewport, keyboard,
-          normalPad, supportedPads, input::add, errors::add,
-          (x, y) -> taps.add(new float[] {x, y}), restoredInsets::incrementAndGet);
+          normalPad, supportedPads, input::add, errors::add, restoredInsets::incrementAndGet);
       dialog.show();
       dialog.getWindow().setLayout(-1, -1);
       oldKeepScreenOn = (dialog.getWindow().getAttributes().flags
@@ -661,6 +738,7 @@ final class FullscreenGestureProbe {
   }
 
   static String runUi(Instrumentation test, Activity activity) throws Exception {
+    FullscreenTransitionProbe.run(test, activity);
     SharedPreferences prefs = activity.getSharedPreferences("remote_fullscreen", 0);
     String[] keys = {"left_touchpad", "right_touchpad", "pinch_zoom"};
     boolean[] present = new boolean[keys.length], saved = new boolean[keys.length];
@@ -690,23 +768,35 @@ final class FullscreenGestureProbe {
         check(f.pad(true).getVisibility() == View.VISIBLE && f.pad(false).getVisibility() == View.VISIBLE,
             "both fullscreen controller touchpads start enabled");
         check(f.pad(true).getRight() < f.pad(false).getLeft(), "side touchpads leave the stream center clear");
-        near((f.pad(true).getTop() + f.pad(true).getBottom()) / 2f, 300,
-            "left touchpad is vertically centered");
-        near((f.pad(false).getTop() + f.pad(false).getBottom()) / 2f, 300,
-            "right touchpad is vertically centered");
+        for (TouchpadView pad : new TouchpadView[] {f.pad(true), f.pad(false)}) {
+          FrameLayout.LayoutParams layout = (FrameLayout.LayoutParams) pad.getLayoutParams();
+          check((layout.gravity & android.view.Gravity.VERTICAL_GRAVITY_MASK) == android.view.Gravity.BOTTOM,
+              "fullscreen touchpads are anchored to the bottom");
+          check(pad.getBottom() == f.stage.getHeight() - layout.bottomMargin,
+              "fullscreen touchpad retains a bottom safe margin");
+        }
+        Bitmap blackBars = Bitmap.createBitmap(1200, 600, Bitmap.Config.ARGB_8888);
+        f.viewport.draw(new Canvas(blackBars));
+        check(blackBars.getPixel(1, 1) == Color.BLACK, "fullscreen empty area is pure black");
+        blackBars.recycle();
         check(!f.viewport.followCursor, "fullscreen direct touch suspends cursor-driven panning");
         f.preservedSurfaces();
         f.assertFittedFrame();
         f.assertNoMenuButton();
         tap(f.viewport, 600, 300);
-        check(f.taps.size() == 1, "fullscreen stream sends a direct tap");
       });
+      holder[0].fullscreen.pointer.worker.submit(() -> {}).get(3, TimeUnit.SECONDS);
+      check(buttons(holder[0].input, 0, true) == 1 && buttons(holder[0].input, 0, false) == 1,
+          "fullscreen stream sends a balanced direct tap");
       capture(test, "fullscreen-controller");
       test.runOnMainSync(() -> {
         holder[0].assertFittedFrame();
         holder[0].assertNoMenuButton();
       });
       test.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK);
+      test.waitForIdleSync();
+      // Bounds transitions deliberately keep the previous frame while the menu animates in.
+      Thread.sleep(400);
       test.waitForIdleSync();
       test.runOnMainSync(() -> {
         FullscreenFixture f = holder[0];
@@ -716,10 +806,12 @@ final class FullscreenGestureProbe {
         check(findVisible(f.stage, "设置") != null && findVisible(f.stage, "退出全屏") != null,
             "first Back exposes settings and explicit fullscreen exit");
         tap(f.viewport, f.viewport.getWidth() / 2f, f.viewport.getHeight() / 2f);
-        check(f.taps.size() == 1, "stream preview does not send remote input while menu is open");
         f.assertMenuLayout(960, 540);
         f.assertMenuLayout(1200, 600);
       });
+      holder[0].fullscreen.pointer.worker.submit(() -> {}).get(3, TimeUnit.SECONDS);
+      check(buttons(holder[0].input, 0, true) == 1,
+          "stream preview does not send remote input while menu is open");
       capture(test, "fullscreen-menu");
       test.runOnMainSync(() -> {
         FullscreenFixture f = holder[0];
@@ -796,7 +888,8 @@ final class FullscreenGestureProbe {
         phone.close();
         holder[0] = null;
       });
-      return "PASS: fullscreen entry, left preview/right menu, Back navigation, saved switches,"
+      return "PASS: animated menu/resume, rapid reversal, in-flight exit, fullscreen entry,"
+          + " bottom-corner touchpads, pure black letterbox, left preview/right menu, Back navigation, saved switches,"
           + " no menu overlay button, maximum uncropped aspect-ratio fit, responsive layout,"
           + " stable render surfaces and viewer restoration";
     } finally {

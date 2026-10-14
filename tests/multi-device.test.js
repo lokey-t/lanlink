@@ -8,6 +8,7 @@ import path from 'node:path';
 import { Service } from '../src/service.js';
 import { newToken } from '../src/identity.js';
 import { createActions } from '../src/actions.js';
+import { quicPath } from '../src/quic-native.js';
 
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(check) { const end = Date.now() + 6000; while (!check()) { if (Date.now() > end) throw Error('mesh condition timed out'); await pause(10); } }
@@ -25,12 +26,12 @@ class Native extends EventEmitter {
   close() {}
 }
 // Real encrypted sockets and group services, with OS actions replaced by probes.
-async function mesh(t) {
+async function mesh(t, quic = false) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'lanlink-mesh-')), token = newToken(), devices = [];
   t.after(async () => { await Promise.all(devices.map(s => s.close())); await rm(root, { recursive: true, force: true }); });
   for (const [name, platform] of [['computer-a', 'darwin'], ['computer-b', 'win32'], ['phone-a', 'android'], ['phone-b', 'android']]) {
     const dir = path.join(root, name); await mkdir(dir);
-    const s = new Service({ id: randomUUID(), name, token, edges: {}, permissions: { input: true, screen: true, clipboard: true, shutdown: true } }, dir, new Native(name), { host: '127.0.0.1', port: 0, noDiscovery: true, noQuic: true });
+    const s = new Service({ id: randomUUID(), name, token, edges: {}, permissions: { input: true, screen: true, clipboard: true, shutdown: true } }, dir, new Native(name), { host: '127.0.0.1', port: 0, noDiscovery: true, noQuic: !quic });
     const identity = s.identity.bind(s); s.identity = () => ({ ...identity(), platform });
     if (platform === 'android') s.native.capabilities.inputMode = 'adb/root';
     devices.push(s); await s.start();
@@ -39,6 +40,53 @@ async function mesh(t) {
   await until(() => devices.every(s => s.peers.size === 3 && [...s.peers.values()].every(p => p.info)));
   return devices;
 }
+
+for (const quic of [false, true]) test(`Mac directly enters Android while Windows retains its USB route (${quic?'QUIC':'TCP'})`, {skip:quic&&!quicPath()}, async t=>{
+  const [mac,win,phone,otherPhone]=await mesh(t,quic);
+  const usbPeer=win.getPeer(phone.config.id);
+  // ADB forwarding is replaced by an equivalent loopback tunnel. Authentication,
+  // auxiliary selection, ownership, preflight and edge switching are production code.
+  win.links.forward=async(_serial,port)=>({port,close:async()=>{}});
+  await win.links.candidate(phone.config.id,null,'WINDOWS-USB-PHONE');
+  const usb=[...win.links.links].find(link=>link.primary===usbPeer);
+  assert.ok(usb);
+  await usb.peer.request('linkUse');win.links.activate(usbPeer,usb);
+  assert.equal(win.links.status(usbPeer),'USB + 局域网');
+  if(quic){
+    for(const service of [mac,win,phone])for(const peer of service.peers.values())await service.quic.connect(peer);
+    await until(()=>mac.getPeer(phone.config.id).quicConn && mac.getPeer(win.config.id).quicConn);
+  }
+  mac.adb.locate=async()=>{throw Error('Mac must never require a local USB cable');};
+  await mac.settings({masterId:mac.config.id,dwell:0,layoutPositions:{[mac.config.id]:{x:0,y:0},[phone.config.id]:{x:1,y:0}}});
+  await until(()=>[mac,win,phone,otherPhone].every(service=>service.state().masterId===mac.config.id&&service.state().layout.positions[phone.config.id]?.x===1));
+  mac.edge.cooldown=0; // The layout-edit guard has elapsed before the physical edge entry.
+  await mac.nativeEvent({type:'cursor',x:999,y:300,width:1000,height:600});
+  assert.equal(mac.active,phone.config.id);assert.equal(phone.owner.id,mac.config.id);
+  assert.equal(mac.adbGuide.notice,null);assert.equal(mac.capture,true);
+  await mac.nativeEvent({type:'input',kind:'move',dx:120,dy:20});
+  await mac.nativeEvent({type:'input',kind:'button',button:0,down:true});
+  await mac.nativeEvent({type:'input',kind:'button',button:0,down:false});
+  await until(()=>phone.native.calls.some(c=>c.method==='input'&&c.args.kind==='button'&&!c.args.down));
+  await assert.rejects(usbPeer.request('acquire'),/CONTROL_CONFLICT/);
+  const releases=phone.native.calls.filter(c=>c.method==='release').length;
+  await win.links.drop(usb);
+  await until(()=>!phone.getPeer(win.config.id).fastLink);
+  assert.equal(phone.native.calls.filter(c=>c.method==='release').length,releases,'unplugging Windows cannot release Mac input');
+  assert.equal(mac.active,phone.config.id);assert.equal(phone.owner.id,mac.config.id);
+  assert.equal(otherPhone.owner,null);
+  await mac.returnLocal();
+  // Direction reversal between the computers also remains independent of phones.
+  await mac.switchTo(win.config.id,'left',false);
+  await mac.nativeEvent({type:'input',kind:'key',code:'KeyM',down:true});
+  await mac.nativeEvent({type:'input',kind:'key',code:'KeyM',down:false});
+  await mac.returnLocal();
+  await win.switchTo(mac.config.id,'right',false);
+  await win.nativeEvent({type:'input',kind:'key',code:'KeyW',down:true});
+  await win.nativeEvent({type:'input',kind:'key',code:'KeyW',down:false});
+  assert.ok(win.native.calls.some(c=>c.method==='input'&&c.args.code==='KeyM'));
+  assert.ok(mac.native.calls.some(c=>c.method==='input'&&c.args.code==='KeyW'));
+  await win.returnLocal();
+});
 
 test('two computers control different Android identities independently; contention and revocation stay scoped', async t => {
   const [a, b, phoneA, phoneB] = await mesh(t);

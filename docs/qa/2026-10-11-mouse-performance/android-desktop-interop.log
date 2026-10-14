@@ -1,0 +1,9 @@
+PASS: Android/Desktop native QUIC and binary motion v2 negotiated over authenticated primary membership.
+PASS: phone and desktop X → remote Y → X both synchronize without stale echo suppression.
+PASS: native Android/desktop WebRTC frame fragments, desktop offerer, 36 KB H.264 payload both directions.
+PASS: native Android/desktop WebRTC frame fragments, phone offerer, 36 KB H.264 payload both directions.
+PASS: Android/desktop QUIC reliable streams, 800 KB and 850 KB, SHA-256 and system file clipboard both directions.
+PASS: real Android ADB helper injected Datagram mouse position and reliable click at the expected screen coordinates.
+PASS: actual emulator ADB screen H.264 -> native QUIC Datagram -> desktop FFmpeg decoder, 10 rendered screen frames.
+PASS: Android/desktop automatic and manual clipboard sync, no echo, helper background read/write, text history copy, settings and dock/home shortcuts
+PASS: encrypted desktop/Android clipboard roundtrip, automatic toggles, manual actions, background ADB helper and history copy.

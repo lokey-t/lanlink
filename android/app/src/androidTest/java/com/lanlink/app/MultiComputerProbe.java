@@ -18,11 +18,13 @@ final class MultiComputerProbe {
     ArrayList<Wire> connections = new ArrayList<>();
     CountDownLatch done = new CountDownLatch(1);
     AtomicInteger keys = new AtomicInteger();
+    AtomicInteger motion = new AtomicInteger();
     test.runOnMainSync(() -> {
       android.widget.Button target = new android.widget.Button(activity);
       target.setText("多电脑与双屏串流验证"); target.setFocusableInTouchMode(true);
       activity.setContentView(target); target.requestFocus();
       target.setOnKeyListener((view, code, event) -> { if (code == android.view.KeyEvent.KEYCODE_A) { keys.incrementAndGet(); return true; } return false; });
+      target.setOnHoverListener((view, event) -> { motion.incrementAndGet(); return true; });
     });
     try {
       prefs.edit().remove("allow_input").remove("allow_screen").remove("allow_clipboard")
@@ -41,7 +43,16 @@ final class MultiComputerProbe {
             service.jobs.execute(() -> {
               try {
                 JSONObject result = Wire.obj();
-                if (operation.equals("probe-counts")) result = Wire.obj("keys", keys.get(), "consentPending", service.consent.peek() != null);
+                if (operation.equals("probe-counts")) {
+                  JSONArray mice = new JSONArray();
+                  for (int device : android.view.InputDevice.getDeviceIds()) {
+                    android.view.InputDevice input = android.view.InputDevice.getDevice(device);
+                    if (input != null && input.getName().equals("LanLink Virtual Mouse")) mice.put(device);
+                  }
+                  result = Wire.obj("keys", keys.get(), "motion", motion.get(), "mice", mice, "consentPending", service.consent.peek() != null, "layout", service.groupLayout.layout(), "masterSelection", service.groupLayout.master());
+                }
+                else if (operation.equals("probe-layout-place")) { JSONObject point = message.getJSONObject("args"); service.groupLayout.place(point.getString("id"), point.getInt("x"), point.getInt("y")); }
+                else if (operation.equals("probe-master")) service.groupLayout.chooseMaster(message.getJSONObject("args").getString("id"));
                 else if (operation.equals("probe-permission")) {
                   JSONObject change = message.getJSONObject("args");
                   service.setDevicePermission(change.getString("id"), change.getString("key"), change.getBoolean("enabled"));

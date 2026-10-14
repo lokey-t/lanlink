@@ -6,6 +6,8 @@ if (!desktop) {
   history.replaceState(null, '', '/');
 }
 let state, initial = true, remoteId = null, viewing = false, control = false, noticeTimer, polling = false;
+const seenAndroidDisconnectRequests = new Set();
+let androidDisconnectRequestId = '';
 async function api(route, data) {
   if (desktop) return window.lanlink[route](data ?? {});
   const r = await fetch('/api/' + route, { method: data === undefined ? 'GET' : 'POST', headers: { 'X-LanLink-Token': token, 'Content-Type': 'application/json' }, body: data === undefined ? undefined : JSON.stringify(data) });
@@ -18,7 +20,7 @@ let deviceSignature = '';
 async function refresh() {
   if (polling) return; polling = true;
   try {
-    state = await api('state'); $('localBadge').textContent = '● ' + state.name + (state.capabilities.simulated ? ' · 模拟模式' : ''); $('layoutName').textContent = state.name; $('account').textContent = state.groupId; $('peerCount').textContent = state.peers.length; $('join').textContent = state.groupEstablished ? '解散当前组并加入其他组' : '加入其他组';
+    state = await api('state'); $('localBadge').textContent = '● ' + state.name + (state.capabilities.simulated ? ' · 模拟模式' : ''); $('account').textContent = state.groupId; $('peerCount').textContent = state.peers.length; $('join').textContent = state.groupEstablished ? '解散当前组并加入其他组' : '加入其他组';
     const sig = JSON.stringify([state.peers, state.active]);
     if (sig !== deviceSignature) {
       deviceSignature = sig; $('deviceList').replaceChildren();
@@ -32,23 +34,67 @@ async function refresh() {
         if (['win32', 'darwin'].includes(p.platform)) actions.append(button('关机', async () => { if (confirm('请求 ' + p.name + ' 在 30 秒后关机？目标端可取消，未保存的工作可能阻止关机。')) { await api('shutdown', { id: p.id }); notice('已发送关机请求'); } }, 'danger'), button('取消关机', () => api('cancel-shutdown', { id: p.id }), 'secondary'));
         card.append(icon, name, detail, actions); $('deviceList').append(card);
       }
-      for (const edge of ['top', 'left', 'right', 'bottom']) {
-        const el = $('edge-' + edge), selected = initial ? state.edges[edge] || '' : el.value;
-        el.replaceChildren(new Option(({ top: '上方', left: '左方', right: '右方', bottom: '下方' })[edge] + ' · 不切换', ''));
-        for (const p of state.peers) el.add(new Option(p.name || p.id, p.id));
-        if (selected && !state.peers.some(p => p.id === selected)) el.add(new Option('已设置设备（离线）', selected)); el.value = selected;
-      }
+
     }
-    if (initial) { $('deviceName').value = state.name; $('dwell').value = state.dwell; $('master').checked = state.master; for (const p of Object.keys(state.permissions)) $('perm-' + p).checked = state.permissions[p]; initial = false; }
+    if (initial) { $('deviceName').value = state.name; $('dwell').value = state.dwell; for (const p of Object.keys(state.permissions)) $('perm-' + p).checked = state.permissions[p]; initial = false; }
     $('shutdownWarning').hidden = !state.shutdownAt; $('countdown').textContent = state.shutdownAt ? Math.max(0, Math.ceil((state.shutdownAt - Date.now()) / 1000)) + ' 秒后执行' : '';
     $('clipboardState').textContent = state.clipboard ? `${state.clipboard.files} 个文件 · ${state.clipboard.textLength} 个文本字符 · 切换后可粘贴` : '复制文本或文件后，会自动通知已配对设备';
     $('transfer').textContent = state.transfer ? `正在接收 ${state.transfer.name} · ${Math.round(state.transfer.received / Math.max(1, state.transfer.total) * 100)}%` : '';
     $('logs').replaceChildren(...state.logs.map(l => { const li = document.createElement('li'); li.textContent = new Date(l.time).toLocaleTimeString() + '  ' + l.message; return li; }));
     if (remoteId && state.active !== remoteId) control = false;
     $('remoteStatus').textContent = control ? '正在控制 · 点击画面后输入' : '查看模式';
+    refreshSharedLayout();
+    refreshAndroidDisconnectNotice();
   } catch (e) { notice(e.message); } finally { polling = false; }
 }
-action('saveLayout', async () => { const edges = {}; for (const k of ['left', 'right', 'top', 'bottom']) edges[k] = $('edge-' + k).value; await api('settings', { edges, dwell: Number($('dwell').value), master: $('master').checked }); notice('屏幕布局已保存'); });
+let layoutSignature='', layoutMasterSaving=false;
+async function chooseLayoutMaster(id){
+  if(layoutMasterSaving||id===state.masterId||!state.layoutDevices?.some(device=>device.id===id&&['darwin','win32'].includes(device.platform)))return;
+  layoutMasterSaving=true;
+  try{const result=await api('settings',{masterId:id});notice(result.warning||'主控设备已切换');await refresh();}
+  catch(error){notice(error.message);$('layoutMaster').value=state.masterId||'';}
+  finally{layoutMasterSaving=false;}
+}
+function refreshSharedLayout(){
+  const devices=state.layoutDevices||[],positions=state.layout?.positions||{};
+  const signature=JSON.stringify([devices,positions,state.masterId]);if(signature===layoutSignature)return;layoutSignature=signature;
+  const options=(id,items,empty)=>{const select=$(id),previous=select.value;select.replaceChildren(...(empty?[new Option(empty,'')]:[]),...items.map(device=>new Option(device.name+(device.online?'':' · 离线'),device.id)));if(items.some(device=>device.id===previous))select.value=previous;};
+  options('layoutTarget',devices);options('layoutAnchor',devices.filter(device=>positions[device.id]),'布局中心');
+  options('layoutMaster',devices.filter(device=>['darwin','win32'].includes(device.platform)),'请选择主控设备');$('layoutMaster').value=state.masterId||'';
+  const points=Object.values(positions),minX=Math.min(0,...points.map(point=>point.x)),maxX=Math.max(0,...points.map(point=>point.x)),minY=Math.min(0,...points.map(point=>point.y)),maxY=Math.max(0,...points.map(point=>point.y));
+  const grid=$('sharedLayout');grid.replaceChildren();grid.style.gridTemplateColumns=`repeat(${maxX-minX+1}, 148px)`;grid.style.gridTemplateRows=`repeat(${maxY-minY+1}, 86px)`;
+  for(const device of devices){const point=positions[device.id];if(!point)continue;
+    const node=button('',()=>{if(['darwin','win32'].includes(device.platform))void chooseLayoutMaster(device.id);else $('layoutAnchor').value=device.id;},'shared-node');
+    node.title=['darwin','win32'].includes(device.platform)?'点击设为主控电脑':'手机作为被控设备';
+    node.setAttribute('aria-pressed',String(device.id===state.masterId));
+    if(device.id===state.masterId){node.classList.add('shared-master');const badge=document.createElement('span');badge.className='shared-master-badge';badge.textContent='主控电脑';node.append(badge);}
+    if(points.some(other=>other.x===point.x+1&&other.y===point.y))node.classList.add('link-right');
+    if(points.some(other=>other.y===point.y+1&&other.x===point.x))node.classList.add('link-down');
+    node.style.gridColumn=String(point.x-minX+1);node.style.gridRow=String(point.y-minY+1);
+    const name=document.createElement('strong');name.textContent=device.name;const status=document.createElement('small');status.textContent=(device.online?'在线':'离线');node.append(name,status);grid.append(node);
+  }
+  $('layoutHelp').textContent=points.length?'点击电脑切换主控，主控标识会同步到同组设备。使用下方的相对设备选项调整布局。':'先将主控设备放到中心，再把其他设备放在任意设备旁边。';
+}
+action('placeLayout',async()=>{const id=$('layoutTarget').value,anchor=state.layout?.positions?.[$('layoutAnchor').value]||{x:0,y:0},delta={center:{x:0,y:0},left:{x:-1,y:0},right:{x:1,y:0},top:{x:0,y:-1},bottom:{x:0,y:1}}[$('layoutDirection').value];await api('layout-place',{id,x:anchor.x+delta.x,y:anchor.y+delta.y});notice('同组布局已更新');});
+action('removeLayout',async()=>{await api('layout-remove',{id:$('layoutTarget').value});notice('设备已移出布局');});
+$('layoutMaster').onchange=()=>chooseLayoutMaster($('layoutMaster').value);
+function refreshAndroidDisconnectNotice() {
+  const request = state.androidDisconnectNotice, requestId = request?.requestId || '', dialog = $('androidDisconnect');
+  if (dialog.open && androidDisconnectRequestId !== requestId) { androidDisconnectRequestId = ''; dialog.close(); }
+  if (!requestId) return;
+  $('androidDisconnectName').textContent = request.name || '设备';
+  $('androidDisconnectMessage').textContent = request.message || '';
+  if (dialog.open || seenAndroidDisconnectRequests.has(requestId)) return;
+  androidDisconnectRequestId = requestId; seenAndroidDisconnectRequests.add(requestId); dialog.showModal();
+}
+async function dismissAndroidDisconnectNotice() {
+  const requestId = androidDisconnectRequestId;
+  androidDisconnectRequestId = ''; $('androidDisconnect').close();
+  if (requestId) await api('android-disconnect-dismiss', { requestId });
+}
+action('dismissAndroidDisconnect', dismissAndroidDisconnectNotice);
+$('androidDisconnect').addEventListener('cancel', e => { e.preventDefault(); dismissAndroidDisconnectNotice().catch(e => notice(e.message)); });
+action('saveLayout', async () => { await api('settings', { dwell: Number($('dwell').value) }); notice('本机切换设置已保存'); });
 action('saveSettings', async () => { const permissions = {}; for (const k of ['input', 'screen', 'clipboard', 'shutdown']) permissions[k] = $('perm-' + k).checked; await api('settings', { name: $('deviceName').value, permissions }); notice('本机设置已保存'); });
 action('showToken', async () => { if (!$('ownToken').hidden) { $('ownToken').hidden = true; $('ownToken').value = ''; $('qrPanel').hidden = true; $('pairQr').removeAttribute('src'); clearInterval(pairingTimer); await api('pairing-stop', {}); return; } const pairing = await api('pairing', { reveal: true }); $('ownToken').value = pairing.code; $('pairQr').src = pairing.qr; $('qrPanel').hidden = false; $('ownToken').hidden = false; clearInterval(pairingTimer); pairingTimer = setInterval(async () => { if ($('ownToken').hidden) { clearInterval(pairingTimer); return; } try { const p = await api('pairing', { reveal: true }); $('ownToken').value = p.code + ' · ' + Math.ceil(p.remainingMs / 1000) + ' 秒后刷新'; $('pairQr').src = p.qr; } catch { $('ownToken').value = ''; $('pairQr').removeAttribute('src'); } }, 1000); });
 action('join', async () => { const current = await api('state'); if (!confirm(current.groupEstablished ? '解散原组后所有成员都将退出；离线成员收到通知后退出。验证新配对码成功后才解散，继续？' : '加入对方的组？')) return; await api('join', { code: $('joinToken').value.trim(), expectedGroup: current.groupId, dissolveCurrentGroup: current.groupEstablished }); $('joinToken').value = ''; $('ownToken').value = ''; $('ownToken').hidden = true; $('qrPanel').hidden = true; $('pairQr').removeAttribute('src'); notice('已加入组，正在发现设备'); });

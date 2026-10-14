@@ -33,7 +33,7 @@ createInterface({ input: process.stdin }).on('line', line => {
     const code = await new Promise((resolve, reject) => { child.once('exit', resolve); child.once('error', reject); });
     assert.equal(code, 0, output); return output;
   }
-  await run('xcrun', ['swiftc', '-swift-version', '5', '-D', 'LANLINK_MODEL_TEST', '-module-cache-path', path.join(root, 'module-cache'), '-framework', 'AppKit', '-framework', 'SwiftUI', '-framework', 'ServiceManagement', 'desktop/macos/LanLink.swift', 'desktop/macos/Localization.swift', 'desktop/macos/SingleInstance.swift', 'desktop/macos/Remote.swift', 'desktop/macos/AdbGuide.swift', 'desktop/macos/Staging.swift', 'tests/MacRemoteProbe.swift', '-o', executable]);
+  await run('xcrun', ['swiftc', '-swift-version', '5', '-D', 'LANLINK_MODEL_TEST', '-module-cache-path', path.join(root, 'module-cache'), '-framework', 'AppKit', '-framework', 'SwiftUI', '-framework', 'ServiceManagement', 'desktop/macos/LanLink.swift', 'desktop/macos/SharedLayout.swift', 'desktop/macos/Localization.swift', 'desktop/macos/SingleInstance.swift', 'desktop/macos/Remote.swift', 'desktop/macos/AdbGuide.swift', 'desktop/macos/Staging.swift', 'tests/MacRemoteProbe.swift', '-o', executable]);
   assert.match(await run(executable, [process.execPath, fixture, log]), /MAC_REMOTE_PROBE_OK/);
   const requests = (await readFile(log, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
   const indexOf = (method, id) => requests.findIndex(request => request.method === method && request.args.id === id);

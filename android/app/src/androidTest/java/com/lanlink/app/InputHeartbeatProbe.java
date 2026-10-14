@@ -44,10 +44,16 @@ final class InputHeartbeatProbe {
       final Wire sender=controller;
       Future<JSONObject> first=callers.submit(()->sender.request("keepControl",Wire.obj()));
       AdaptiveTransportProbe.check(leaseReceived.await(2,TimeUnit.SECONDS),"lease reaches selected transport");
-      Future<JSONObject> second=callers.submit(()->sender.request("keepControl",Wire.obj()));
+      AtomicReference<Thread> secondThread=new AtomicReference<>();
+      Future<JSONObject> second=callers.submit(()->{secondThread.set(Thread.currentThread());return sender.request("keepControl",Wire.obj());});
       Future<JSONObject> move=callers.submit(()->sender.request("input",Wire.obj("kind","relative","dx",1,"dy",0)));
       move.get(1,TimeUnit.SECONDS);
       AdaptiveTransportProbe.check(!first.isDone()&&!second.isDone()&&leases.get()==1,"input proceeds before heartbeat response and renewals stay single-flight");
+      // Ensure the second caller actually joined the first FutureTask before
+      // completing it; an unscheduled caller is a new renewal, not a duplicate.
+      long joinedBy=System.currentTimeMillis()+1000;
+      while((secondThread.get()==null||secondThread.get().getState()!=Thread.State.WAITING)&&System.currentTimeMillis()<joinedBy)Thread.sleep(2);
+      AdaptiveTransportProbe.check(secondThread.get()!=null&&secondThread.get().getState()==Thread.State.WAITING,"second caller joins the in-flight renewal");
       remote.send(Wire.obj("type","response","id",pendingLease.get().getString("id"),"result",Wire.obj()));
       first.get(2,TimeUnit.SECONDS);second.get(2,TimeUnit.SECONDS);
       sender.request("keepControl",Wire.obj());

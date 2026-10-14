@@ -8,11 +8,14 @@ import org.json.*;
 final class QuicProbe {
   static void check(boolean value,String message){if(!value)throw new AssertionError(message);}
   static String run(LinkService service)throws Exception {
+    QuicAdmissionProbe.run(service);
+    QuicPipelineProbe.run(service);
     QuicNative a=new QuicNative(new File(service.getCacheDir(),"quic-probe-a")),b=new QuicNative(new File(service.getCacheDir(),"quic-probe-b"));
+    ArrayBlockingQueue<byte[]> binaryMoves=new ArrayBlockingQueue<>(8);
     ArrayBlockingQueue<JSONObject> moves=new ArrayBlockingQueue<>(8),requests=new ArrayBlockingQueue<>(8);
     try{
       a.ready.get(3,TimeUnit.SECONDS);JSONObject info=b.ready.get(3,TimeUnit.SECONDS);
-      b.listener=e->{if(e.optString("event").equals("datagram"))moves.offer(e);if(e.optString("event").equals("request"))requests.offer(e);};
+      b.listener=new QuicNative.Listener(){public void event(JSONObject e){if(e.optString("event").equals("datagram"))moves.offer(e);if(e.optString("event").equals("request"))requests.offer(e);}public void motion(long conn,byte[] bytes){binaryMoves.offer(bytes);}};
       String ticket=Wire.hex(VideoWire.random())+Wire.hex(VideoWire.random());ticket=ticket.substring(0,64);
       b.call("ticket",Wire.obj("ticket",ticket,"owner",UUID.randomUUID().toString()));
       long conn=a.call("connect",Wire.obj("address","127.0.0.1:"+info.getInt("port"),"owner",UUID.randomUUID().toString(),"ticket",ticket,"fingerprint",info.getString("fingerprint"),"timeout",5000)).getLong("conn");
@@ -42,8 +45,30 @@ final class QuicProbe {
         check(process.distance("REL_Y")==3020,"long outage does not replay excessive stale motion");
         for(JSONObject input:receiver.accept(sender.move(Wire.obj("kind","move","x",.5,"y",1,"dx",0,"dy",25))))hid.move(input,1000,2000);
         check(process.distance("REL_Y")==3045,"live motion resumes after excessive recovery gap");
+        java.lang.reflect.Field field=ShellAgent.class.getDeclaredField("hid");field.setAccessible(true);Object previous=field.get(null);
+        java.lang.reflect.Method handle=ShellAgent.class.getDeclaredMethod("handle",JSONObject.class);handle.setAccessible(true);
+        try{field.set(null,hid);JSONArray batch=new JSONArray();for(double distance:new double[]{1000,1000,500})batch.put(Wire.obj("kind","move","x",.5,"y",1,"dx",0,"dy",distance));
+          handle.invoke(null,Wire.obj("method","inputBatch","inputs",batch,"width",1000,"height",2000,"pointer",true));
+          check(process.distance("REL_Y")==5545,"one helper request executes all recovered motion without losing distance");
+        }finally{field.set(null,previous);}
+
       }finally{hid.close();}
-      return "PASS: Android JNI QUIC handshake, raw boundary loss recovery, bounded burst recovery, duplicate/reorder suppression, reliable click barrier and production uinput command output";
+      JSONObject absolute=Wire.obj("method","input","args",Wire.obj("kind","move","x",.2,"y",.8),"width",1080,"height",1920,"pointer",true);
+      JSONObject compact=ShellAgent.compactInput(ShellChannel.motionLine(absolute));
+      check(!compact.getJSONObject("args").has("dx")&&compact.getJSONObject("args").getDouble("x")==.2&&compact.getBoolean("pointer"),"compact IPC preserves absolute positioning without inventing raw deltas");
+      absolute.getJSONObject("args").put("dx",.5).put("dy",-2.25);compact=ShellAgent.compactInput(ShellChannel.motionLine(absolute));
+      check(compact.getJSONObject("args").getDouble("dy")==-2.25,"compact IPC preserves fractional raw movement");
+      check(a.binaryMotion&&b.binaryMotion,"binary JNI and event-driven wait enabled");
+      sender.reset();receiver.reset(sender.epoch);sender.move(Wire.obj("kind","relative","dx",1.25,"dy",3));
+      JSONObject snapshot=sender.move(Wire.obj("kind","relative","dx",-.5,"dy",4)).put("afterInput",7);
+      byte[] bytes=QuicMotion.encode(snapshot);check(bytes.length==104,"fixed binary record size");
+      a.sendMotion(conn,bytes);byte[] delivered=binaryMoves.poll(3,TimeUnit.SECONDS);check(delivered!=null&&Arrays.equals(bytes,delivered),"JNI binary bytes arrive without JSON/Base64");
+      JSONObject decoded=QuicMotion.decode(delivered);check(decoded.getLong("afterInput")==7&&decoded.getString("epoch").equals(sender.epoch),"input dependency and epoch survive binary transport");
+      List<JSONObject> binaryInputs=receiver.accept(decoded);check(binaryInputs.size()==1&&binaryInputs.get(0).getDouble("dx")==.75&&binaryInputs.get(0).getDouble("dy")==7,"binary transport recovers lost fractional distance");
+      sender.epoch="00112233-4455-6677-8899-aabbccddeeff";
+      JSONObject golden=Wire.obj("epoch",sender.epoch,"seq",2,"time",12345,"afterInput",7,"kind","move","raw",true,"dx",.75,"dy",380,"recentDx",.75,"recentDy",380,"x",.25,"y",1);
+      check(Wire.hex(QuicMotion.encode(golden)).equals("020300000000000000112233445566778899aabbccddeeff0000000000000002000000000000303900000000000000073fe80000000000004077c000000000003fe80000000000004077c000000000003fd00000000000003ff00000000000000000000000000000"),"Java matches desktop golden binary fixture");
+      return "PASS: binary JNI, event-driven wait, shared desktop/Android binary fixture, fractional loss recovery; Android JNI QUIC handshake, raw boundary loss recovery, bounded burst recovery, duplicate/reorder suppression, reliable click barrier and production uinput command output";
     }finally{a.close();b.close();}
   }
   /** Captures production uinput commands without injecting test input into the user's phone. */

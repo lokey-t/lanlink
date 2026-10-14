@@ -6,6 +6,25 @@ import org.json.JSONObject;
 
 /** Cumulative raw motion survives loss, including absolute moves at a clamped edge. */
 final class QuicMotion {
+  static byte[] encode(JSONObject m)throws Exception {
+    java.nio.ByteBuffer b=java.nio.ByteBuffer.allocate(104).order(java.nio.ByteOrder.BIG_ENDIAN);
+    UUID epoch=UUID.fromString(m.getString("epoch"));boolean move=m.getString("kind").equals("move");
+    b.put((byte)2).put((byte)((move?1:0)|(m.optBoolean("raw")?2:0)));b.position(8);
+    b.putLong(epoch.getMostSignificantBits()).putLong(epoch.getLeastSignificantBits());
+    b.putLong(m.getLong("seq")).putLong(m.getLong("time")).putLong(m.optLong("afterInput"));
+    for(String key:new String[]{"dx","dy","recentDx","recentDy","x","y","ageMs"})b.putDouble(m.optDouble(key,0));
+    return b.array();
+  }
+  static JSONObject decode(byte[] bytes)throws Exception {
+    if(bytes.length!=104||bytes[0]!=2||(bytes[1]&~3)!=0)throw new IOException("鼠标数据无效");
+    for(int i=2;i<8;i++)if(bytes[i]!=0)throw new IOException("鼠标数据无效");
+    java.nio.ByteBuffer b=java.nio.ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.BIG_ENDIAN);b.position(8);
+    String epoch=new UUID(b.getLong(),b.getLong()).toString();long seq=b.getLong(),time=b.getLong(),after=b.getLong();
+    if(seq<=0||seq>9007199254740991L||time<0||time>9007199254740991L||after<0||after>9007199254740991L)throw new IOException("鼠标序号无效");
+    JSONObject m=Wire.obj("epoch",epoch,"seq",seq,"time",time,"afterInput",after,"kind",(bytes[1]&1)!=0?"move":"relative");
+    for(String key:new String[]{"dx","dy","recentDx","recentDy","x","y","ageMs"})m.put(key,b.getDouble());
+    if((bytes[1]&2)!=0)m.put("raw",true);return m;
+  }
   static final class Sender {
     String epoch;long seq;double dx,dy;JSONObject snapshot;final ArrayDeque<double[]> samples=new ArrayDeque<>();
     final java.util.function.LongSupplier clock;Sender(java.util.function.LongSupplier clock){this.clock=clock;reset();}
@@ -26,7 +45,7 @@ final class QuicMotion {
   }
   /** Per-connection pacing: native Datagram enqueue time is not network RTT. */
   static final class Pacing {
-    static final int MIN=8,MAX=24;
+    static final int MIN=4,MAX=24;
     final java.util.function.LongSupplier clock;
     final ArrayDeque<double[]> rttBuckets=new ArrayDeque<>();
     int interval=MIN,good;long changedAt=-1000000,lastSent=-1000000,recoverSince=-1;
@@ -49,7 +68,7 @@ final class QuicMotion {
       double excess=rttAt>=0&&now-rttAt<=2000?Math.max(0,rtt-base):0;
       long backlog=queueAt>=0&&now-queueAt<=500?queued:0;
       double freshDelay=delayAt>=0&&now-delayAt<=500?delay:0;
-      int target=backlog>=65536||freshDelay>=80?24:backlog>=16384?20:backlog>=4096||excess>=40||freshDelay>=35?16:excess>=15||freshDelay>=15?12:8;
+      int target=backlog>=65536||freshDelay>=80?24:backlog>=16384?20:backlog>=4096||excess>=40||freshDelay>=35?16:excess>=15||freshDelay>=15?12:4;
       if(target>interval){good=0;recoverSince=-1;if(now-changedAt>=120){interval=backlog>=131072?MAX:Math.min(target,interval+4);changedAt=now;}}
       else if(target<interval){if(recoverSince<0)recoverSince=now;if(++good>=3&&now-recoverSince>=200&&now-changedAt>=250){interval=Math.max(target,interval-4);changedAt=now;good=0;recoverSince=now;}}
       else{good=0;recoverSince=-1;}

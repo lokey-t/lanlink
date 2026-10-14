@@ -4,6 +4,9 @@ import qrcode from '../vendor/qrcode.mjs';
 import { Group } from './group.js';
 import { AdbManager } from './adb.js';
 import { groupPermissions } from './permissions.js';
+import {editLayoutPositions,initializeLayout} from './layout.js';
+import {applySettings} from './settings.js';
+import {initializeMaster} from './master.js';
 
 // Shared application operations. Desktop calls them directly through restricted IPC;
 // the optional developer HTTP harness delegates to the same implementation.
@@ -30,6 +33,8 @@ export function createActions(service) {
     'group-permissions': () => groupPermissions(service),
     'adb-forget': a => adb.forget(a.id),
     settings: a => service.settings(a),
+    'layout-place':a=>service.configure(()=>applySettings(service,{layoutPositions:editLayoutPositions(service,a)})),
+    'layout-remove':a=>service.configure(()=>applySettings(service,{layoutPositions:editLayoutPositions(service,{id:a.id,remove:true})})),
     'device-remove': a => service.group.remove(a.id),
     'stop-inbound': () => service.stopInbound(),
     'adb-devices': () => adb.devices(),
@@ -53,6 +58,7 @@ export function createActions(service) {
     'consent-revoke': a => service.revokeConsent(a.id),
     'consent-set': a => service.setConsent(a.id,a.permissions),
     'permission-dismiss': () => { service.permissionNotice = null; },
+    'android-disconnect-dismiss': a => service.androidRecovery.dismiss(a.requestId),
     pairing: a => {
       const info = { ...service.pairing.show(), groupId: service.group.data.id, groupEstablished: service.group.established };
       if (a.reveal) {
@@ -82,7 +88,7 @@ export function createActions(service) {
       await service.returnLocal(); service.stopDiscovery?.(); service.pairing.hide();
       for (const p of service.sockets) p.close();
       service.config.knownDevices = {}; service.config.edges = {}; service.config.deviceGrants = {}; service.consent.reset(service.config.deviceGrants); service.permissionNotice = null; service.secret = secret; service.config.token = result.token.trim(); service.config.pausedPeers = {}; if (result.group) service.group.adopt(result.group, result.token); else { service.config.group = { id: (await import('./identity.js')).accountId(result.token), revision: 0, members: {}, removed: [], history: [], anchors: {} }; service.group.data = service.config.group; service.group.data.members[service.config.id] = service.group.own; service.group.refreshBoxes(); } service.offers.clear(); service.clipboard = null;service.clipboardSync.clear();
-      delete service.config.pendingGroupJoin; await saveConfig(service.dir, service.config);
+      delete service.config.pendingGroupJoin;delete service.config.layout;delete service.config.masterSelection;service.config.master=false;await initializeMaster(service);await initializeLayout(service);await saveConfig(service.dir, service.config);
       if (!service.options.noDiscovery) service.stopDiscovery = startDiscovery(service.identity(), secret, service.port,
         (b, host) => { if (service.config.id < b.id && !service.peers.has(b.id)) service.connect(host, b.port); }, e => service.log(e.message));
       if (result.host) service.connect(result.host, result.port);

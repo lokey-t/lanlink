@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { stopVideoProcess, createDecoder, chooseEncoder } from '../src/video-codec.js';
 import { existsSync } from 'node:fs';
@@ -25,6 +25,24 @@ test('actual idle FFmpeg decoder closes its input and exits without leaving a wo
   const decoder = createDecoder(ffmpeg, () => assert.fail('closed decoder must not publish'), () => {});
   const first = decoder.close(); assert.equal(decoder.close(), first); await first;
   assert.equal(decoder.push({ key: true, data: Buffer.from([0, 0, 1, 9]) }), false);
+});
+
+test('macOS JPEG capture produces its first H.264 image without FFmpeg stream-analysis buffering', { skip: process.platform !== 'darwin' || !existsSync(ffmpeg), timeout: 10000 }, async t => {
+  if (!await chooseEncoder(ffmpeg, new AbortController().signal)) { t.skip('native H.264 encoder unavailable'); return; }
+  const jpeg = spawnSync(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=size=1440x900:color=blue', '-frames:v', '1', '-c:v', 'mjpeg', '-f', 'image2pipe', 'pipe:1'], { timeout: 5000 });
+  assert.equal(jpeg.status, 0, String(jpeg.stderr));
+  const previous = process.env.LANLINK_FFMPEG; process.env.LANLINK_FFMPEG = ffmpeg;
+  let source, timer;
+  t.after(async () => {
+    clearTimeout(timer); await source?.close();
+    if (previous === undefined) delete process.env.LANLINK_FFMPEG; else process.env.LANLINK_FFMPEG = previous;
+  });
+  const native = { capabilities: { width: 1440, height: 900 }, call: async () => ({ data: jpeg.stdout.toString('base64'), width: 1440, height: 900 }) };
+  const frame = await new Promise((resolve, reject) => {
+    timer = setTimeout(() => reject(Error('first H.264 image was still buffered after two seconds')), 2000);
+    source = captureVideo(native, true, resolve, reject);
+  });
+  clearTimeout(timer); assert.equal(frame.codec, 'h264'); assert.equal(frame.key, true);
 });
 
 test('service shutdown drains active and retired codecs before its parent exits immediately', { timeout: 15000 }, async t => {

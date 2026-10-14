@@ -10,6 +10,7 @@ const execute = promisify(execFile);
 const root = fileURLToPath(new URL('../', import.meta.url));
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const serialPattern = /^[a-zA-Z0-9][a-zA-Z0-9._:\[\]-]{0,199}$/;
+const usbSerial = serial => typeof serial === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,199}$/.test(serial) && !serial.startsWith('emulator-') && !serial.includes('_adb-tls-');
 
 export async function findAdb({ env = process.env, platform = process.platform, home = os.homedir(), exists = access } = {}) {
   const name = platform === 'win32' ? 'adb.exe' : 'adb';
@@ -52,6 +53,7 @@ export function helperCommand(bootstrap, installed) {
 export class AdbManager {
   constructor(service, { locate = findAdb, run = execute, wait = delay } = {}) {
     Object.assign(this, { service, locate, run, wait }); this.busy = false; this.retries = new Map();
+    this.usbPrompted = new Map(); this.ticking = false;
   }
   async remember(id, serial, peer) {
     if (!this.service.config) return;
@@ -67,7 +69,14 @@ export class AdbManager {
     return { message: '已取消该设备的电脑自动恢复；不会撤销手机系统中的 USB 调试信任。' };
   }
   async tick() {
-    if (this.busy || this.service.closing) return;
+    if (this.busy || this.ticking || this.service.closing) return;
+    this.ticking = true;
+    try {
+      try { await this.scanUsb(); } catch { /* A temporary USB scan failure must not stop saved recovery. */ }
+      await this.recover();
+    } finally { this.ticking = false; }
+  }
+  async recover() {
     for (const [id, binding] of Object.entries(this.service.config.adbBindings || {})) {
       const peer = this.service.peers.get(id);
       if (!peer || peer.closed || peer.info?.platform !== 'android' || peer.info.capabilities?.memberKey !== binding.key || this.service.group.excluded(id)) continue;
@@ -82,6 +91,59 @@ export class AdbManager {
       }
       catch { /* Retry saved, explicitly approved transports only; never pick another phone. */ }
       break;
+    }
+  }
+  async usbDevice(serial) {
+    if (!usbSerial(serial)) return null;
+    const executable = await this.locate();
+    if (!executable) return null;
+    return parseDevices(await this.command(executable, ['devices', '-l'], 3000)).find(device => device.serial === serial) || null;
+  }
+  async scanUsb() {
+    const service = this.service, guide = service.adbGuide;
+    if (!guide?.usbDetected || this.busy || service.closing || service.changingGroup) return;
+    const group = service.group;
+    const members = Object.entries(group?.data?.members || {}).filter(([id, member]) => member.platform === 'android' && typeof member.key === 'string' && member.key && !group.excluded(id));
+    if (!members.length) { this.usbPrompted.clear(); return; }
+    const currentMember = (id, key) => service.group === group && !group.excluded(id) && group.data.members[id]?.key === key;
+    const executable = await this.locate();
+    if (!executable) return;
+    const devices = parseDevices(await this.command(executable, ['devices', '-l'], 3000)).filter(device => usbSerial(device.serial));
+    const attached = new Set(devices.map(device => device.serial));
+    for (const serial of this.usbPrompted.keys()) if (!attached.has(serial)) this.usbPrompted.delete(serial);
+    if (guide.notice || this.busy || service.closing || service.changingGroup) return;
+    for (const [id, member] of members) {
+      const peer = service.peers.get(id);
+      // Only authenticated, current group identities can supply live status.
+      if (peer && !peer.closed && peer.info?.capabilities?.memberKey !== member.key) continue;
+      const binding = service.config.adbBindings?.[id];
+      const bound = binding?.key === member.key && this.validBinding(id, binding) ? binding.serial : null;
+      let report;
+      for (const device of [...devices].sort((a, b) => Number(b.serial === bound) - Number(a.serial === bound))) {
+        const noticeKey = `${id}:${member.key}`;
+        if (this.usbPrompted.get(device.serial)?.has(noticeKey)) continue;
+        let verified = false;
+        if (device.status === 'unauthorized') {
+          // ADB cannot read an application's identity before Android's system
+          // consent. Only a previously verified serial/key binding is evidence.
+          if (device.serial !== bound) continue;
+          const owners = Object.entries(service.config.adbBindings || {}).filter(([otherId, other]) => other.serial === device.serial && currentMember(otherId, other.key) && this.validBinding(otherId, other));
+          if (owners.length !== 1) continue;
+          verified = true;
+        } else if (device.status === 'device' && peer && !peer.closed) {
+          if (!report) try { report = await peer.request('permission-status', {}, 3000); } catch { break; }
+          const engine = report?.engine;
+          if (!engine || engine.root || engine.authorized !== false && !engine.revoked && (engine.ready || engine.authorized === true || engine.recovering)) break;
+          verified = await service.links?.verifyUsb(id, device.serial);
+        }
+        if (!verified || this.busy || service.closing || service.changingGroup || guide.notice || !currentMember(id, member.key)) continue;
+        if (peer && (peer.closed || service.peers.get(id) !== peer || peer.info?.capabilities?.memberKey !== member.key)) continue;
+        const opened = await guide.usbDetected({ id, name: member.name, serial: device.serial, usbUnauthorized: device.status === 'unauthorized', report });
+        if (!opened) continue;
+        if (!this.usbPrompted.has(device.serial)) this.usbPrompted.set(device.serial, new Set());
+        this.usbPrompted.get(device.serial).add(noticeKey);
+        return;
+      }
     }
   }
   async command(executable, args, timeout = 7000) {
@@ -189,6 +251,12 @@ export class AdbManager {
   async match(id) {
     const peer=this.service.getPeer(id);
     if(peer.info?.platform!=='android')throw Error('请选择组内安卓设备');
+    const notice = this.service.adbGuide?.notice;
+    if (notice?.id === id && notice.trigger === 'usb') {
+      const device = await this.usbDevice(notice.serial);
+      if (this.service.getPeer(id) !== peer) throw Error('设备连接已改变');
+      if (!device || device.status !== 'device') return { connected: false, message: device?.status === 'unauthorized' ? '已检测到这台组内手机，请解锁手机，允许 USB 调试并勾选始终允许此电脑' : '手机的数据线连接尚未就绪，请重新连接并允许 USB 调试' };
+    }
     const status = await peer.request('adbStatus', {}, 5000);
     if(this.service.getPeer(id)!==peer)throw Error('设备连接已改变');
     if(status.ready===true)return {connected:true,ready:true,name:peer.info.name,message:'手机助手已就绪，本组电脑可直接使用，无需连接数据线'};

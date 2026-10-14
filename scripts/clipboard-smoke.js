@@ -28,7 +28,7 @@ try{
   await service.start();
   instrument=run(['shell','am','instrument','-w','-e','clipboardSmokePort',String(service.port),'-e','clipboardSmokeToken',config.token,'com.lanlink.app.test/com.lanlink.app.PermissionFlowTest'],120000).then(r=>r.stdout);
   await until(()=>{peer=[...service.peers.values()].find(p=>p.info?.platform==='android');return peer;});
-  if(quicTest){await until(()=>peer.quicConn);console.log('PASS: Android/Desktop native QUIC negotiated over authenticated primary membership.');}
+  if(quicTest){await until(()=>peer.quicConn);assert.equal(service.quic.modern(peer),true,'desktop and Android must negotiate binary motion v2');console.log('PASS: Android/Desktop native QUIC and binary motion v2 negotiated over authenticated primary membership.');}
   const step=(step,args={})=>(peer.tcpRequest||peer.lanRequest||peer.request.bind(peer))('testClipboard',{step,...args},20000);
   native.copy('电脑自动上传 → 手机');await until(async()=>{const r=await step('status');return r.latest?.text==='电脑自动上传 → 手机';});
   await step('copy',{text:'手机自动上传 → 电脑'});await until(()=>native.clip.text==='手机自动上传 → 电脑');const count=service.clipboardSync.list().length;

@@ -193,7 +193,8 @@ test('cursor feedback is normalized and sent only while the authorized input lea
 });
 
 test('configured edge dwell enters shared control, moves into target, and returns at opposite edge', async t => {
-  const {a,b}=await pair(t);a.config.master=true;a.config.dwell=100;a.config.edges={right:b.config.id};
+  const {a,b}=await pair(t);await a.settings({masterId:a.config.id,dwell:100,edges:{right:b.config.id}});
+  await until(()=>b.state().masterId===a.config.id&&b.state().layout.revision===a.state().layout.revision);
   let now=1000;a.edge.now=()=>now;a.edge.cooldown=0;
   await a.nativeEvent({type:'cursor',x:1919,y:540,width:1920,height:1080});
   assert.equal(a.active,null);now+=110;
@@ -207,7 +208,7 @@ test('configured edge dwell enters shared control, moves into target, and return
   assert(b.native.calls.some(c=>c.method==='input'&&c.args.kind==='button'&&c.args.down));
   a.position.x=0;now+=999;a.checkReturnEdge();assert.equal(a.active,b.config.id);now+=1;a.checkReturnEdge();now+=110;a.checkReturnEdge();
   await until(()=>!a.active&&!a.returning);assert.equal(b.owner,null);
-  assert(!a.native.calls.some(c=>c.method==='warp'),'capture and return must preserve the desktop cursor');
+  assert.equal(a.native.calls.findLast(c=>c.method==='warp')?.args.x,.985,'shared-layout return enters the adjacent right side of the physical master');
   now+=1500;await a.nativeEvent({type:'cursor',x:1919,y:540,width:1920,height:1080});now+=1000;await a.nativeEvent({type:'cursor',x:1919,y:540,width:1920,height:1080});
   assert.equal(a.active,null,'stationary cursor must not immediately reenter the phone');
 });

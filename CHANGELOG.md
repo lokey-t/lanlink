@@ -8,6 +8,15 @@
 This file preserves the original release notes in Chinese, with same-version addenda grouped together.
 Historical entries describe their version at the time. For current behavior, permission defaults, build instructions, and validation scope, use the READMEs and the latest validation reports.
 
+## 0.3.47 混合设备控制与共享布局
+
+- 同组设备共享一张固定坐标布局；任意设备旁都可继续连接其他设备，支持多级串联和分支。布局修改、离线重连和主控鼠标选择在组内同步，切换主控不移动设备位置。
+- 只有选定的主控鼠标可发起跨屏输入；沿远端屏幕邻边继续切换时保持主控键鼠捕获，释放原目标后再向新目标输入。保留修饰键顺序，离线邻居、拒绝、取消和迟到终止消息不会留下占用。
+- Windows 输入到达后直接唤醒处理，截屏和剪贴板各用独立工作线程；Mac/Windows 输出采用独立写线程并合并连续鼠标样本，避免慢画面输出阻塞输入回调。
+- QUIC 按设备限制普通请求，为输入、续租、回复和关闭预留容量；本机暂忙不再被误判成设备断线。鼠标发送间隔仍按网络压力在 8–24ms 之间调节。
+- 修复未连接的安卓辅助通道超时误释放鼠标、旧通道迟到失败影响新通道等问题。Windows 保持 USB 辅链时，Mac 可直接通过局域网使用安卓已启动的输入助手。
+- 验证依据与实机边界见 [共享布局与混合设备记录](docs/SHARED-LAYOUT-0.3.47.md)。
+
 ## 0.3.46 深度测试问题修复
 
 - macOS、Windows、Android 设置新增本机语言选择，提供「跟随系统」及 11 种语言；首次使用匹配系统语言，识别中文脚本与地区，无法匹配时回退英语。语言切换立即保存，桌面保留设置草稿；共享设置页与常用文案资源，其余提示使用英语回退。

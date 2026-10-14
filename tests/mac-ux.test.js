@@ -34,7 +34,7 @@ createInterface({input:process.stdin}).on('line', line => {
     assert.equal(code, 0, output); return output;
   }
   const executable = path.join(root, 'probe');
-  await run('xcrun', ['swiftc', '-swift-version', '5', '-D', 'LANLINK_MODEL_TEST', '-module-cache-path', path.join(root, 'module-cache'), '-framework', 'AppKit', '-framework', 'SwiftUI', '-framework', 'ServiceManagement', 'desktop/macos/LanLink.swift', 'desktop/macos/Localization.swift', 'desktop/macos/SingleInstance.swift', 'desktop/macos/Remote.swift', 'desktop/macos/AdbGuide.swift', 'desktop/macos/Staging.swift', 'tests/MacUXProbe.swift', '-o', executable]);
+  await run('xcrun', ['swiftc', '-swift-version', '5', '-D', 'LANLINK_MODEL_TEST', '-module-cache-path', path.join(root, 'module-cache'), '-framework', 'AppKit', '-framework', 'SwiftUI', '-framework', 'ServiceManagement', 'desktop/macos/LanLink.swift', 'desktop/macos/SharedLayout.swift', 'desktop/macos/Localization.swift', 'desktop/macos/SingleInstance.swift', 'desktop/macos/Remote.swift', 'desktop/macos/AdbGuide.swift', 'desktop/macos/Staging.swift', 'tests/MacUXProbe.swift', '-o', executable]);
   assert.match(await run(executable, [root]), /MAC_UX_PROBE_OK/);
   const events = (await readFile(log, 'utf8')).trim().split('\n').map(JSON.parse);
   assert.equal(events.filter(e => e.event === 'start').length, 3, 'manual recovery and crash recovery each launch one host');

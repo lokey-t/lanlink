@@ -17,7 +17,7 @@ node scripts/build-info.js
 sh native/macos/build.sh
 sh scripts/build-quic-macos.sh
 mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Resources/runtime"
-xcrun swiftc -O -swift-version 5 -target "$(uname -m)-apple-macos14.0" -framework AppKit -framework SwiftUI -framework ServiceManagement desktop/macos/LanLink.swift desktop/macos/Localization.swift desktop/macos/SingleInstance.swift desktop/macos/Remote.swift desktop/macos/AdbGuide.swift desktop/macos/Staging.swift -o "$BUNDLE/Contents/MacOS/LanLink"
+xcrun swiftc -O -swift-version 5 -target "$(uname -m)-apple-macos14.0" -framework AppKit -framework SwiftUI -framework ServiceManagement desktop/macos/LanLink.swift desktop/macos/SharedLayout.swift desktop/macos/Localization.swift desktop/macos/SingleInstance.swift desktop/macos/Remote.swift desktop/macos/AdbGuide.swift desktop/macos/Staging.swift -o "$BUNDLE/Contents/MacOS/LanLink"
 for name in src vendor node_modules; do cp -R "$name" "$BUNDLE/Contents/Resources/"; done
 cp assets/icons/LanLink.icns assets/icons/MenuBarTemplate.png assets/icons/MenuBarTemplate@2x.png "$BUNDLE/Contents/Resources/"
 mkdir -p "$BUNDLE/Contents/Resources/native/quic"

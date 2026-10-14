@@ -26,7 +26,8 @@ async function pair(t, permissions = { input: true, screen: true, clipboard: tru
   const folder = await mkdtemp(path.join(os.tmpdir(), 'lanlink-test-')); const token = newToken(); const services = [];
   for (const name of ['A', 'B']) { const dir = path.join(folder, name); await mkdir(dir); const config = { id: randomUUID(), name, token, dwell: 450, edges: {}, master: true, permissions: { ...permissions } }; const s = new Service(config, dir, new FakeNative(), { port: 0, host: '127.0.0.1', noDiscovery: true }); await s.start(); services.push(s); }
   t.after(async () => { await Promise.all(services.map(s => s.close())); await rm(folder, { recursive: true, force: true }); });
-  services[0].connect('127.0.0.1', services[1].port); await until(() => services.every(s => s.peers.size === 1));
+  services[0].connect('127.0.0.1', services[1].port); await until(() => services.every(s => s.peers.size === 1&&[...s.peers.values()].every(p=>p.info)));
+  await services[0].settings({masterId:services[0].config.id});await until(()=>services.every(s=>s.state().masterId===services[0].config.id));
   return { a: services[0], b: services[1], folder };
 }
 test('authenticated group requests work immediately, while explicit restrictions persist after reconnect', async t => {
@@ -69,7 +70,10 @@ test('target termination blocks retries while retaining grants for a new explici
   const {a,b}=await pair(t,{input:false,screen:false,clipboard:false,shutdown:false},false);
   const p=a.getPeer(b.config.id);
   await assert.rejects(p.request('acquire'),/PERMISSION_REQUIRED/);
+  const incoming=b.getPeer(a.config.id),send=incoming.send.bind(incoming),ended=[];
+  incoming.send=message=>{if(message.type==='control-ended')ended.push(message);return send(message);};
   await b.revokeConsent(a.config.id);
+  assert.equal(ended.length,0,'revoking an idle peer must not send a late end notification that cancels its next approved session');
   await p.request('permission-request', {permissions:['input','screen']});
   await b.decideConsent({...b.state().consentRequests[0],accepted:true,permissions:{input:true,screen:true,clipboard:false,shutdown:false}});
   assert.deepEqual(b.config.permissions,{input:true,screen:true,clipboard:false,shutdown:false});
@@ -199,7 +203,7 @@ test('Datagram recovery at a boundary cannot become a local edge switch after re
   assert.equal(recovered.reduce((n,m)=>n+m.dx,0),1300);
   for(const input of recovered)await b.handle(b.getPeer(a.config.id),'input',input);
   assert.equal(b.edge.waitingForLeave,true);await a.returnLocal();
-  b.config.master=true;b.config.edges={right:a.config.id};b.config.dwell=0;b.edge.cooldown=0;
+  await b.settings({masterId:b.config.id,edges:{right:a.config.id},dwell:0});await until(()=>a.state().masterId===b.config.id);b.edge.cooldown=0;
   const boundary={type:'cursor',x:1919,y:540,width:1920,height:1080};
   await b.nativeEvent({...boundary,synthetic:true});await b.nativeEvent(boundary);
   assert.equal(b.active,null);assert.equal(b.edge.progress,null);

@@ -22,25 +22,38 @@ export class LinkManager {
     const send=async(method,args,timeout)=>{
         const link = primary.fastLink;
         if (!link || link.peer.closed) return primary.lanRequest(method, args, timeout);
+        const routeVersion = primary.routeVersion;
         try { return await link.peer.request(method, args, Math.min(timeout || 15000, 1500)); }
         catch (error) {
           if (link.peer.closed || error.message === '设备响应超时') {
             await this.drop(link);
-            await primary.lanRequest('inputReset', {}, 1500).catch(() => {});
+            // A delayed failure (especially a heartbeat) belongs to the route
+            // it used. It must not reset input on a replacement connection.
+            if (this.valid(primary) && !primary.fastLink && link.retiredVersion === routeVersion + 1 && primary.routeVersion === link.retiredVersion)
+              await primary.lanRequest('inputReset', {}, 1500).catch(() => {});
           }
           throw error; // Never repeat a possibly delivered key/click/text operation.
         }
     };
     const measure=(method,args)=>motionRttSample(method,args)&&(!primary.quicConn||!!primary.fastLink);
-    primary.inputScheduler=new InputQueue(send,{adaptive:true,measure});
+    primary.inputScheduler=new InputQueue(send,{adaptive:true,measure,overlap:(method)=>method==='input'&&!primary.fastLink&&this.service.quic?.modern(primary)});
     let heartbeat;
     primary.request = (method,args={},timeout)=>{
       // Renewal has no input ordering semantics. Waiting for its network reply
       // must not pause Datagram movement or clicks on a high-latency connection.
       if(method==='keepControl') {
         if(!heartbeat) {
-          const start=performance.now(),measureRtt=measure(method,args);
-          heartbeat=send(method,args,timeout).then(result=>{
+          let start=performance.now(),measureRtt=measure(method,args);
+          const routeVersion=primary.routeVersion;
+          heartbeat=send(method,args,timeout).catch(error=>{
+            // Renewal is idempotent: confirm the current route once before
+            // reporting an old route's failure as the end of the control lease.
+            if(this.valid(primary) && primary.routeVersion!==routeVersion) {
+              start=performance.now();measureRtt=measure(method,args);
+              return send(method,args,timeout);
+            }
+            throw error;
+          }).then(result=>{
             if(measureRtt)primary.inputScheduler.feedback({rttMs:performance.now()-start});
             return result;
           }).finally(()=>{heartbeat=null;});
@@ -56,7 +69,9 @@ export class LinkManager {
   }
   activate(primary, link) {
     if (!this.valid(primary)) throw Error('设备连接已结束');
-    this.wrap(primary); primary.fastLink = link; this.service.emit('change');
+    this.wrap(primary);
+    if (primary.fastLink !== link) primary.routeVersion = (primary.routeVersion || 0) + 1;
+    primary.fastLink = link; this.service.emit('change');
   }
   async dispatch(primary, link, m) {
     if (!this.valid(primary)) { await this.drop(link); return; }
@@ -168,7 +183,7 @@ export class LinkManager {
               await link.peer.request('linkUse', {}, 1200); this.activate(link.primary, link);
             }
           }
-        } catch { await this.drop(link); }
+        } catch (error) { if (error.code !== 'QUIC_BUSY') await this.drop(link); }
       }
       const android = [...this.service.peers].filter(([, p]) => p.info?.platform === 'android' && p.info.capabilities?.dualLink === true);
       if (!android.length) return;
@@ -213,6 +228,7 @@ export class LinkManager {
     link.primary.off('closed', link.onPrimaryClosed);
     if (link.primary.fastLink === link) {
       link.primary.fastLink = null;
+      link.retiredVersion = link.primary.routeVersion = (link.primary.routeVersion || 0) + 1;
       if (this.service.owner?.id === link.primary.remote.id) this.service.native.call('release').catch(() => {});
     }
     link.peer.close(); await link.tunnel?.close(); this.service.emit('change');
