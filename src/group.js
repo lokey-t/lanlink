@@ -75,16 +75,61 @@ export class Group {
     this.checkHistory(); const signature=sign('sha256',Buffer.from(['lanlink-member-v1',this.data.id,member.id,member.key].join('|')),privateOptions(this.service.config.deviceKey.private)).toString('base64'); this.learn({...member,certificate:{issuer:this.own.id,signature}}, true); this.data.revision = Math.max(Date.now(), this.data.revision + 1); this.refreshBoxes();
     await saveConfig(this.service.dir, this.service.config); this.publish();
   }
+  admitGroup(meta) {
+    return this.enqueue(async () => {
+      const incoming = Object.values(meta?.members || {});
+      if (!incoming.length || incoming.length > 16 || incoming.some(m => !validMember(m))) throw Error('组公钥信息无效');
+      const ids = new Set(Object.keys(this.data.members));
+      for (const m of incoming) {
+        if (this.data.members[m.id] && this.data.members[m.id].key !== m.key) throw Error('设备公钥冲突，请重新配对');
+        ids.add(m.id);
+      }
+      if (ids.size > 16) throw Error('每个组最多支持 16 台设备');
+      if (!Array.isArray(meta.removed) || meta.removed.some(id => !validId(id))) throw Error('组成员信息无效');
+      const removed = [...new Set([...this.data.removed, ...meta.removed])].filter(id => !ids.has(id));
+      if (removed.length > 64) throw Error('组成员变更过多，请创建新组');
+      if (this.service.config.dissolvedGroups?.[this.data.id]) throw Error('当前组已解散');
+      this.checkHistory();
+      for (const m of incoming) if (m.id !== this.own.id) {
+        const signature = sign('sha256', Buffer.from(['lanlink-member-v1', this.data.id, m.id, m.key].join('|')), privateOptions(this.service.config.deviceKey.private)).toString('base64');
+        this.learn({ ...m, certificate: { issuer: this.own.id, signature } }, true);
+      }
+      this.data.removed = removed; for (const id of removed) this.forget(id);
+      this.data.revision = Math.max(Date.now(), this.data.revision + 1); this.refreshBoxes();
+      await saveConfig(this.service.dir, this.service.config); this.publish();
+    });
+  }
+  migration(meta, token) {
+    const revision = Math.max(Date.now(), this.data.revision + 1), result = structuredClone(this.service.config.mergedGroups || {});
+    result[this.data.id] = Object.values(this.data.members).filter(m => !this.excluded(m.id)).map(m => this.makeBox(m, { token, meta }, revision));
+    this.validateMigrations(result); return result;
+  }
+  validateMigrations(records) {
+    if (!records || Array.isArray(records) || typeof records !== 'object' || Object.keys(records).length > 64 || JSON.stringify(records).length > 4000000) throw Error('离线成员合并记录已满');
+    for (const [id, boxes] of Object.entries(records)) if (!/^[a-f0-9]{24}$/.test(id) || !Array.isArray(boxes) || boxes.length > 16 || boxes.some(b => b?.group !== id || b.kind !== 'lanlink-group-update-v1' || !validId(b.to) || !validId(b.issuer) || !Number.isSafeInteger(b.revision) || typeof b.signature !== 'string' || b.signature.length > 500 || typeof b.wrapped !== 'string' || b.wrapped.length > 500 || typeof b.body !== 'string' || b.body.length > 40000 || JSON.stringify(b).length > 60000)) throw Error('组合并记录无效');
+  }
+  rememberMigrations(records) {
+    if (!records) return false;
+    this.validateMigrations(records);
+    const merged = { ...this.service.config.mergedGroups };
+    let changed = false;
+    for (const [id, boxes] of Object.entries(records)) if (!merged[id] || Math.max(...boxes.map(b => b.revision)) > Math.max(...merged[id].map(b => b.revision))) { merged[id] = boxes; changed = true; }
+    this.validateMigrations(merged);
+    if (changed) this.service.config.mergedGroups = merged;
+    return changed;
+  }
   adopt(meta, token) {
     if (this.service.config.dissolvedGroups?.[meta?.id]) throw Error('该组已经解散，请生成新的组邀请');
     if (!meta || !/^[a-f0-9]{24}$/.test(meta.id) || !Number.isSafeInteger(meta.revision) || !meta.members || Object.keys(meta.members).length > 16) throw Error('组成员信息无效');
     const members = {}; for (const m of Object.values(meta.members)) { if (!validMember(m)) throw Error('设备公钥无效'); members[m.id] = m; }
     this.service.config.token = token; this.data = this.service.config.group = { id: meta.id, revision: meta.revision, members, removed: (meta.removed || []).filter(validId).slice(0, 64), history: Array.isArray(meta.history) ? meta.history.slice(-1024) : [], anchors: meta.anchors && Object.keys(meta.anchors).length <= 128 ? meta.anchors : {} }; this.data.members[this.own.id] = this.own; this.data.removed = this.data.removed.filter(id => id !== this.own.id); this.refreshBoxes();
   }
-  makeBox(member) {
-    const key = randomBytes(32), b = { kind: 'lanlink-group-update-v1', group: this.data.id, to: member.id, revision: this.data.revision, issuer: this.own.id, chain: this.certificateChain() };
+  makeBox(member, replacement, revision = this.data.revision) {
+    const key = randomBytes(32), b = { kind: 'lanlink-group-update-v1', group: this.data.id, to: member.id, revision, issuer: this.own.id, chain: this.certificateChain() };
     b.wrapped = publicEncrypt({ ...keyOptions(member.key), oaepHash: 'sha256', padding: constants.RSA_PKCS1_OAEP_PADDING }, key).toString('base64');
-    b.body = seal(key, 0, { token: this.service.config.token, removed: this.data.removed, members: this.data.members });
+    const target = replacement?.meta || this.data;
+    b.body = seal(key, 0, { token: replacement?.token || this.service.config.token, removed: target.removed || [], members: target.members, ...(replacement ? { group: { id: target.id, revision: target.revision, anchors: target.anchors || {} } } : {}) });
+    if (b.body.length > 40000) throw Error('组更新成员信息过多');
     b.signature = sign('sha256', Buffer.from(boxTranscript(b)), privateOptions(this.service.config.deviceKey.private)).toString('base64'); return b;
   }
   certificateChain() {
@@ -119,6 +164,13 @@ export class Group {
   async acceptUpdate(b) {
     if (this.service.config.dissolvedGroups?.[this.data.id]) throw Error('当前组已经解散');
     const payload = this.decodeBox(b), s = this.service;
+    if (payload.group) {
+      const meta = { ...payload.group, members: payload.members, removed: payload.removed, history: [] };
+      const check = new Group({ ...s, config: structuredClone(s.config) }); check.adopt(meta, payload.token);
+      this.adopt(meta, payload.token);
+      for (const id of payload.removed) this.forget(id);
+      await saveConfig(s.dir, s.config); await s.groupChanged(); this.publish(); return;
+    }
     for(const m of Object.values(this.data.members)) this.data.anchors[m.id]=m; this.data.members = payload.members; this.data.revision = b.revision; this.data.removed = payload.removed; s.config.token = payload.token;
     for (const id of payload.removed) this.forget(id);
     this.refreshBoxes(); await saveConfig(s.dir, s.config); await s.groupChanged(); this.publish();
@@ -137,11 +189,12 @@ export class Group {
     await Promise.allSettled(peers.filter(p => p.remote.id !== id).map(p => { const box = this.boxes.get(p.remote.id); return box ? p.request('group-update', { box }, 3000) : Promise.resolve(); }));
     await s.groupChanged(); this.publish();
   }
-  publish() { for (const p of this.service.peers.values()) if (!this.excluded(p.remote.id)) try { p.send({ type: 'group-members', group: this.data.id, members: this.data.members, history: this.data.history }); } catch {} }
-  async merge(message) { if (message.group !== this.data.id || !message.members || Object.keys(message.members).length > 16) return; let changed = false; if (Array.isArray(message.history)) for (const b of message.history.slice(0, 1024)) { const issuer = this.data.members[b.issuer]; if (this.data.history.length < 1024 && issuer && validId(b.to) && Number.isSafeInteger(b.revision) && typeof b.signature === 'string' && b.signature.length < 500 && b.group === this.data.id && b.revision <= this.data.revision && typeof b.body === 'string' && b.body.length < 40000 && !this.data.history.some(x => x.to === b.to && x.revision === b.revision)) { try { if (verify('sha256', Buffer.from(boxTranscript(b)), keyOptions(issuer.key), Buffer.from(b.signature, 'base64'))) { this.data.history.push(b); changed = true; } } catch {} } } for (const m of Object.values(message.members)) changed = this.learn(m) || changed; if (changed) { await saveConfig(this.service.dir, this.service.config); this.publish(); } }
+  publish() { for (const p of this.service.peers.values()) if (!this.excluded(p.remote.id)) try { p.send({ type: 'group-members', group: this.data.id, members: this.data.members, history: this.data.history, migrations: this.service.config.mergedGroups }); } catch {} }
+  async merge(message) { if (message.group !== this.data.id || !message.members || Object.keys(message.members).length > 16) return; let changed = this.rememberMigrations(message.migrations); if (Array.isArray(message.history)) for (const b of message.history.slice(0, 1024)) { const issuer = this.data.members[b.issuer]; if (this.data.history.length < 1024 && issuer && validId(b.to) && Number.isSafeInteger(b.revision) && typeof b.signature === 'string' && b.signature.length < 500 && b.group === this.data.id && b.revision <= this.data.revision && typeof b.body === 'string' && b.body.length < 40000 && !this.data.history.some(x => x.to === b.to && x.revision === b.revision)) { try { if (verify('sha256', Buffer.from(boxTranscript(b)), keyOptions(issuer.key), Buffer.from(b.signature, 'base64'))) { this.data.history.push(b); changed = true; } } catch {} } } for (const m of Object.values(message.members)) changed = this.learn(m) || changed; if (changed) { await saveConfig(this.service.dir, this.service.config); this.publish(); } }
   recoveryQuery() { return { kind: 'lanlink-group-recovery-v1', group: this.data.id, id: this.own.id, revision: this.data.revision }; }
   recoveryResponse(query) {
     if (query?.kind === 'lanlink-group-recovery-v1' && validId(query.id) && Number.isSafeInteger(query.revision) && this.service.config.dissolvedGroups?.[query.group]) return this.service.config.dissolvedGroups[query.group];
+    if (query?.kind === 'lanlink-group-recovery-v1' && validId(query.id) && Number.isSafeInteger(query.revision) && this.service.config.mergedGroups?.[query.group]) return this.service.config.mergedGroups[query.group].filter(b => b.to === query.id && b.revision > query.revision).sort((a,b) => a.revision-b.revision)[0] || null;
     if (!query || query.kind !== 'lanlink-group-recovery-v1' || query.group !== this.data.id || !validId(query.id) || this.excluded(query.id) || !Number.isSafeInteger(query.revision) || query.revision < 0) return null;
     return this.data.history.filter(b => b.to === query.id && b.revision > query.revision).sort((a,b) => a.revision-b.revision)[0] || null;
   }

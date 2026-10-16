@@ -132,7 +132,8 @@ public class LinkService extends Service implements Wire.Listener {
     }
     if (!enabled && key.equals("clipboard") && clip != null && id.equals(clip.optString("source")))
       {clip=null;groupClipboard.prune();}
-    permissionNotice.removePeer(id);
+    PermissionNotice.Request guide = permissionNotice.peek(System.currentTimeMillis());
+    if (!enabled || guide == null || !guide.explicit) permissionNotice.removePeer(id);
   }
 
   public boolean rootActive() {
@@ -251,7 +252,7 @@ public class LinkService extends Service implements Wire.Listener {
 
   public void clearResolvedPermissionNotice() {
     PermissionNotice.Request request = permissionNotice.peek(System.currentTimeMillis());
-    if (request == null || request.needs.contains("consent")) return;
+    if (request == null || request.explicit || request.needs.contains("consent")) return;
     for (String need : request.needs) {
       if (need.equals("adb") && !rootEnabled() && (adbRevoked() || !adbAuthorized())) return;
       if (need.equals("input")
@@ -489,7 +490,32 @@ public class LinkService extends Service implements Wire.Listener {
         .registerDefaultNetworkCallback(networkCallback);
   }
 
+  private String stageNotificationSignature="",stageNotificationToken="";
+  void updateStageNotification(){
+    main.post(()->{
+      if(staging==null||!running)return;
+      JSONArray pending=staging.pending();NotificationManager nm=getSystemService(NotificationManager.class);
+      if(pending.length()==0){nm.cancel(17);stageNotificationSignature="";stageNotificationToken="";return;}
+      JSONObject first=pending.optJSONObject(0),version=first.optJSONObject("preview");
+      String token=version==null?first.optString("id"):version.optString("id");
+      String signature=token+":"+pending.length();if(signature.equals(stageNotificationSignature))return;
+      if(!token.equals(stageNotificationToken))nm.cancel(17);stageNotificationToken=token;stageNotificationSignature=signature;
+      Intent open=new Intent(this,MainActivity.class).setAction("com.lanlink.app.FILES");
+      Notification.Builder notice=new Notification.Builder(this,"lanlink-files")
+        .setSmallIcon(R.drawable.lanlink_notification).setContentTitle(Language.t("收到文件")+" · "+first.optString("sourceName"))
+        .setContentText(first.optJSONObject("offer").optString("name")+(pending.length()>1?" · "+pending.length()+" "+Language.t("文件"):""))
+        .setContentIntent(PendingIntent.getActivity(this,17,open,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE))
+        .setAutoCancel(false).setOnlyAlertOnce(true);
+      for(boolean accept:new boolean[]{true,false}){
+        String action=accept?"stage-accept":"stage-reject";
+        Intent intent=new Intent(this,LinkService.class).setAction(action).setData(Uri.parse("lanlink://file-preview/"+token+"/"+action)).putExtra("token",token);
+        notice.addAction(new Notification.Action.Builder(null,Language.t(accept?"接受":"拒绝"),PendingIntent.getService(this,17,intent,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE)).build());
+      }
+      try{nm.notify(17,notice.build());}catch(SecurityException ignored){}
+    });
+  }
   private void createNotificationChannels() {
+    getSystemService(NotificationManager.class).createNotificationChannel(new NotificationChannel("lanlink-files",Language.t("收到文件"),NotificationManager.IMPORTANCE_HIGH));
     NotificationManager nm = getSystemService(NotificationManager.class);
     nm.createNotificationChannel(
         new NotificationChannel("lanlink", Language.t("局域网协作"), NotificationManager.IMPORTANCE_LOW));
@@ -533,6 +559,7 @@ public class LinkService extends Service implements Wire.Listener {
   }
 
   public int onStartCommand(Intent i, int flags, int startId) {
+    if(i!=null&&("stage-accept".equals(i.getAction())||"stage-reject".equals(i.getAction()))){jobs.execute(()->{try{if(staging!=null)staging.handlePending(i.getStringExtra("token"),"stage-accept".equals(i.getAction()));}catch(Exception e){status=String.valueOf(e.getMessage());}updateStageNotification();});return START_NOT_STICKY;}
     if (i != null && "stop-control".equals(i.getAction())) {
       stopInbound();
       return START_NOT_STICKY;
@@ -657,9 +684,9 @@ public class LinkService extends Service implements Wire.Listener {
           || meta.getJSONObject("members").length() > 16) throw new IOException("组信息无效");
       for (Iterator<String> it = meta.getJSONObject("members").keys(); it.hasNext(); )
         GroupKeys.publicKey(meta.getJSONObject("members").getJSONObject(it.next()));
-      if (meta.getString("id").equals(expectedGroup)) return;
+      if (meta.getString("id").equals(expectedGroup)) { connect(result.getString("host"), result.getInt("port")); return; }
       if (group.established()) {
-        if (!dissolve) throw new IOException("组已有成员，请重新确认解散当前组");
+        if (!dissolve) throw new IOException("组已发生变化，请重新配对以合并设备组");
         JSONObject pending = new JSONObject(result.toString()).put("previousGroup", expectedGroup);
         if (!prefs.edit().putString("pending_group_join", pending.toString()).commit())
           throw new IOException("加入信息保存失败");
@@ -702,6 +729,13 @@ public class LinkService extends Service implements Wire.Listener {
     try {
       server = new ServerSocket(45831);
       group = new GroupKeys(this, prefs);
+      JSONObject pendingMerge = new JSONObject(prefs.getString("pending_group_merge", "{}"));
+      if (pendingMerge.has("group")) {
+        group.rememberMigrations(pendingMerge.optJSONObject("migrations"));
+        group.adopt(pendingMerge.getJSONObject("group"), pendingMerge.getString("token"));
+        for (int i = 0; i < group.data.getJSONArray("removed").length(); i++) forgetDevice(group.data.getJSONArray("removed").getString(i));
+        prefs.edit().remove("pending_group_merge").commit();
+      }
       groupLayout.reconcile();
       JSONObject pendingJoin = new JSONObject(prefs.getString("pending_group_join", "{}"));
       if (group.isDissolved()
@@ -1070,10 +1104,25 @@ public class LinkService extends Service implements Wire.Listener {
   JSONObject handle(Wire p, String method, JSONObject a) throws Exception {
     if (p.id == null || peers.get(p.id) != p || !p.matchesGroupToken(token)) throw new IOException("设备连接已结束");
     if (group != null && group.excluded(p.id)) throw new IOException("设备已移出组");
+    if (method.equals("permission-guide-open") || method.equals("permission-toggle")) {
+      String key = a.optString("permission");
+      if (!Arrays.asList(DeviceConsent.KEYS).contains(key)) throw new IOException("此设备不支持该功能");
+      if (method.equals("permission-toggle") && !(a.opt("enabled") instanceof Boolean)) throw new IOException("权限开关无效");
+      if (method.equals("permission-guide-open") || a.optBoolean("enabled") && (!allowed(key) || !consent.allowed(p.id, key))) {
+        needPermission(p, key);
+        permissionNotice.openGuide(p.id, p.info.optString("name", "设备"), key, System.currentTimeMillis());
+        main.post(() -> { Intent intent = new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP); intent.putExtra("permission", true); try { startActivity(intent); } catch (Exception ignored) {} });
+        return obj("opened", true, "guideRequired", method.equals("permission-toggle"));
+      }
+      if (!(a.opt("enabled") instanceof Boolean)) throw new IOException("权限开关无效");
+      setDevicePermission(p.id, key, a.optBoolean("enabled"));
+      return obj("message", "权限已保存");
+    }
     if(method.equals("quicOpen"))return quic.offer(p);
     if(method.equals("stage-cancel"))return staging.remoteStopped(p,a.optString("id"),false,"");
     if(method.equals("stage-failed"))return staging.remoteStopped(p,a.optString("id"),true,a.optString("error","接收失败，请重试"));
     if(method.equals("stage-complete"))return staging.complete(p,a.optString("id"));
+    if(method.equals("stage-preview"))return staging.applyPreview(p,a.optJSONObject("preview"));
     if(method.equals("stage-offer"))return staging.accept(p,a);
     if(method.equals("stage-retract"))return staging.retract(p,a.optString("session"));
     if(method.equals("stage-status")){requireClipboardPermission(p);return staging.available(p,a.optString("id"));}
@@ -2092,6 +2141,7 @@ public class LinkService extends Service implements Wire.Listener {
   public void onDestroy() {
     if (backgroundRecovery != null) backgroundRecovery.stopped();
     if(staging!=null)staging.close();
+    getSystemService(NotificationManager.class).cancel(17);
     quic.close();
     bulk.close();
     if(edgeGlow!=null)edgeGlow.close();

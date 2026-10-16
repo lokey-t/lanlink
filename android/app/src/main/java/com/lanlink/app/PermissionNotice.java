@@ -10,6 +10,7 @@ final class PermissionNotice {
     final String peer, name;
     final Set<String> needs;
     final long created;
+    boolean explicit;
 
     Request(String peer, String name, Set<String> needs, long created) {
       this.peer = peer;
@@ -34,6 +35,11 @@ final class PermissionNotice {
     needs.add(need);
     pending = new Request(peer, name, needs, now);
     return true;
+  }
+
+  synchronized void openGuide(String peer, String name, String need, long now) {
+    pending = new Request(peer, name, new LinkedHashSet<>(Collections.singleton(need)), now);
+    pending.explicit = true;
   }
 
   synchronized Request peek(long now) {

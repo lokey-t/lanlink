@@ -82,10 +82,10 @@ export class BulkHost{
   }
   async open(peer,args){
     const s=this.service;s.authorize(peer,'clipboard');requestedRate(args.maxRate);requestedBytes(args.maxBytes);
-    if(this.sessions.size>=4)throw Error('文件传输会话已满');
+    if(this.sessions.size>=16)throw Error('文件传输会话已满');
     // Validate expiry and range before opening any listener.
     await s.fileBytes({...args,offset:args.offset,maxBytes:1},peer.remote.id);
-    s.authorize(peer,'clipboard');if(this.sessions.size>=4)throw Error('文件传输会话已满');
+    s.authorize(peer,'clipboard');if(this.sessions.size>=16)throw Error('文件传输会话已满');
     const secret=randomBytes(32),session={peer,offerId:args.offerId,sockets:new Set()},server=net.createServer();session.server=server;this.sessions.add(session);
     const close=()=>{clearTimeout(session.timer);peer.off('closed',close);for(const socket of session.sockets)socket.destroy();server.close();this.sessions.delete(session);};session.close=close;peer.once('closed',close);
     session.timer=setTimeout(close,6000);session.timer.unref();

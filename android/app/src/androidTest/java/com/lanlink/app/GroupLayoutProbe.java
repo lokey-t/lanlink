@@ -6,6 +6,8 @@ import java.util.*;
 import org.json.*;
 
 final class GroupLayoutProbe {
+  static android.view.View find(android.view.View root,String tag){if(tag.equals(root.getTag()))return root;if(root instanceof android.view.ViewGroup){android.view.ViewGroup group=(android.view.ViewGroup)root;for(int i=0;i<group.getChildCount();i++){android.view.View found=find(group.getChildAt(i),tag);if(found!=null)return found;}}return null;}
+  static void previewOnly(android.view.View root){check(!(root instanceof android.widget.Spinner)&&!(root instanceof android.widget.Button),"preview must not contain placement controls");check(!root.isClickable()&&!root.isLongClickable(),"preview and its tiles must be non-interactive");if(root instanceof android.view.ViewGroup){android.view.ViewGroup group=(android.view.ViewGroup)root;for(int i=0;i<group.getChildCount();i++)previewOnly(group.getChildAt(i));}}
   static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }
   static JSONObject graph(String group, long revision, String origin, JSONObject positions) { return Wire.obj("group", group, "revision", revision, "origin", origin, "positions", positions); }
   static JSONObject point(int x, int y) { return Wire.obj("x", x, "y", y); }
@@ -80,10 +82,18 @@ final class GroupLayoutProbe {
         } catch (Exception error) { throw new AssertionError(error); }
       });
       Thread.sleep(500);
-      android.graphics.Bitmap screenshot = test.getUiAutomation().takeScreenshot(); check(screenshot != null, "layout editor is visible");
+      test.runOnMainSync(()->{
+        GroupLayoutPanel panel=new GroupLayoutPanel(activity,new Ui(activity),service);
+        android.view.View preview=find(panel,"layoutPreview");check(preview!=null,"whole-group preview exists");previewOnly(preview);
+        String masterBefore=state.master().toString(),layoutBefore=state.layout().toString();
+        for(String id:new String[]{own,mac,windows}){android.view.View tile=find(preview,"layoutDevice-"+id);check(tile!=null,"group member remains visible");check(!tile.performClick()&&!tile.performLongClick(),"tapping or holding a preview tile must do nothing");}
+        check(masterBefore.equals(state.master().toString())&&layoutBefore.equals(state.layout().toString()),"preview interactions cannot change the master or positions");
+        check(panel.getChildCount()==3,"phone layout page contains only explicit master control, spacing and read-only map");
+      });
+      android.graphics.Bitmap screenshot = test.getUiAutomation().takeScreenshot(); check(screenshot != null, "layout preview is visible");
       java.io.File folder = new java.io.File(activity.getExternalFilesDir(null), "ui-check"); folder.mkdirs();
       try (java.io.FileOutputStream out = new java.io.FileOutputStream(new java.io.File(folder, "group-layout.png"))) { screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out); } finally { screenshot.recycle(); }
-      return "PASS: Android same-group persisted layout/master, LWW convergence, strict membership/position/time validation, multilevel incremental edits, master pointer gate and native whole-group editor";
+      return "PASS: Android same-group persisted layout/master, LWW convergence, strict membership/position/time validation, master pointer gate, read-only whole-group preview and no phone placement controls";
     } finally {
       SharedPreferences.Editor restore = prefs.edit();
       if (oldKnown == null) restore.remove("known_devices"); else restore.putString("known_devices", oldKnown);

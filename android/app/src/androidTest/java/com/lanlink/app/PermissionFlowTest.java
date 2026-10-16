@@ -175,6 +175,7 @@ public final class PermissionFlowTest extends Instrumentation {
       if(options!=null&&options.containsKey("groupConsentProbe")){result.putString("stream",GroupConsentProbe.run(service)+"\n");finish(Activity.RESULT_OK,result);return;}
       if(options!=null&&options.containsKey("adaptiveTransportProbe")){result.putString("stream",AdaptiveTransportProbe.run()+"\n");finish(Activity.RESULT_OK,result);return;}
       if(options!=null&&options.containsKey("auxIsolationProbe")){result.putString("stream",AuxIsolationProbe.run(service)+"\n");finish(Activity.RESULT_OK,result);return;}
+      if(options!=null&&options.containsKey("stagePreviewProbe")){result.putString("stream",StagePreviewProbe.run(this,service)+"\n");finish(Activity.RESULT_OK,result);return;}
       if(options!=null&&options.containsKey("groupLayoutProbe")){result.putString("stream",GroupLayoutProbe.run(this,activity,service)+"\n");finish(Activity.RESULT_OK,result);return;}
       if(options!=null&&options.containsKey("multiComputerPorts")){result.putString("stream",MultiComputerProbe.run(this,activity,service,options)+"\n");finish(Activity.RESULT_OK,result);return;}
       if(options!=null&&options.containsKey("pairJoinCode")){result.putString("stream",PairJoinProbe.run(this,service,options)+"\n");finish(Activity.RESULT_OK,result);return;}

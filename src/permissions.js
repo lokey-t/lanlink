@@ -1,4 +1,59 @@
-const labels = { input: '键鼠标操作', screen: '屏幕共享', clipboard: '剪贴板文件共享', shutdown: '远程关机' };
+import { randomUUID } from 'node:crypto';
+const labels = { input: '键鼠控制', screen: '屏幕查看', clipboard: '剪贴板与文件', shutdown: '远程关机' };
+
+function permissionKey(key) {
+  if (!Object.hasOwn(labels, key)) throw Error('请选择有效的权限');
+  return key;
+}
+
+// Opening a guide never grants system, application or per-device permissions.
+export function showPermissionGuide(service, key, requester = service.config.id, name = service.config.name) {
+  permissionKey(key);
+  service.permissionNotice = { id: requester, name, permission: key, requestId: randomUUID(), explicit: true, expires: Date.now() + 120000 };
+  service.emit('change');
+  return { opened: true };
+}
+
+export async function openPermissionGuide(service, id, key) {
+  permissionKey(key);
+  if (id === service.config.id) return showPermissionGuide(service, key);
+  const peer = service.peers.get(id);
+  if (!peer || peer.closed || service.group.excluded(id)) throw Error('设备离线，请等待设备重新连接');
+  const result = await peer.request('permission-guide-open', { permission: key }, 4000);
+  if (result?.opened !== true) throw Error('请升级目标设备后重试');
+  return { opened: true, remote: true, name: peer.info?.name || '设备' };
+}
+
+export async function togglePermission(service, id, key, enabled) {
+  permissionKey(key);
+  if (typeof enabled !== 'boolean') throw Error('权限开关无效');
+  if (id === service.config.id) return service.settings({ permissions: { [key]: enabled } });
+  const peer = service.peers.get(id);
+  if (!peer || peer.closed || service.group.excluded(id)) throw Error('设备离线，请等待设备重新连接');
+  // Remote switches only change this requester's access to the target device.
+  // A target's global application switch is enabled by its local guide.
+  return peer.request('permission-toggle', { permission: key, enabled }, 4000);
+}
+
+export async function enablePermissionGuide(service, requestId) {
+  const request = service.permissionNotice;
+  if (!request || request.requestId !== requestId || request.expires <= Date.now()) throw Error('请求已结束，请重新打开权限引导');
+  const key = permissionKey(request.permission);
+  if (request.id !== service.config.id && service.group.excluded(request.id)) throw Error('设备已移出组');
+  const result = await service.settings({ permissions: { [key]: true } });
+  if (request.id !== service.config.id) await service.setConsent(request.id, { [key]: true });
+  return result;
+}
+
+export async function receivePermissionToggle(service, peer, key, enabled) {
+  permissionKey(key);
+  if (typeof enabled !== 'boolean') throw Error('权限开关无效');
+  if (enabled && (!service.config.permissions[key] || !service.consent.allowed(peer.remote.id, key))) {
+    showPermissionGuide(service, key, peer.remote.id, peer.info?.name);
+    return { guideRequired: true };
+  }
+  return service.setConsent(peer.remote.id, { [key]: enabled });
+}
 
 export function permissionReport(service, requester = service.config.id) {
   const caps = service.native.capabilities, local = requester === service.config.id;
@@ -16,7 +71,8 @@ export function permissionRows(report) {
     const app = p ? (p.appEnabled === true ? '已开启' : p.appEnabled === false ? '未开启' : '未知') : '未知';
     const system = p ? (p.systemGranted === true ? '已就绪' : p.systemGranted === false ? '未就绪' : '未知') : '未知';
     const consent = p ? (p.peerAllowed === true ? '已允许' : p.peerAllowed === false ? '未允许' : '待首次确认') : '未知';
-    return { key, label, supported, app, system, consent,
+    const state = !supported ? 'unsupported' : !p ? 'unknown' : p.appEnabled === false || p.peerAllowed === false ? 'disabled' : p.appEnabled === true && p.systemGranted === true && p.peerAllowed === true ? 'ready' : p.systemGranted === false ? 'unready' : 'unknown';
+    return { key, label, supported, app, system, consent, state,
       status: !supported ? '不支持' : !p ? '状态未知' : p.appEnabled === false ? '应用未开启' : p.systemGranted === false ? '系统未就绪' : p.peerAllowed === false ? '未允许此电脑' : p.peerAllowed == null ? '待首次确认' : p.appEnabled && p.systemGranted ? '已就绪' : '状态未知' };
   });
 }

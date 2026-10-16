@@ -6,7 +6,7 @@ import path from 'node:path';
 export async function buildInfo(root){
   const inputs=['package.json','package-lock.json','src','desktop','scripts','native/macos','native/windows','native/quic/src','native/quic/Cargo.toml','native/quic/Cargo.lock','android/app/build.gradle','android/build.gradle','android/settings.gradle','android/gradle.properties','android/app/src/main','android/gradle','vendor','assets/icons'];
   const sources=[];
-  async function visit(relative){if(/(?:^|\/)(?:build-info\.json|LanLinkBridge|\.DS_Store|README\.md)$/.test(relative)||relative.includes('/jniLibs/'))return;
+  async function visit(relative){relative=relative.replaceAll(path.sep,'/');if(/(?:^|\/)(?:build-info\.json|LanLinkBridge|\.DS_Store|README\.md)$/.test(relative)||relative.includes('/jniLibs/'))return;
     const full=path.join(root,relative);let children;try{children=await readdir(full,{withFileTypes:true});}catch(error){if(error.code==='ENOENT')return;if(error.code!=='ENOTDIR')throw error;const bytes=await readFile(full);sources.push({path:relative.replaceAll(path.sep,'/'),sha256:createHash('sha256').update(bytes).digest('hex')});return;}
     for(const entry of children.sort((a,b)=>a.name.localeCompare(b.name,'en')))if(!entry.isSymbolicLink())await visit(path.join(relative,entry.name));
   }

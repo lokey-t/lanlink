@@ -19,14 +19,14 @@ export function broadcasts() {
   return result;
 }
 // Bounded newline channel. Each socket only handles one ephemeral handshake.
-function channel(socket, onMessage) {
+function channel(socket, onMessage, onError = () => {}) {
   let buffer = ''; socket.setEncoding('utf8'); socket.setNoDelay(true);
   const timer = setTimeout(() => socket.destroy(), 6000);
   socket.on('error', () => {}); socket.on('close', () => clearTimeout(timer));
   socket.on('data', data => {
     try {
-      buffer += data; if (buffer.length > 2000000) throw new Error('Oversize');
-      let i; while ((i = buffer.indexOf('\n')) >= 0 && !socket.destroyed) { const raw = buffer.slice(0, i); buffer = buffer.slice(i + 1); Promise.resolve(onMessage(JSON.parse(raw))).catch(() => socket.destroy()); }
+      buffer += data; if (buffer.length > 8000000) throw new Error('Oversize');
+      let i; while ((i = buffer.indexOf('\n')) >= 0 && !socket.destroyed) { const raw = buffer.slice(0, i); buffer = buffer.slice(i + 1); Promise.resolve(onMessage(JSON.parse(raw))).catch(error => { onError(error); socket.destroy(); }); }
     } catch { socket.destroy(); }
   });
   return value => socket.write(JSON.stringify(value) + '\n');
@@ -63,8 +63,23 @@ export class Pairing {
   accept(socket) {
     if (!this.current() || this.sockets.size >= 8) { socket.destroy(); return; }
     this.sockets.add(socket); socket.on('close', () => this.sockets.delete(socket));
-    let session, invite;
+    let session, invite, reverse = false, pendingGroup, pendingRevision, applying = false;
     const send = channel(socket, async m => {
+      if (applying) { socket.destroy(); return; }
+      if (pendingGroup) {
+        if (m.kind !== 'merge') throw Error('配对握手失败');
+        applying = true;
+        const result = unseal(session.key, 3, m.body), group = this.service.group;
+        if (group !== pendingGroup || group.data.revision !== pendingRevision) throw Error('组已发生变化，请重新配对');
+        if (Object.values(group.data.members).some(member => result.group?.members?.[member.id]?.key !== member.key)) throw Error('组公钥信息无效');
+        // Keep only this authenticated exchange alive while the group transition revokes invitations.
+        this.sockets.delete(socket);
+        const { applyPairingResult } = await import('./actions.js');
+        group.rememberMigrations(result.migrations);
+        result.migrations = group.migration(result.group, result.token);
+        await applyPairingResult(this.service, result);
+        send({ kind: 'merged', body: seal(session.key, 4, { group: group.data.id, migrations: this.service.config.mergedGroups }) }); socket.end(); return;
+      }
       if (!this.current()) { socket.destroy(); return; }
       if (!session) {
         if (m.kind !== 'hello' || m.id !== this.invite.id) { socket.destroy(); return; }
@@ -72,16 +87,22 @@ export class Pairing {
         if (this.attempts.length >= 10) { send({ error: '尝试过于频繁，请稍后重试' }); socket.end(); return; }
         this.attempts.push(this.now()); invite = this.invite;
         session = serverStart(invite.code, invite.salt, invite.id, m.A);
-        send({ kind: 'challenge', id: invite.id, salt: invite.salt, B: session.B }); return;
+        reverse = m.retainGroup === true && m.group !== this.service.group?.data.id;
+        if (reverse && !this.service.group) { send({ error: '对方版本不支持保留原组，请升级或让新设备输入原组配对码' }); socket.end(); return; }
+        send({ kind: 'challenge', id: invite.id, salt: invite.salt, B: session.B, retainGroup: reverse || m.group === this.service.group?.data.id }); return;
       }
       if (invite !== this.invite || m.kind !== 'proof' || !equal(m.proof, session.clientProof)) { socket.destroy(); return; }
       // Consume this code before releasing the encrypted account credential.
       this.invite = null;
+      if (reverse) {
+        pendingGroup = this.service.group; pendingRevision = pendingGroup.data.revision;
+        send({ kind: 'joined', proof: session.serverProof, body: seal(session.key, 0, { token: this.service.config.token, port: this.service.port, reverse: true, member: pendingGroup.own, group: pendingGroup.export() }) }); return;
+      }
       if (m.member && this.service.group) await this.service.group.admit(unseal(session.key, 1, m.member));
       send({ kind: 'joined', proof: session.serverProof, body: seal(session.key, 0, { token: this.service.config.token, port: this.service.port, group: this.service.group?.export() }) }); socket.end();
-    });
+    }, error => this.service.log('配对失败：' + error.message));
   }
-  async join(code, targetId) {
+  async join(code, targetId, dissolveCurrentGroup = false) {
     if (typeof code !== 'string' || !/^\d{8}$/.test(code)) throw new Error('请输入八位数字配对码');
     if (this.joining) throw new Error('正在配对，请稍候');
     this.joining = true;
@@ -90,9 +111,13 @@ export class Pairing {
       const candidates = offers.filter(o => o.id !== this.invite?.id);
       if (!candidates.length) throw new Error('未找到待配对设备，请在同一局域网的另一台设备打开“添加设备”');
       // All matching account responses must agree; never pick an arbitrary code collision.
-      const results = await Promise.allSettled(candidates.map(o => exchange(o, code, this.service.group?.own)));
+      const retain = this.service.group?.established && !dissolveCurrentGroup ? this.service.group : undefined;
+      const results = await Promise.allSettled(candidates.map(o => exchange(o, code, this.service.group?.own, retain)));
       const successes = results.filter(r => r.status === 'fulfilled').map(r => r.value);
-      if (!successes.length) throw new Error('配对码错误、已过期或尝试过于频繁，请查看对方最新配对码');
+      if (!successes.length) {
+        const unsupported = results.find(r => r.status === 'rejected' && /原组|每个组|离线成员/.test(r.reason.message));
+        throw unsupported?.reason || new Error('配对码错误、已过期或尝试过于频繁，请查看对方最新配对码');
+      }
       if (new Set(successes.map(s => s.token)).size !== 1) throw new Error('配对码冲突，请刷新后重试或扫描二维码');
       return successes[0];
     } finally { this.joining = false; }
@@ -115,21 +140,38 @@ export async function discover(targetId, destinations = broadcasts(), port = PAI
     });
   });
 }
-export function exchange(offer, code, member) {
+export function exchange(offer, code, member, retainGroup) {
   return new Promise((resolve, reject) => {
     const socket = net.connect({ host: offer.host, port: offer.port }); const client = clientStart(); let keys, done = false;
-    const fail = () => { if (!done) { done = true; reject(new Error('配对未完成')); } };
+    const fail = error => { if (!done) { done = true; reject(error instanceof Error ? error : new Error('配对未完成')); } };
     socket.on('error', fail); socket.on('close', fail);
-    const send = channel(socket, m => {
+    let merging;
+    const send = channel(socket, async m => { try {
+      if (m.error) throw Error(m.error);
+      if (merging) {
+        const ack = unseal(keys.key, 4, m.body);
+        if (m.kind !== 'merged' || ack.group !== retainGroup.data.id) throw Error('配对握手失败');
+        done = true;
+        if (retainGroup.rememberMigrations(ack.migrations)) { const { saveConfig } = await import('./identity.js'); await saveConfig(retainGroup.service.dir, retainGroup.service.config); retainGroup.publish(); }
+        done = true; resolve({ ...merging, host: offer.host }); socket.end(); return;
+      }
       if (!keys) {
         if (m.kind !== 'challenge' || m.id !== offer.id) throw new Error('握手失败');
+        if (retainGroup && m.retainGroup !== true) throw Error('对方版本不支持保留原组，请升级或让新设备输入原组配对码');
         keys = clientFinish(client, code, m); send({ kind: 'proof', proof: keys.clientProof, member: member ? seal(keys.key, 1, member) : undefined }); return;
       }
       if (m.kind !== 'joined' || !equal(m.proof, keys.serverProof) || typeof m.body !== 'string') throw new Error('握手失败');
       const result = unseal(keys.key, 0, m.body); parseToken(result.token);
       if (!Number.isInteger(result.port) || result.port < 1 || result.port > 65535) throw new Error('端口无效');
+      if (result.reverse) {
+        if (!retainGroup || retainGroup.service.group !== retainGroup) throw Error('组已发生变化，请重新配对');
+        await retainGroup.admitGroup(result.group);
+        merging = { token: retainGroup.service.config.token, group: retainGroup.export(), port: result.port };
+        send({ kind: 'merge', body: seal(keys.key, 3, { token: merging.token, group: merging.group, migrations: retainGroup.service.config.mergedGroups }) }); return;
+      }
       done = true; resolve({ ...result, host: offer.host }); socket.end();
+    } catch (error) { fail(error); reject(error); socket.destroy(); }
     });
-    socket.once('connect', () => send({ kind: 'hello', id: offer.id, A: client.A }));
+    socket.once('connect', () => send({ kind: 'hello', id: offer.id, A: client.A, ...(retainGroup ? { retainGroup: true, group: retainGroup.data.id } : {}) }));
   });
 }

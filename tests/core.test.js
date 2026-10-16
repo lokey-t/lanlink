@@ -285,3 +285,30 @@ test('appearance is validated, persisted locally, and never changes a paired dev
   assert.equal(a.state().theme,'system');
   assert.equal((await loadConfig(a.dir)).theme,'system');
 });
+
+test('permission matrix opens the guide on the selected peer and requires local confirmation to restore revoked access', async t => {
+  const {a:source,b:target} = await pair(t);
+  const {createActions} = await import('../src/actions.js');
+  const invoke = createActions(source), confirm = createActions(target);
+  await target.settings({permissions:{screen:false}});
+  await target.setConsent(source.config.id,{input:false,screen:false});
+  const result=await invoke('permission-guide-open',{id:target.config.id,permission:'screen'});
+  assert.equal(result.remote,true);
+  assert.equal(source.permissionNotice,null);
+  assert.equal(target.permissionNotice.permission,'screen');
+  assert.equal(target.config.permissions.screen,false);
+  const requestId=target.permissionNotice.requestId;
+  await confirm('permission-guide-enable',{requestId});
+  assert.equal(target.config.permissions.screen,true);
+  assert.equal(target.consent.allowed(source.config.id,'screen'),true);
+  await invoke('permission-toggle',{id:target.config.id,permission:'screen',enabled:false});
+  assert.equal(target.consent.allowed(source.config.id,'screen'),false);
+  const pending=await invoke('permission-toggle',{id:target.config.id,permission:'screen',enabled:true});
+  assert.equal(pending.guideRequired,true);
+  assert.equal(target.consent.allowed(source.config.id,'screen'),false);
+  await confirm('permission-dismiss',{requestId});
+  assert.notEqual(target.permissionNotice,null,'an old dialog cannot dismiss the new request');
+  await confirm('permission-guide-enable',{requestId:target.permissionNotice.requestId});
+  assert.equal(target.consent.allowed(source.config.id,'screen'),true);
+  assert.equal(target.consent.allowed(source.config.id,'input'),false,'other permissions remain disabled');
+});

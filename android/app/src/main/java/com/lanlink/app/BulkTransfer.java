@@ -37,7 +37,7 @@ final class BulkTransfer implements AutoCloseable {
   }
   static Reader connect(Wire peer,JSONObject info)throws Exception{return new Reader(VideoWire.connect(peer.socket.getInetAddress().getHostAddress(),info),info.optBoolean("completeAck"));}
   synchronized JSONObject open(Wire peer,JSONObject args)throws Exception{
-    service.requireClipboardPermission(peer);final long requested=requestedRate(args);final int requestedBytes=LinkService.fileChunkLimit(args);if(servers.size()+sockets.size()>=4)throw new IOException("文件传输会话已满");
+    service.requireClipboardPermission(peer);final long requested=requestedRate(args);final int requestedBytes=LinkService.fileChunkLimit(args);if(servers.size()+sockets.size()>=16)throw new IOException("文件传输会话已满");
     long offset=args.getLong("offset"),end=args.getLong("end");if(offset<0||end<offset||end>2L*1024*1024*1024)throw new IOException("文件范围无效");service.fileBytes(new JSONObject(args.toString()).put("maxBytes",1),peer.id);
     ServerSocket server=new ServerSocket(0);server.setSoTimeout(6000);servers.add(server);byte[] secret=VideoWire.random();
     service.jobs.execute(()->{Socket socket=null;try{socket=server.accept();synchronized(this){servers.remove(server);sockets.add(socket);}server.close();VideoWire wire=VideoWire.accept(socket,secret);long position=offset,seq=0,nextAt=System.nanoTime();

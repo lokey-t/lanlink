@@ -82,7 +82,7 @@ Open **Add device (添加设备)** on one device. On the other, choose **Join an
 
 - Codes refresh every 60 seconds and may contain leading zeros. Keep the inviting device's Add device window open.
 - An invitation is consumed after a successful pairing and revoked when its window closes. The QR code does not contain the long-term group secret.
-- Joining another group from a device whose current group has other members prompts you to dissolve that group first. Check which group you intend to change.
+- Devices in existing groups can pair directly: if AB and CD are separate groups, pairing B with C merges all four devices into one group while preserving existing device permissions. Offline devices sync when they reconnect, with no need to pair each device again. A merged group supports up to 16 devices.
 
 ### 3. Prepare the permissions you need
 

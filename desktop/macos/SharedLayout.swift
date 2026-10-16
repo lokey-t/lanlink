@@ -8,7 +8,7 @@ struct SharedLayoutCell: Hashable {
     }
 }
 // Every member uses the same global cells. The viewport follows the extent of
-// the whole group, never the local computer or the selected keyboard master.
+// the whole group. Centering changes only the scroll offset, never group cells.
 struct SharedLayoutGeometry: Equatable {
     let card: CGSize; let contentSize: CGSize; let origin: CGPoint; let step: CGSize
     let minX: Int; let maxX: Int; let minY: Int; let maxY: Int
@@ -18,7 +18,8 @@ struct SharedLayoutGeometry: Equatable {
         let columns = CGFloat(maxX - minX + 1), rows = CGFloat(maxY - minY + 1)
         let scale = max(0.65, min(1, max(1, size.width - 32) / (columns * 212), max(1, size.height - 32) / (rows * 148)))
         card = CGSize(width: 180 * scale, height: 112 * scale); step = CGSize(width: 212 * scale, height: 148 * scale)
-        contentSize = CGSize(width: max(size.width, columns * step.width + 32), height: max(size.height, rows * step.height + 32))
+        // Half a viewport around the outer cells lets any member reach the center.
+        contentSize = CGSize(width: size.width + (columns - 1) * step.width, height: size.height + (rows - 1) * step.height)
         origin = CGPoint(x: contentSize.width / 2 - CGFloat(minX + maxX) * step.width / 2, y: contentSize.height / 2 - CGFloat(minY + maxY) * step.height / 2)
     }
     func point(_ cell: SharedLayoutCell) -> CGPoint { CGPoint(x: origin.x + CGFloat(cell.x) * step.width, y: origin.y + CGFloat(cell.y) * step.height) }

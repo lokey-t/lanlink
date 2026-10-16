@@ -17,7 +17,17 @@ public final class Pairing implements AutoCloseable {
   public static final int DISCOVERY_PORT = 45833;
   private static final SecureRandom RANDOM = new SecureRandom();
   private static final BigInteger N = new BigInteger("AC6BDB41324A9A9BF166DE5E1389582FAF72B6651987EE07FC3192943DB56050A37329CBB4A099ED8193E0757767A13DD52312AB4B03310DCD7F48A9DA04FD50E8083969EDB767B0CF6095179A163AB3661A05FBD5FAAAE82918A9962F0B93B855F97993EC975EEAA80D740ADBF4FF747359D041D5C33EA71D281E446B14773BCA97B43A23FB801676BD207A436C6481F1D2B9078717461A5B9D32E688F87748544523B524B0D57D5EA77A2775D2ECFA032CFBDBF52FB3786160279004E57AE6AF874E7303CE53299CCC041C7BC308D82A5698F3A8D0C38271AE35F8E9DBFBB694B5C803D89F7AE435DE236D525F54759B65E372FCD68EF20FA7111F9E4AFF73", 16), G = BigInteger.valueOf(2);
-  public interface Members { JSONObject own(); void admit(JSONObject m) throws Exception; JSONObject export(); }
+  public interface Members {
+    JSONObject own();
+    void admit(JSONObject m) throws Exception;
+    JSONObject export();
+    default void admitGroup(JSONObject meta) throws Exception { throw new IOException("不支持组合并"); }
+    default JSONObject migrations() throws Exception { return new JSONObject(); }
+    default void rememberMigrations(JSONObject records) throws Exception {}
+    default String credential() { throw new UnsupportedOperationException(); }
+    default boolean established() { return false; }
+    default void joinPaired(JSONObject result) throws Exception { throw new IOException("不支持加入组"); }
+  }
   public Members members;
   private final Supplier<String> token;
   private final int servicePort;
@@ -62,7 +72,7 @@ public final class Pairing implements AutoCloseable {
   private static JSONObject read(Socket s) throws Exception {
     ByteArrayOutputStream buffer = new ByteArrayOutputStream(); InputStream in = s.getInputStream();
     long deadline = System.currentTimeMillis() + 6000;
-    for (int i = 0; i < 2000000; i++) { if (System.currentTimeMillis() >= deadline) throw new IOException("配对超时"); int b = in.read(); if (b < 0) throw new EOFException(); if (b == '\n') return new JSONObject(buffer.toString("UTF-8")); buffer.write(b); }
+    for (int i = 0; i < 8000000; i++) { if (System.currentTimeMillis() >= deadline) throw new IOException("配对超时"); int b = in.read(); if (b < 0) throw new EOFException(); if (b == '\n') return new JSONObject(buffer.toString("UTF-8")); buffer.write(b); }
     throw new IOException("配对数据过大");
   }
   private static void send(Socket s, JSONObject m) throws Exception { s.getOutputStream().write(bytes(m.toString() + "\n")); s.getOutputStream().flush(); }
@@ -104,32 +114,71 @@ public final class Pairing implements AutoCloseable {
       String id = invite.getString("id"), salt = invite.getString("salt"); BigInteger a = publicValue(hello.getString("A"));
       BigInteger v = G.modPow(exponent(invite.getString("code"), salt, id), N), b = privateValue(), B = multiplier().multiply(v).add(G.modPow(b, N)).mod(N), u = integer(hash(pad(a), pad(B)));
       if (u.signum() == 0) return; Keys keys = new Keys(a.multiply(v.modPow(u, N)).mod(N).modPow(b, N), a, B, salt, id);
-      send(s, obj("kind", "challenge", "id", id, "salt", salt, "B", hex(pad(B)))); JSONObject proof = read(s);
+      boolean reverse = hello.optBoolean("retainGroup") && (members == null || !hello.optString("group").equals(members.export().optString("id")));
+      if (reverse && members == null) { send(s, obj("error", "对方版本不支持保留原组，请升级或让新设备输入原组配对码")); return; }
+      send(s, obj("kind", "challenge", "id", id, "salt", salt, "B", hex(pad(B)), "retainGroup", reverse || hello.optString("group").equals(members == null ? "-" : members.export().optString("id")))); JSONObject proof = read(s);
       synchronized (this) {
         if (System.currentTimeMillis() - start > 6000 || !current() || invitation != invite || !proof.optString("kind").equals("proof") || !equal(proof.optString("proof"), keys.client)) return;
-        invitation = null; if(members != null && proof.has("member")) members.admit(cryptMember(keys.key, proof.getString("member"))); send(s, obj("kind", "joined", "proof", keys.server, "body", encrypt(keys.key, obj("token", token.get(), "port", servicePort, "group", members == null ? JSONObject.NULL : members.export()))));
+        invitation = null;
+        if (reverse) {
+          Members pending = members; long pendingRevision = pending.export().getLong("revision");
+          send(s, obj("kind", "joined", "proof", keys.server, "body", encrypt(keys.key, obj("token", token.get(), "port", servicePort, "reverse", true, "member", pending.own(), "group", pending.export()))));
+          JSONObject merge = read(s);
+          if (!merge.optString("kind").equals("merge") || members != pending || pending.export().getLong("revision") != pendingRevision) return;
+          JSONObject result = crypt(keys.key, 3, merge.getString("body"));
+          JSONObject prior = pending.export().getJSONObject("members"), merged = result.getJSONObject("group").getJSONObject("members");
+          for (Iterator<String> it = prior.keys(); it.hasNext();) {
+            String memberId = it.next();
+            if (!merged.getJSONObject(memberId).getString("key").equals(prior.getJSONObject(memberId).getString("key"))) throw new IOException("组公钥信息无效");
+          }
+          sockets.remove(s);
+          pending.joinPaired(result);
+          send(s, obj("kind", "merged", "body", crypt(keys.key, 4, obj("group", pending.export().getString("id"), "migrations", pending.migrations()))));
+          return;
+        }
+        if(members != null && proof.has("member")) members.admit(cryptMember(keys.key, proof.getString("member"))); send(s, obj("kind", "joined", "proof", keys.server, "body", encrypt(keys.key, obj("token", token.get(), "port", servicePort, "group", members == null ? JSONObject.NULL : members.export()))));
       }
     } catch (Exception ignored) {} finally { sockets.remove(socket); }
   }
-  private static JSONObject cryptMember(byte[] key, String body) throws Exception {
-    byte[] iv=new byte[12]; iv[11]=1; Cipher c=Cipher.getInstance("AES/GCM/NoPadding"); c.init(Cipher.DECRYPT_MODE,new SecretKeySpec(key,"AES"),new GCMParameterSpec(128,iv)); c.updateAAD(bytes("lanlink-v1:1")); return new JSONObject(new String(c.doFinal(Base64.getDecoder().decode(body)),java.nio.charset.StandardCharsets.UTF_8));
+  private static JSONObject cryptMember(byte[] key, String body) throws Exception { return crypt(key, 1, body); }
+  private static JSONObject crypt(byte[] key, int seq, String body) throws Exception {
+    byte[] iv=new byte[12]; iv[11]=(byte)seq; Cipher c=Cipher.getInstance("AES/GCM/NoPadding"); c.init(Cipher.DECRYPT_MODE,new SecretKeySpec(key,"AES"),new GCMParameterSpec(128,iv)); c.updateAAD(bytes("lanlink-v1:"+seq)); return new JSONObject(new String(c.doFinal(Base64.getDecoder().decode(body)),java.nio.charset.StandardCharsets.UTF_8));
   }
-  private static String cryptMember(byte[] key, JSONObject body) throws Exception {
-    byte[] iv=new byte[12]; iv[11]=1; Cipher c=Cipher.getInstance("AES/GCM/NoPadding"); c.init(Cipher.ENCRYPT_MODE,new SecretKeySpec(key,"AES"),new GCMParameterSpec(128,iv)); c.updateAAD(bytes("lanlink-v1:1")); return Base64.getEncoder().encodeToString(c.doFinal(bytes(body.toString())));
+  private static String cryptMember(byte[] key, JSONObject body) throws Exception { return crypt(key, 1, body); }
+  private static String crypt(byte[] key, int seq, JSONObject body) throws Exception {
+    byte[] iv=new byte[12]; iv[11]=(byte)seq; Cipher c=Cipher.getInstance("AES/GCM/NoPadding"); c.init(Cipher.ENCRYPT_MODE,new SecretKeySpec(key,"AES"),new GCMParameterSpec(128,iv)); c.updateAAD(bytes("lanlink-v1:"+seq)); return Base64.getEncoder().encodeToString(c.doFinal(bytes(body.toString())));
   }
   public static JSONObject exchange(String host, int port, String id, String code) throws Exception { return exchange(host,port,id,code,null); }
   public static JSONObject exchange(String host, int port, String id, String code, JSONObject member) throws Exception {
+    return exchange(host, port, id, code, member, null);
+  }
+  public static JSONObject exchange(String host, int port, String id, String code, JSONObject member, Members retain) throws Exception {
     if (!code.matches("[0-9]{8}") || !id.matches("[a-f0-9]{32}")) throw new IllegalArgumentException("请输入八位数字配对码");
     BigInteger a = privateValue(), A = G.modPow(a, N);
     try (Socket s = new Socket()) {
       s.connect(new InetSocketAddress(host, port), 2500); s.setSoTimeout(2500); s.setTcpNoDelay(true);
-      send(s, obj("kind", "hello", "id", id, "A", hex(pad(A)))); JSONObject m = read(s);
+      JSONObject hello = obj("kind", "hello", "id", id, "A", hex(pad(A)));
+      if (retain != null) hello.put("retainGroup", true).put("group", retain.export().getString("id"));
+      send(s, hello); JSONObject m = read(s);
+      if (m.has("error")) throw new IOException(m.getString("error"));
+      if (retain != null && !m.optBoolean("retainGroup")) throw new IOException("对方版本不支持保留原组，请升级或让新设备输入原组配对码");
       if (!m.optString("kind").equals("challenge") || !m.optString("id").equals(id)) throw new IOException("配对握手失败");
       String salt = m.getString("salt"); BigInteger B = publicValue(m.getString("B")), x = exponent(code, salt, id), u = integer(hash(pad(A), pad(B)));
       if (u.signum() == 0) throw new IOException("配对握手失败"); Keys keys = new Keys(B.subtract(multiplier().multiply(G.modPow(x, N))).mod(N).modPow(a.add(u.multiply(x)), N), A, B, salt, id);
       JSONObject proofMessage=obj("kind","proof","proof",keys.client); if(member!=null) proofMessage.put("member",cryptMember(keys.key,member)); send(s, proofMessage); m = read(s);
       if (!m.optString("kind").equals("joined") || !equal(m.optString("proof"), keys.server)) throw new IOException("配对验证失败");
-      JSONObject result = decrypt(keys.key, m.getString("body")); parseToken(result.getString("token")); int peerPort = result.getInt("port"); if (peerPort < 1 || peerPort > 65535) throw new IOException("端口无效"); result.put("host", host); return result;
+      JSONObject result = decrypt(keys.key, m.getString("body")); parseToken(result.getString("token")); int peerPort = result.getInt("port"); if (peerPort < 1 || peerPort > 65535) throw new IOException("端口无效"); if (result.optBoolean("reverse")) {
+        if (retain == null) throw new IOException("配对握手失败");
+        retain.admitGroup(result.getJSONObject("group"));
+        JSONObject merged = obj("token", retain.credential(), "group", retain.export(), "port", peerPort, "host", host, "migrations", retain.migrations());
+        send(s, obj("kind", "merge", "body", crypt(keys.key, 3, merged)));
+        JSONObject ack = read(s);
+        JSONObject body = crypt(keys.key, 4, ack.getString("body"));
+        if (!ack.optString("kind").equals("merged") || !body.getString("group").equals(retain.export().getString("id"))) throw new IOException("配对握手失败");
+        retain.rememberMigrations(body.optJSONObject("migrations"));
+        return merged;
+      }
+      result.put("host", host); return result;
     }
   }
   public synchronized String ownId() { return invitation == null ? "" : invitation.optString("id"); }
@@ -151,8 +200,9 @@ public final class Pairing implements AutoCloseable {
     if (offers.isEmpty()) throw new IOException("未找到设备，请在同一局域网的另一台设备打开添加设备界面");
     ExecutorService clients = Executors.newFixedThreadPool(offers.size()); List<Future<JSONObject>> jobs = new ArrayList<>();
     try {
-      for (JSONObject o : offers.values()) jobs.add(clients.submit(() -> exchange(o.getString("host"), o.getInt("port"), o.getString("id"), code, members == null ? null : members.own())));
-      JSONObject result = null; for (Future<JSONObject> job : jobs) { JSONObject r; try { r = job.get(7, TimeUnit.SECONDS); } catch (Exception e) { continue; } if (result != null && !result.getString("token").equals(r.getString("token"))) throw new IOException("配对码冲突，请扫描二维码或重试"); result = r; }
+      for (JSONObject o : offers.values()) jobs.add(clients.submit(() -> exchange(o.getString("host"), o.getInt("port"), o.getString("id"), code, members == null ? null : members.own(), members != null && members.established() ? members : null)));
+      Exception actionable = null; JSONObject result = null; for (Future<JSONObject> job : jobs) { JSONObject r; try { r = job.get(7, TimeUnit.SECONDS); } catch (Exception e) { Throwable cause = e.getCause(); if (cause != null && cause.getMessage() != null && cause.getMessage().contains("原组")) actionable = new IOException(cause.getMessage()); continue; } if (result != null && !result.getString("token").equals(r.getString("token"))) throw new IOException("配对码冲突，请扫描二维码或重试"); result = r; }
+      if (result == null && actionable != null) throw actionable;
       if (result == null) throw new IOException("配对码错误、已过期或尝试过于频繁，请查看最新配对码"); return result;
     } finally { clients.shutdownNow(); }
   }

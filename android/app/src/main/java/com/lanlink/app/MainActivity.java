@@ -132,7 +132,7 @@ public class MainActivity extends Activity {
     ui.gap(box, 12);
     box.addView(ui.title(Language.t("添加设备"), 30));
     ui.gap(box, 8);
-    box.addView(ui.text(Language.t("连接同一 Wi-Fi，轻松加入"), 14, Ui.MUTED));
+    box.addView(ui.text(Language.t("连接同一 Wi-Fi，扫码配对并合并设备组"), 14, Ui.MUTED));
     ui.gap(box, 18);
     LinearLayout joinCard = ui.card();
     box.addView(joinCard);
@@ -205,7 +205,7 @@ public class MainActivity extends Activity {
     LinearLayout card = ui.card();
     box.addView(card);
     card.addView(ui.title(Language.t("其他设备加入本组"), 18));
-    card.addView(ui.text(Language.t("让新设备扫码，或输入下方八位数字"), 12, Ui.MUTED));
+    card.addView(ui.text(Language.t("让另一台设备扫码，或输入下方八位数字；双方已有分组会一并合并"), 12, Ui.MUTED));
     ImageView qr = new ImageView(this);
     qr.setContentDescription(Language.t("二维码尚未显示"));
     qr.setScaleType(ImageView.ScaleType.FIT_CENTER);
@@ -288,7 +288,7 @@ public class MainActivity extends Activity {
               if (pairing == null) throw new Exception(Language.t("服务正在启动…"));
               boolean formed = link().groupEstablished();
               joinTitle.setText(Language.t("加入其他组"));
-              submit.setText(formed ? Language.t("解散当前组并加入其他组") : Language.t("配对并加入"));
+              submit.setText(formed ? Language.t("配对并合并设备组") : Language.t("配对并加入"));
               JSONObject info = pairing.show();
               String code = info.getString("code"), id = info.getString("id");
               digits.setText(code.substring(0, 4) + " " + code.substring(4));
@@ -347,7 +347,7 @@ public class MainActivity extends Activity {
             toast(Language.t("组服务尚未就绪，请重试"));
             return;
           }
-          final boolean dissolve = pairingService.groupEstablished();
+          final boolean formed = pairingService.groupEstablished();
           final String expectedGroup = pairingService.group.data.optString("id");
           pairJoining = true;
           submit.setEnabled(false);
@@ -376,13 +376,13 @@ public class MainActivity extends Activity {
                         JSONObject result =
                             pairingService.pairing.join(
                                 value, value.equals(scannedCode) ? scannedId : null);
-                        pairingService.joinGroup(result, dissolve, expectedGroup);
+                        pairingService.joinGroup(result, false, expectedGroup);
                         main.post(
                             () -> {
                               unlock.run();
                               if (!alive) return;
                               awaitingConnection[0] = true;
-                              message.setText(Language.t("已配对，正在建立加密连接…"));
+                              message.setText(Language.t("已配对，正在同步组内设备…"));
                               if (!pairingService.peers.isEmpty()) finishPairing();
                             });
                       } catch (Exception error) {
@@ -394,10 +394,10 @@ public class MainActivity extends Activity {
                       }
                     });
               };
-          if (dissolve)
+          if (formed)
             new AlertDialog.Builder(this)
-                .setTitle(Language.t("解散当前组并加入其他组？"))
-                .setMessage(Language.t("原组所有设备都会退出，并断开控制。离线设备收到解散通知后退出。先验证新组配对码，成功后才解散原组。"))
+                .setTitle(Language.t("配对并合并设备组？"))
+                .setMessage(Language.t("配对成功后，双方组内的所有设备将合并为一组，保留已有设备授权。离线设备重新上线后自动同步，无需逐台配对。"))
                 .setNegativeButton(Language.t("取消"), (d, w) -> unlock.run())
                 .setOnCancelListener(d -> unlock.run())
                 .setPositiveButton(Language.t("加入"), (d, w) -> connect.run())
@@ -559,7 +559,7 @@ public class MainActivity extends Activity {
     layout.addView(detail);
     ui.gap(layout, 16);
     LinearLayout arrangement = ui.card();
-    arrangement.addView(ui.item("monitor", Language.t("组内布局与主控"), Language.t("查看全组设备，选择主控电脑并调整屏幕位置"), null, () -> { page = "layout"; renderPage(); }));
+    arrangement.addView(ui.item("monitor", Language.t("组内布局与主控"), Language.t("查看全组设备布局并选择主控电脑"), null, () -> { page = "layout"; renderPage(); }));
     layout.addView(arrangement);
     ui.gap(layout, 16);
     LinearLayout local = ui.card();
@@ -1806,7 +1806,7 @@ public class MainActivity extends Activity {
     refreshConsent(s);
       return;
     }
-    String key = request.peer + "/" + request.needs.toString();
+    String key = request.peer + "/" + request.needs.toString() + (request.explicit ? "/"+request.created : "");
     if (permissionDialog != null && key.equals(permissionDialogKey)) {
       refreshPermissionRows();
       return;
@@ -1847,10 +1847,22 @@ public class MainActivity extends Activity {
           if (alive
               && !isChangingConfigurations()
               && current != null
-              && current.peer.equals(request.peer)) s.dismissPermissionNotice();
+              && current == request) s.dismissPermissionNotice();
         });
     box.addView(ui.title(request.name + Language.t(" 请求协作"), 16));
     ui.gap(box, 8);
+    if (request.explicit) {
+      box.addView(ui.text(Language.t("来自 ") + request.name + Language.t(" 的权限设置请求"), 14, Ui.INK));
+      box.addView(ui.button(Language.t("开启本机权限并允许请求设备"), true, () -> run(() -> {
+        if (s.permissionNotice.peek(System.currentTimeMillis()) != request) throw new java.io.IOException("请求已结束，请重新打开权限引导");
+        for (String need : request.needs) if (Arrays.asList(DeviceConsent.KEYS).contains(need)) {
+          s.setAllowed(need, true);
+          if (!request.peer.equals(s.deviceId)) s.setDevicePermission(request.peer, need, true);
+        }
+        main.post(this::update);
+      })));
+      ui.gap(box, 12);
+    }
     if(!request.needs.contains("adb"))box.addView(ui.text(Language.t("开启所需权限后即可协作，已开启的项目会显示「已授权」。"), 14, Ui.MUTED));
     ui.gap(box, 18);
     if (request.needs.contains("adb")) {
@@ -1934,6 +1946,8 @@ public class MainActivity extends Activity {
                       && (!request.needs.contains("screen")
                           || s.allowed("screen") && s.screenReady())
                       && (!request.needs.contains("clipboard") || s.allowed("clipboard"));
+              if (request.explicit) for (String need : request.needs)
+                if (Arrays.asList(DeviceConsent.KEYS).contains(need) && !request.peer.equals(s.deviceId)) ready &= s.consent.allowed(request.peer, need);
               if (!ready) {
                 toast(Language.t("仍有权限未开启，请完成上方设置"));
                 return;
@@ -2177,6 +2191,7 @@ public class MainActivity extends Activity {
 
   private void handleIntent(Intent i) {
     if (i == null) return;
+    if("com.lanlink.app.FILES".equals(i.getAction()))main.postDelayed(()->{page="center";centerSelection="files";renderPage();},300);
     if ("com.lanlink.app.PERMISSIONS".equals(i.getAction()))
       main.postDelayed(this::showPermissionHelp, 300);
     if (Intent.ACTION_VIEW.equals(i.getAction())

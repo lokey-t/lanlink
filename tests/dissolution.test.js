@@ -27,7 +27,7 @@ async function until(fn) { for (let i=0; !fn(); i++) { assert(i<200, 'event comp
 test('switch group requires explicit consent and validates pairing before dissolving; own-group invitation is harmless', async t => {
   const {a,b,d} = await fixture(t), call = createActions(a), old = a.group.data.id, token = a.config.token;
   a.pairing.join = async () => { throw Error('配对码错误'); };
-  await assert.rejects(call('join', { code: '12345678' }), /确认解散/);
+  await assert.rejects(call('join', { code: '12345678' }), /配对码错误/);
   await assert.rejects(call('join', { code: '12345678', dissolveCurrentGroup:true }), /配对码错误/);
   assert.equal(a.group.data.id,old); assert.equal(a.config.token,token); assert.equal(b.group.data.id,old); assert.equal(a.config.dissolvedGroups,undefined);
   a.pairing.join = async () => ({ token, group: structuredClone(a.group.export()) });

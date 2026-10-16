@@ -50,6 +50,158 @@
     }
   ],
   "messages": {
+    "收到文件": {
+      "en": "Incoming files",
+      "zh-Hant": "收到檔案",
+      "ja": "ファイルを受信",
+      "ko": "받은 파일",
+      "de": "Eingehende Dateien",
+      "fr": "Fichiers entrants",
+      "es": "Archivos entrantes",
+      "pt": "Arquivos recebidos",
+      "it": "File in arrivo",
+      "ru": "Входящие файлы"
+    },
+    "接受": {
+      "en": "Accept",
+      "zh-Hant": "接受",
+      "ja": "受け入れる",
+      "ko": "수락",
+      "de": "Annehmen",
+      "fr": "Accepter",
+      "es": "Aceptar",
+      "pt": "Aceitar",
+      "it": "Accetta",
+      "ru": "Принять"
+    },
+    "设备已授权": {
+      "en": "Device authorized",
+      "zh-Hant": "裝置已授權"
+    },
+    "设备已授权，已经可以正常使用。": {
+      "en": "The device is authorized and ready to use.",
+      "zh-Hant": "裝置已授權，已經可以正常使用。"
+    },
+    "仅预览全组设备布局，请在电脑端调整设备位置。": {
+      "en": "Preview the group layout. Arrange devices on a computer.",
+      "zh-Hant": "僅預覽全組裝置配置，請在電腦端調整裝置位置。"
+    },
+    "布局还是空的，请在电脑端设置设备布局。": {
+      "en": "The layout is empty. Set up device positions on a computer.",
+      "zh-Hant": "配置仍是空的，請在電腦端設定裝置配置。"
+    },
+    "查看全组设备布局并选择主控电脑": {
+      "en": "Preview the group layout and choose the keyboard and mouse host",
+      "zh-Hant": "查看全組裝置配置並選擇主控電腦"
+    },
+    "居中": {
+      "en": "Center",
+      "zh-Hant": "置中",
+      "ja": "中央に表示",
+      "ko": "가운데로",
+      "de": "Zentrieren",
+      "fr": "Centrer",
+      "es": "Centrar",
+      "pt": "Centralizar",
+      "it": "Centra",
+      "ru": "По центру"
+    },
+    "设备类型：": {
+      "en": "Device type: ",
+      "zh-Hant": "裝置類型：",
+      "ja": "デバイスの種類：",
+      "ko": "기기 유형: ",
+      "de": "Gerätetyp: ",
+      "fr": "Type d’appareil : ",
+      "es": "Tipo de dispositivo: ",
+      "pt": "Tipo de dispositivo: ",
+      "it": "Tipo di dispositivo: ",
+      "ru": "Тип устройства: "
+    },
+    "在线状态：": {
+      "en": "Status: ",
+      "zh-Hant": "連線狀態：",
+      "ja": "接続状態：",
+      "ko": "연결 상태: ",
+      "de": "Status: ",
+      "fr": "État : ",
+      "es": "Estado: ",
+      "pt": "Estado: ",
+      "it": "Stato: ",
+      "ru": "Состояние: "
+    },
+    "控制鼠标：": {
+      "en": "Mouse control: ",
+      "zh-Hant": "控制滑鼠：",
+      "ja": "マウス操作：",
+      "ko": "마우스 제어: ",
+      "de": "Maussteuerung: ",
+      "fr": "Contrôle de la souris : ",
+      "es": "Control del ratón: ",
+      "pt": "Controle do mouse: ",
+      "it": "Controllo del mouse: ",
+      "ru": "Управление мышью: "
+    },
+    "设备鼠标": {
+      "en": "Local mouse",
+      "zh-Hant": "裝置滑鼠",
+      "ja": "ローカルマウス",
+      "ko": "로컬 마우스",
+      "de": "Lokale Maus",
+      "fr": "Souris locale",
+      "es": "Ratón local",
+      "pt": "Mouse local",
+      "it": "Mouse locale",
+      "ru": "Локальная мышь"
+    },
+    "远程鼠标控制": {
+      "en": "Remote mouse control",
+      "zh-Hant": "遠端滑鼠控制",
+      "ja": "リモートマウス操作",
+      "ko": "원격 마우스 제어",
+      "de": "Fernsteuerung der Maus",
+      "fr": "Contrôle de souris à distance",
+      "es": "Control remoto del ratón",
+      "pt": "Controle remoto do mouse",
+      "it": "Controllo remoto del mouse",
+      "ru": "Удалённое управление мышью"
+    },
+    "设置此设备为键鼠主设备": {
+      "en": "Make this device the keyboard and mouse host",
+      "zh-Hant": "設定此裝置為鍵鼠主裝置",
+      "ja": "このデバイスをキーボードとマウスのホストにする",
+      "ko": "이 기기를 키보드 및 마우스 호스트로 설정",
+      "de": "Dieses Gerät als Tastatur- und Maushost festlegen",
+      "fr": "Définir cet appareil comme hôte du clavier et de la souris",
+      "es": "Usar este dispositivo como anfitrión del teclado y ratón",
+      "pt": "Definir este dispositivo como host do teclado e mouse",
+      "it": "Imposta questo dispositivo come host di tastiera e mouse",
+      "ru": "Назначить это устройство хостом клавиатуры и мыши"
+    },
+    "设置本机为键鼠主设备": {
+      "en": "Make this computer the keyboard and mouse host",
+      "zh-Hant": "設定本機為鍵鼠主裝置",
+      "ja": "このコンピュータをキーボードとマウスのホストにする",
+      "ko": "이 컴퓨터를 키보드 및 마우스 호스트로 설정",
+      "de": "Diesen Computer als Tastatur- und Maushost festlegen",
+      "fr": "Définir cet ordinateur comme hôte du clavier et de la souris",
+      "es": "Usar este ordenador como anfitrión del teclado y ratón",
+      "pt": "Definir este computador como host do teclado e mouse",
+      "it": "Imposta questo computer come host di tastiera e mouse",
+      "ru": "Назначить этот компьютер хостом клавиатуры и мыши"
+    },
+    "Android 暂不支持作为键鼠主设备": {
+      "en": "Android cannot currently host keyboard and mouse sharing",
+      "zh-Hant": "Android 暫不支援作為鍵鼠主裝置"
+    },
+    "请选择远程设备发送文件": {
+      "en": "Select a remote device to send files",
+      "zh-Hant": "請選擇遠端裝置傳送檔案"
+    },
+    "同组布局与主设备标识自动同步。点击设备查看操作，拖动调整位置。": {
+      "en": "Layout and host badges sync across the group. Click a device for actions; drag to arrange.",
+      "zh-Hant": "同組配置與主裝置標識自動同步。點按裝置查看操作，拖動調整位置。"
+    },
     "语言": {
       "en": "Language",
       "zh-Hant": "語言",
@@ -5056,6 +5208,180 @@
     "点击电脑切换主控，主控标识会同步到同组设备。长按设备可选为摆放参考。": {
       "en": "Tap a computer to switch the controller. Its badge syncs across the group. Hold a device to use it as a placement reference.",
       "zh-Hant": "點按電腦切換主控，主控標識會同步至同組裝置。長按裝置可選為擺放參考。"
+    },
+    "配对并合并设备组 →": {
+      "en": "Pair and merge device groups →",
+      "zh-Hant": "配對並合併裝置群組 →"
+    },
+    "配对并合并设备组": {
+      "en": "Pair and merge device groups",
+      "zh-Hant": "配對並合併裝置群組"
+    },
+    "配对并合并设备组？": {
+      "en": "Pair and merge device groups?",
+      "zh-Hant": "配對並合併裝置群組？"
+    },
+    "配对成功后，双方组内的所有设备将合并为一组，保留已有设备授权。离线设备重新上线后自动同步，无需逐台配对。": {
+      "en": "After pairing, all devices in both groups will form one group. Existing device permissions are preserved. Offline devices sync when they reconnect, with no need to pair each device.",
+      "zh-Hant": "配對成功後，雙方群組內的所有裝置將合併為一組，保留既有裝置授權。離線裝置重新上線後自動同步，無需逐台配對。"
+    },
+    "二维码只在本机识别。配对成功后，双方已有设备组将合并，离线设备上线后自动同步。已有设备授权保留，可在设置中管理。": {
+      "en": "QR codes are processed on this device. Pairing merges both device groups. Offline devices sync when they reconnect. Existing permissions are preserved and can be managed in Settings.",
+      "zh-Hant": "QR 碼僅在本機辨識。配對成功後，雙方既有裝置群組將合併，離線裝置上線後自動同步。既有裝置授權保留，可在設定中管理。"
+    },
+    "对方版本不支持保留原组，请升级或让新设备输入原组配对码": {
+      "en": "The other device does not support group merging. Update it, or enter this group’s pairing code on an ungrouped device."
+    },
+    "设备公钥冲突，请重新配对": {
+      "en": "Device public keys conflict. Please pair again."
+    },
+    "离线成员合并记录已满": {
+      "en": "Offline group merge history is full."
+    },
+    "组合并记录无效": {
+      "en": "Invalid group merge record."
+    },
+    "组合并记录保存失败": {
+      "en": "Could not save group merge history."
+    },
+    "组更新成员信息过多": {
+      "en": "Group membership data exceeds the update limit."
+    },
+    "扫码或输入配对码，双方已有设备将自动合并为一组。": {
+      "en": "Scan or enter a pairing code to merge all devices from both groups.",
+      "zh-Hant": "掃碼或輸入配對碼，雙方既有裝置將自動合併為一組。"
+    },
+    "连接同一 Wi-Fi，扫码配对并合并设备组": {
+      "en": "Connect to the same Wi-Fi, pair and merge device groups.",
+      "zh-Hant": "連接同一 Wi-Fi，掃碼配對並合併裝置群組。"
+    },
+    "已配对，正在同步组内设备…": {
+      "en": "Paired. Syncing devices in the merged group…",
+      "zh-Hant": "已配對，正在同步群組內裝置…"
+    },
+    "让另一台设备扫码，或输入本机八位配对码。\n双方已有分组会一并合并。": {
+      "en": "Scan with the other device, or enter this device’s eight-digit code.\nExisting groups will be merged.",
+      "zh-Hant": "讓另一台裝置掃碼，或輸入本機八位配對碼。\n雙方既有群組會一併合併。"
+    },
+    "让另一台设备扫码，或输入本机八位配对码。双方已有分组会一并合并。": {
+      "en": "Scan with the other device, or enter this device’s eight-digit code. Existing groups will be merged.",
+      "zh-Hant": "讓另一台裝置掃碼，或輸入本機八位配對碼。雙方既有群組會一併合併。"
+    },
+    "让另一台设备扫码，或输入下方八位数字；双方已有分组会一并合并": {
+      "en": "Scan with the other device or enter the eight-digit code below. Existing groups will be merged.",
+      "zh-Hant": "讓另一台裝置掃碼，或輸入下方八位數字；雙方既有群組會一併合併"
+    },
+    "组已发生变化，请重新配对以合并设备组": {
+      "en": "The group changed. Pair again to merge the device groups.",
+      "zh-Hant": "群組已變更，請重新配對以合併裝置群組。"
+    },
+    "键鼠控制": {
+      "en": "Keyboard and mouse control"
+    },
+    "屏幕查看": {
+      "en": "Screen viewing"
+    },
+    "已禁用": {
+      "en": "Disabled"
+    },
+    "一键开启": {
+      "en": "Enable"
+    },
+    "请到目标设备操作": {
+      "en": "Continue on the target device"
+    },
+    "切换观看设备": {
+      "en": "Look at the target device"
+    },
+    "本机行：功能总开关；其他设备行：本机使用该设备的权限。": {
+      "en": "This device: global feature switches. Other devices: this device’s access to the selected device."
+    },
+    "悬停查看含义 · 左键或右键打开菜单": {
+      "en": "Hover for details · Left-click or right-click to manage"
+    },
+    "悬停查看含义 · 左键或右键打开菜单\n本机行：功能总开关；其他设备行：本机使用该设备的权限。": {
+      "en": "Hover for details · Left-click or right-click to manage\nThis device: global switches. Other devices: access from this device."
+    },
+    "查看设备能力与权限，点击图标进行管理": {
+      "en": "View device capabilities and click an icon to manage permissions"
+    },
+    "允许本组设备使用": {
+      "en": "Allow devices in this group"
+    },
+    "允许本机使用此设备": {
+      "en": "Allow this device to access the target"
+    },
+    "本机访问此设备：": {
+      "en": "Access to this device: "
+    },
+    "在本机打开权限引导": {
+      "en": "Open setup on this device"
+    },
+    "在目标设备打开权限引导": {
+      "en": "Open setup on the target device"
+    },
+    "此设备不支持该功能": {
+      "en": "This device does not support this feature"
+    },
+    "请刷新状态，或升级目标设备后重试": {
+      "en": "Refresh the status, or update the target device and try again"
+    },
+    "管理此设备使用本机的权限": {
+      "en": "Manage this device’s access to this computer"
+    },
+    "此设备使用本机的权限": {
+      "en": "This device’s access to this computer"
+    },
+    "设备权限": {
+      "en": "Device permissions"
+    },
+    "权限引导已在该设备打开，请切换观看设备并按提示完成授权。": {
+      "en": "Permission setup is open on the target device. Look at that device and follow the instructions."
+    },
+    "请在本机完成权限设置": {
+      "en": "Complete permission setup on this device"
+    },
+    " 的权限设置请求": {
+      "en": " requests permission setup"
+    },
+    "开启后允许请求设备使用此功能。系统权限仍需在本机完成授权。": {
+      "en": "Enabling allows the requesting device to use this feature. System permissions must still be granted on this device."
+    },
+    "系统能力尚未就绪，请检查设备服务及系统权限后重试。": {
+      "en": "The system capability is not ready. Check the device service and system permissions, then try again."
+    },
+    "权限已开启": {
+      "en": "Permission enabled"
+    },
+    "权限已保存": {
+      "en": "Permissions saved"
+    },
+    "开启键鼠控制": {
+      "en": "Enable keyboard and mouse control"
+    },
+    "开启屏幕查看": {
+      "en": "Enable screen viewing"
+    },
+    "开启剪贴板与文件": {
+      "en": "Enable clipboard and files"
+    },
+    "开启远程关机": {
+      "en": "Enable remote shutdown"
+    },
+    "请选择有效的权限": {
+      "en": "Select a valid permission"
+    },
+    "权限开关无效": {
+      "en": "Invalid permission switch"
+    },
+    "请求已结束，请重新打开权限引导": {
+      "en": "The request has ended. Open permission setup again."
+    },
+    "请升级目标设备后重试": {
+      "en": "Update the target device and try again."
+    },
+    "开启本机权限并允许请求设备": {
+      "en": "Enable this feature and allow the requesting device"
     }
   }
 }

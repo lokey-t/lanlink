@@ -13,14 +13,15 @@ async function api(route, data) {
   const r = await fetch('/api/' + route, { method: data === undefined ? 'GET' : 'POST', headers: { 'X-LanLink-Token': token, 'Content-Type': 'application/json' }, body: data === undefined ? undefined : JSON.stringify(data) });
   const value = await r.json(); if (!r.ok) throw new Error(value.error); return value;
 }
-function notice(s) { $('notice').textContent = s; clearTimeout(noticeTimer); noticeTimer = setTimeout(() => $('notice').textContent = '', 9000); }
+function notice(s) { $('notice').textContent = s; clearTimeout(noticeTimer); noticeTimer = setTimeout(() => $('notice').textContent = '', 3000); }
 function action(id, fn) { $(id).onclick = async () => { $(id).disabled = true; try { await fn(); await refresh(); } catch (e) { notice(e.message); } finally { $(id).disabled = false; } }; }
 function button(text, fn, cls = '') { const b = document.createElement('button'); b.textContent = text; b.className = cls; b.onclick = async () => { try { await fn(); } catch (e) { notice(e.message); } }; return b; }
 let deviceSignature = '';
 async function refresh() {
   if (polling) return; polling = true;
   try {
-    state = await api('state'); $('localBadge').textContent = '● ' + state.name + (state.capabilities.simulated ? ' · 模拟模式' : ''); $('account').textContent = state.groupId; $('peerCount').textContent = state.peers.length; $('join').textContent = state.groupEstablished ? '解散当前组并加入其他组' : '加入其他组';
+    state = await api('state'); $('localBadge').textContent = '● ' + state.name + (state.capabilities.simulated ? ' · 模拟模式' : ''); $('account').textContent = state.groupId; $('peerCount').textContent = state.peers.length; $('join').textContent = state.groupEstablished ? '配对并合并设备组' : '加入其他组';
+    $('serviceWarning').hidden = true; $('serviceWarning').textContent = '';
     const sig = JSON.stringify([state.peers, state.active]);
     if (sig !== deviceSignature) {
       deviceSignature = sig; $('deviceList').replaceChildren();
@@ -45,7 +46,7 @@ async function refresh() {
     $('remoteStatus').textContent = control ? '正在控制 · 点击画面后输入' : '查看模式';
     refreshSharedLayout();
     refreshAndroidDisconnectNotice();
-  } catch (e) { notice(e.message); } finally { polling = false; }
+  } catch (e) { $('serviceWarning').textContent = e.message; $('serviceWarning').hidden = false; } finally { polling = false; }
 }
 let layoutSignature='', layoutMasterSaving=false;
 async function chooseLayoutMaster(id){
@@ -97,7 +98,7 @@ $('androidDisconnect').addEventListener('cancel', e => { e.preventDefault(); dis
 action('saveLayout', async () => { await api('settings', { dwell: Number($('dwell').value) }); notice('本机切换设置已保存'); });
 action('saveSettings', async () => { const permissions = {}; for (const k of ['input', 'screen', 'clipboard', 'shutdown']) permissions[k] = $('perm-' + k).checked; await api('settings', { name: $('deviceName').value, permissions }); notice('本机设置已保存'); });
 action('showToken', async () => { if (!$('ownToken').hidden) { $('ownToken').hidden = true; $('ownToken').value = ''; $('qrPanel').hidden = true; $('pairQr').removeAttribute('src'); clearInterval(pairingTimer); await api('pairing-stop', {}); return; } const pairing = await api('pairing', { reveal: true }); $('ownToken').value = pairing.code; $('pairQr').src = pairing.qr; $('qrPanel').hidden = false; $('ownToken').hidden = false; clearInterval(pairingTimer); pairingTimer = setInterval(async () => { if ($('ownToken').hidden) { clearInterval(pairingTimer); return; } try { const p = await api('pairing', { reveal: true }); $('ownToken').value = p.code + ' · ' + Math.ceil(p.remainingMs / 1000) + ' 秒后刷新'; $('pairQr').src = p.qr; } catch { $('ownToken').value = ''; $('pairQr').removeAttribute('src'); } }, 1000); });
-action('join', async () => { const current = await api('state'); if (!confirm(current.groupEstablished ? '解散原组后所有成员都将退出；离线成员收到通知后退出。验证新配对码成功后才解散，继续？' : '加入对方的组？')) return; await api('join', { code: $('joinToken').value.trim(), expectedGroup: current.groupId, dissolveCurrentGroup: current.groupEstablished }); $('joinToken').value = ''; $('ownToken').value = ''; $('ownToken').hidden = true; $('qrPanel').hidden = true; $('pairQr').removeAttribute('src'); notice('已加入组，正在发现设备'); });
+action('join', async () => { const current = await api('state'); if (!confirm(current.groupEstablished ? '配对成功后，双方组内所有设备将合并为一组，保留已有授权；离线设备上线后自动同步。继续？' : '加入对方的组？')) return; await api('join', { code: $('joinToken').value.trim(), expectedGroup: current.groupId }); $('joinToken').value = ''; $('ownToken').value = ''; $('ownToken').hidden = true; $('qrPanel').hidden = true; $('pairQr').removeAttribute('src'); notice('配对完成，正在同步组内设备'); });
 action('connect', () => api('connect', { host: $('host').value.trim(), port: Number($('port').value) }));
 action('returnLocal', () => api('release', {})); action('cancelLocal', () => api('cancel-shutdown', {}));
 action('share', async () => { await api('clipboard', { text: $('shareText').value }); notice('文本已共享'); });

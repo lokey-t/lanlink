@@ -78,7 +78,7 @@ import AppKit
         try require(!displayed.contains("NATIVE_ERROR:"), "cleanup warnings must not expose internal error codes")
         try require(model.serviceError.isEmpty && model.needsServiceRecovery, "a saved mutation warning must offer recovery without claiming the mutation failed")
         model.presentOperationResult(["message": "其他操作已完成"], success: "旧文案")
-        try require(model.notice == "其他操作已完成", "backend success messages must take precedence over fallback UI copy")
+        try require(model.successToast == "其他操作已完成", "backend success messages must take precedence over fallback UI copy")
         try require(model.globalMessage == displayed, "unrelated successful actions must not hide an unresolved cleanup warning")
         model.failed("服务已退出")
         try require(model.globalMessage == "服务已退出", "a service failure must take precedence over the saved-operation warning")

@@ -20,7 +20,7 @@ import { Pairing } from './pairing.js';
 import { Group } from './group.js';
 import { Consent, permissionNames } from './consent.js';
 import { VideoHost, VideoViewer } from './video.js';
-import { permissionReport } from './permissions.js';
+import { permissionReport, showPermissionGuide, receivePermissionToggle } from './permissions.js';
 import { AdbManager } from './adb.js';
 import { LinkManager } from './links.js';
 import {QuicManager} from './quic.js';
@@ -59,6 +59,12 @@ export class Service extends EventEmitter {
   trackTask(task) { this.messageTasks.add(task); const done = () => this.messageTasks.delete(task); task.then(done, done); return task; }
   identity() { return { id: this.config.id, name: this.config.name, platform: process.platform, masterSelection:masterSelection(this),layout:layoutSelection(this),capabilities: { ...this.native.capabilities,staging:1,quic:this.quic.enabled?1:0,motionV2:this.quic.native?.binaryMotion?2:0,bulk:1,rtcVideo:1, controlPrepare: true, dualLink: true, memberKey: this.group.own.key } }; }
   async start() {
+    if (this.config.pendingGroupMerge) {
+      const pendingMerge = this.config.pendingGroupMerge;
+      this.group.adopt(pendingMerge.group, pendingMerge.token);
+      for (const id of this.group.data.removed) this.group.forget(id);
+      delete this.config.pendingGroupMerge;
+    }
     const pending = this.config.pendingGroupJoin;
     if (this.config.dissolvedGroups?.[this.group.data.id] || pending && this.config.dissolvedGroups?.[pending.previousGroup]) {
       if (pending?.group) this.group.adopt(pending.group, pending.token);
@@ -176,7 +182,7 @@ export class Service extends EventEmitter {
     // This is session-scoped and never overrides an explicit saved per-device denial.
     if (permission !== 'clipboard' || !this.canShareClipboard(peer.remote.id)) this.consent.require(peer.remote.id, peer.info?.name, permission);
     if (!this.config.permissions[permission] || this.native.capabilities[permission] === false) {
-      this.permissionNotice = { id: peer.remote.id, name: peer.info?.name || '已配对设备', permission, expires: Date.now() + 120000 };
+      this.permissionNotice = { requestId: randomUUID(), id: peer.remote.id, name: peer.info?.name || '已配对设备', permission, expires: Date.now() + 120000 };
       throw new Error('PERMISSION_REQUIRED: 被控设备尚未允许此功能或缺少系统权限，请在被控设备开启');
     }
   }
@@ -251,13 +257,15 @@ export class Service extends EventEmitter {
   async handle(peer, method, a) {
     if (this.group.excluded(peer.remote.id)) throw Error('设备已移出组');
     if (!this.currentPeer(peer)) throw Error('设备连接已结束');
+    if (method === 'permission-guide-open') return showPermissionGuide(this, a.permission, peer.remote.id, peer.info?.name);
+    if (method === 'permission-toggle') return receivePermissionToggle(this, peer, a.permission, a.enabled);
     if(method==='permission-request') { const keys = Array.isArray(a.permissions) ? [...new Set(a.permissions.filter(key => permissionNames.includes(key)))] : permissionNames; if (!keys.length) throw Error('请选择需要的权限'); const ready = this.consent.request(peer.remote.id,peer.info?.name,Date.now(),keys) === true;this.emit('change');return {ready}; }
     if(method==='permission-cancel') {this.consent.disconnect(peer.remote.id);this.emit('change');return {};}
     if(method==='permission-prepare') {
       await this.refreshCapabilities();
       if(!this.currentPeer(peer))throw Error('设备连接已结束');
       const permission=(a.permissions||[]).find(k=>['input','screen','clipboard','shutdown'].includes(k) && (!this.config.permissions[k] || !this.native.capabilities[k]));
-      if(permission)this.permissionNotice={id:peer.remote.id,name:peer.info?.name,permission,expires:Date.now()+120000};
+      if(permission)this.permissionNotice={requestId:randomUUID(),id:peer.remote.id,name:peer.info?.name,permission,expires:Date.now()+120000};
       this.emit('change');return {};
     }
     if (method === 'permission-status') {
@@ -303,6 +311,7 @@ export class Service extends EventEmitter {
     if (method === 'screen') { this.authorize(peer, 'screen'); if (this.capturing) throw new Error('屏幕正在捕获'); this.capturing = true; this.screenViewers.set(peer.remote.id, Date.now() + 4000); try { const frame = await this.native.call('screen'); this.authorize(peer, 'screen'); return frame; } catch (e) { this.screenViewers.delete(peer.remote.id); throw e; } finally { this.capturing = false; } }
     if(method==='clipboard-sync'){if(!this.clipboardSync.allowed(peer.remote.id))throw Error('剪贴板共享未授权');await this.clipboardSync.inventory(peer,a.ids);return {latest:this.clipboardSync.latest};}
     if (method === 'clipboardGet') { this.authorize(peer, 'clipboard'); return this.snapshotClipboard(false); }
+    if (method === 'stage-preview') return this.staging.applyPreview(peer,a.preview);
     if (method === 'stage-offer') return this.staging.accept(peer,a);
     if (method === 'stage-status') {this.authorize(peer,'clipboard');return this.staging.available(peer,a.id);}
     if (method === 'stage-begin') {this.authorize(peer,'clipboard');return this.staging.begin(peer,a.id,a.resume===true);}
@@ -600,7 +609,7 @@ export class Service extends EventEmitter {
   }
   configure(run){const work=(this.configurationWork||Promise.resolve()).catch(()=>{}).then(run);this.configurationWork=work;return work;}
   settings(a) {return this.configure(()=>applySettings(this,a));}
-  state() { return { buildInfo, language:languagePreference(this.config.language), theme:['system','dark','light'].includes(this.config.theme)?this.config.theme:'system', clipboardSettings:this.clipboardSync.state(), masterId:masterSelection(this)?.id||(this.config.master?this.config.id:""), masterDevices:masterChoices(this), edgeGlowHideAway:!!this.config.edgeGlowHideAway, switchMode:this.config.switchMode||"dwell", edgeHotkey:this.config.edgeHotkey||"ctrl-alt", edgeGlowEnabled: this.config.edgeGlow !== false, edgeTransition: this.edgeTransition, id: this.config.id, name: this.config.name, groupId: this.group.data.id, groupEstablished: this.group.established, groupMemberCount: Object.keys(this.group.data.members).length, account: this.group.data.id, controlEnded: this.controlEnded, androidDisconnectNotice: this.androidRecovery.notice, fallbackNotice: this.fallbackNotice, adbGuide: this.adbGuide.notice, accessNotice: this.access.notice, viewers: [...new Set([...this.videoHost.sessions.values()].map(s => s.peer.remote.id).concat(this.liveScreens(this.screenViewers)))], port: this.port, dwell: this.config.dwell ?? 100, edges: layoutEdges(this), layout:layoutSelection(this),layoutDevices:layoutDevices(this),consentRequests: this.consent.list(), deviceGrants: this.config.deviceGrants, permissionNotice: this.permissionNotice, permissions: this.config.permissions, master: !!this.config.master, capabilities: this.native.capabilities, knownDevices: this.config.knownDevices || {}, peers: [...this.peers].map(([id, p]) => ({ id, ...p.info, address: p.socket.remoteAddress, transport: this.links.status(p), access: p.access || {status:"未就绪",permissions:{}} })), active: this.active, pendingControl: this.controlIntent?.id, owner: this.owner?.id, shutdownAt: this.shutdownAt, transfer: this.transfer, clipboard: this.clipboard ? { source: this.clipboard.source, files: this.clipboard.files.length, textLength: this.clipboard.text.length } : null, logs: this.logs }; }
+  state() { return { buildInfo, language:languagePreference(this.config.language), theme:['system','dark','light'].includes(this.config.theme)?this.config.theme:'system', clipboardSettings:this.clipboardSync.state(), masterId:masterSelection(this)?.id||(this.config.master?this.config.id:""), masterDevices:masterChoices(this), edgeGlowHideAway:!!this.config.edgeGlowHideAway, switchMode:this.config.switchMode||"dwell", edgeHotkey:this.config.edgeHotkey||"ctrl-alt", edgeGlowEnabled: this.config.edgeGlow !== false, edgeTransition: this.edgeTransition, id: this.config.id, name: this.config.name, groupId: this.group.data.id, groupEstablished: this.group.established, groupMemberCount: Object.keys(this.group.data.members).length, account: this.group.data.id, controlEnded: this.controlEnded, androidDisconnectNotice: this.androidRecovery.notice, fallbackNotice: this.fallbackNotice, stageIncoming:this.staging.incoming(), adbGuide: this.adbGuide.notice, adbAuthorization: this.adb.authorizationNotice(), accessNotice: this.access.notice, viewers: [...new Set([...this.videoHost.sessions.values()].map(s => s.peer.remote.id).concat(this.liveScreens(this.screenViewers)))], port: this.port, dwell: this.config.dwell ?? 100, edges: layoutEdges(this), layout:layoutSelection(this),layoutDevices:layoutDevices(this),consentRequests: this.consent.list(), deviceGrants: this.config.deviceGrants, permissionNotice: this.permissionNotice, permissions: this.config.permissions, master: !!this.config.master, capabilities: this.native.capabilities, knownDevices: this.config.knownDevices || {}, peers: [...this.peers].map(([id, p]) => ({ id, ...p.info, address: p.socket.remoteAddress, transport: this.links.status(p), access: p.access || {status:"未就绪",permissions:{}} })), active: this.active, pendingControl: this.controlIntent?.id, owner: this.owner?.id, shutdownAt: this.shutdownAt, transfer: this.transfer, clipboard: this.clipboard ? { source: this.clipboard.source, files: this.clipboard.files.length, textLength: this.clipboard.text.length } : null, logs: this.logs }; }
   async stopInbound() {
     const ids = new Set([...this.videoHost.sessions.values()].map(s => s.peer.remote.id).concat(this.liveScreens(this.screenViewers))); this.screenViewers.clear(); if (this.owner) ids.add(this.owner.id);
     for (const id of ids) { this.config.pausedPeers[id] = true; try { this.peers.get(id)?.send({ type: 'control-ended',...(this.owner?.id===id&&this.owner.edgeSession?{session:this.owner.edgeSession}:{}) }); } catch {} }

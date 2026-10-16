@@ -3,7 +3,7 @@ import { startDiscovery } from './discovery.js';
 import qrcode from '../vendor/qrcode.mjs';
 import { Group } from './group.js';
 import { AdbManager } from './adb.js';
-import { groupPermissions } from './permissions.js';
+import { groupPermissions, openPermissionGuide, togglePermission, enablePermissionGuide } from './permissions.js';
 import {editLayoutPositions,initializeLayout} from './layout.js';
 import {applySettings} from './settings.js';
 import {initializeMaster} from './master.js';
@@ -20,6 +20,8 @@ export function createActions(service) {
     'stage-outgoing-cancel':a=>service.staging.cancelOutgoing(a.id),
     'stage-outgoing-remove':a=>service.staging.removeOutgoing(a.id),
     'stage-cancel':a=>service.staging.cancel(a.id),
+    'stage-preview-decide':a=>service.staging.decide(a.token,a.accepted===true),
+    'stage-decline':async a=>{await service.staging.cancel(a.id);return service.staging.remove(a.id);},
     'stage-save':a=>service.staging.saveTo(a.id,a.destination),
     'stage-share':a=>service.staging.share(a.id,a.files,a.start!==false,a.session),
     'stage-drag-end':a=>{service.staging.end(a.session);return {};},
@@ -31,7 +33,11 @@ export function createActions(service) {
     'clipboard-download':()=>service.clipboardSync.downloadNow(),
     'clipboard-copy':a=>service.clipboardSync.copy(a.id),
     'group-permissions': () => groupPermissions(service),
+    'permission-guide-open': a => openPermissionGuide(service, a.id, a.permission),
+    'permission-toggle': a => togglePermission(service, a.id, a.permission, a.enabled),
+    'permission-guide-enable': a => enablePermissionGuide(service, a.requestId),
     'adb-forget': a => adb.forget(a.id),
+    'adb-authorization-dismiss': a => adb.dismissAuthorization(a.requestId),
     settings: a => service.settings(a),
     'layout-place':a=>service.configure(()=>applySettings(service,{layoutPositions:editLayoutPositions(service,a)})),
     'layout-remove':a=>service.configure(()=>applySettings(service,{layoutPositions:editLayoutPositions(service,{id:a.id,remove:true})})),
@@ -57,7 +63,7 @@ export function createActions(service) {
     'consent-decide': a => service.decideConsent(a),
     'consent-revoke': a => service.revokeConsent(a.id),
     'consent-set': a => service.setConsent(a.id,a.permissions),
-    'permission-dismiss': () => { service.permissionNotice = null; },
+    'permission-dismiss': a => { if (!a?.requestId || service.permissionNotice?.requestId === a.requestId) service.permissionNotice = null; },
     'android-disconnect-dismiss': a => service.androidRecovery.dismiss(a.requestId),
     pairing: a => {
       const info = { ...service.pairing.show(), groupId: service.group.data.id, groupEstablished: service.group.established };
@@ -74,24 +80,17 @@ export function createActions(service) {
     join: async a => {
       const previousGroup = service.group.data.id;
       if (a.expectedGroup && a.expectedGroup !== previousGroup) throw Error('组已发生变化，请重新打开添加设备');
-      if (service.group.established && a.dissolveCurrentGroup !== true) throw Error('请先确认解散当前组，所有原组成员都将退出');
-      const result = a.code !== undefined ? await service.pairing.join(a.code, a.id) : { token: a.token };
-      const secret = parseToken(result.token);
+      const result = a.code !== undefined ? await service.pairing.join(a.code, a.id, a.dissolveCurrentGroup === true) : { token: a.token };
+      parseToken(result.token);
       if (service.group.data.id !== previousGroup) throw Error('组已发生变化，请重新配对');
-      if (result.group?.id === previousGroup) return { alreadyInGroup: true };
+      if (result.group?.id === previousGroup) { if (result.host) service.connect(result.host, result.port); return { alreadyInGroup: true }; }
       if (result.group) { const check = new Group({ ...service, config: structuredClone(service.config) }); check.adopt(result.group, result.token); }
       if (service.group.established) {
-        if (a.dissolveCurrentGroup !== true) throw Error('组已有新成员，请重新确认解散');
+        if (a.dissolveCurrentGroup !== true) throw Error('组已发生变化，请重新配对以合并设备组');
         service.config.pendingGroupJoin = { previousGroup, ...result }; await saveConfig(service.dir, service.config);
         await service.group.dissolve();
       }
-      await service.returnLocal(); service.stopDiscovery?.(); service.pairing.hide();
-      for (const p of service.sockets) p.close();
-      service.config.knownDevices = {}; service.config.edges = {}; service.config.deviceGrants = {}; service.consent.reset(service.config.deviceGrants); service.permissionNotice = null; service.secret = secret; service.config.token = result.token.trim(); service.config.pausedPeers = {}; if (result.group) service.group.adopt(result.group, result.token); else { service.config.group = { id: (await import('./identity.js')).accountId(result.token), revision: 0, members: {}, removed: [], history: [], anchors: {} }; service.group.data = service.config.group; service.group.data.members[service.config.id] = service.group.own; service.group.refreshBoxes(); } service.offers.clear(); service.clipboard = null;service.clipboardSync.clear();
-      delete service.config.pendingGroupJoin;delete service.config.layout;delete service.config.masterSelection;service.config.master=false;await initializeMaster(service);await initializeLayout(service);await saveConfig(service.dir, service.config);
-      if (!service.options.noDiscovery) service.stopDiscovery = startDiscovery(service.identity(), secret, service.port,
-        (b, host) => { if (service.config.id < b.id && !service.peers.has(b.id)) service.connect(host, b.port); }, e => service.log(e.message));
-      if (result.host) service.connect(result.host, result.port);
+      await applyPairingResult(service, result);
     },
     connect: a => service.connect(a.host, Number(a.port || 45831)),
     control: a => service.switchTo(a.id, a.edge || 'right', !!a.capture, a.newSession === true, a.fallbackAccepted === true, a.screen === true),
@@ -117,4 +116,33 @@ export function createActions(service) {
     if (!args || typeof args !== 'object' || Array.isArray(args) || JSON.stringify(args).length > 2 * 1024 * 1024) throw new Error('请求数据无效或过大');
     return await actions[method](args) ?? {};
   };
+}
+
+// Both pairing directions use the same persisted group transition.
+export async function applyPairingResult(service, result) {
+  const secret = parseToken(result.token);
+  const check = new Group({ ...service, config: structuredClone(service.config) });
+  if (result.group) check.adopt(result.group, result.token);
+  service.group.rememberMigrations(result.migrations);
+  if (result.migrations && service.group.established) {
+    service.config.pendingGroupMerge = { group: result.group, token: result.token };
+    await saveConfig(service.dir, service.config);
+    const updates = result.migrations[service.group.data.id] || [];
+    await Promise.allSettled([...service.peers.values()].map(p => {
+      const box = updates.find(b => b.to === p.remote.id);
+      return box ? p.request('group-update', { box }, 1500) : Promise.resolve();
+    }));
+    service.pairing.hide(); service.group.adopt(result.group, result.token);
+    for (const id of service.group.data.removed) service.group.forget(id);
+    delete service.config.pendingGroupMerge;
+    await saveConfig(service.dir, service.config); await service.groupChanged();
+    service.group.publish(); return;
+  }
+  await service.returnLocal(); service.stopDiscovery?.(); service.pairing.hide();
+  for (const p of service.sockets) p.close();
+  service.config.knownDevices = {}; service.config.edges = {}; service.config.deviceGrants = {}; service.consent.reset(service.config.deviceGrants); service.permissionNotice = null; service.secret = secret; service.config.token = result.token.trim(); service.config.pausedPeers = {}; if (result.group) service.group.adopt(result.group, result.token); else { service.config.group = { id: (await import('./identity.js')).accountId(result.token), revision: 0, members: {}, removed: [], history: [], anchors: {} }; service.group.data = service.config.group; service.group.data.members[service.config.id] = service.group.own; service.group.refreshBoxes(); } service.offers.clear(); service.clipboard = null;service.clipboardSync.clear();
+  delete service.config.pendingGroupJoin;delete service.config.layout;delete service.config.masterSelection;service.config.master=false;await initializeMaster(service);await initializeLayout(service);await saveConfig(service.dir, service.config);
+  if (!service.options.noDiscovery) service.stopDiscovery = startDiscovery(service.identity(), secret, service.port,
+    (b, host) => { if (service.config.id < b.id && !service.peers.has(b.id)) service.connect(host, b.port); }, e => service.log(e.message));
+  if (result.host) service.connect(result.host, result.port);
 }

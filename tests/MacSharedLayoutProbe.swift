@@ -17,6 +17,11 @@ import SwiftUI
             try require(model.devices.first { $0.id == "D" }?.online == false, "offline group member must remain available for layout")
             try require(model.layoutPositions["B"] == SharedLayoutCell(x: 2, y: 0), "chain coordinates must not recenter on this computer")
             try require(model.masterID == "A", "master badge must name the same remote master")
+            let remoteActions = DeviceActions(model: model, device: model.devices.first { $0.id == "A" }!)
+            try require(remoteActions.deviceType == "Windows" && remoteActions.onlineStatus == "未就绪", "device actions must identify the platform and readiness independently of its master badge")
+            let limited = Device(id: "limited", name: "Limited", platform: "android", online: true, access: ["status": "有限授权"])
+            try require(DeviceActions(model: model, device: limited).onlineStatus == "未授权", "partial authorization must not report fully online")
+            try require(DeviceActions(model: model, device: model.devices.first { $0.id == "D" }!).onlineStatus == "离线", "offline devices must report offline in their action menu")
             let before = model.layoutPositions; model.state["masterId"] = "D"
             try require(model.layoutPositions == before, "changing the master must preserve every group cell")
             model.place("D", "bottom", relativeTo: "B")
@@ -42,7 +47,7 @@ import SwiftUI
             let arranged = model.layoutPositions
             let targetMaster = model.devices.first { $0.id == "B" }!
             await model.chooseLayoutMaster(targetMaster)
-            try require(model.masterID == "B", "clicking a layout computer must update the shared master through settings")
+            try require(model.masterID == "B", "the explicit master action must update the shared master through settings")
             try require(model.layoutPositions == arranged, "choosing a layout master must not move any card")
             try require(DeviceTile(model: model, device: targetMaster).isLayoutMaster, "new master must show its dedicated badge")
             try require(!DeviceTile(model: model, device: model.devices.first { $0.id == "D" }!).isLayoutMaster, "old master badge must clear")
@@ -81,6 +86,9 @@ import SwiftUI
     static func geometry() throws {
         let cells = [SharedLayoutCell(x: 0, y: 0), SharedLayoutCell(x: 1, y: 0), SharedLayoutCell(x: 2, y: 0), SharedLayoutCell(x: 1, y: -1), SharedLayoutCell(x: 2, y: 1)]
         let layout = SharedLayoutGeometry(size: CGSize(width: 840, height: 520), cells: cells)
+        let limits = [SharedLayoutCell(x: -32, y: -32), SharedLayoutCell(x: 32, y: 32)]
+        let extent = SharedLayoutGeometry(size: CGSize(width: 400, height: 250), cells: limits)
+        for cell in limits { let point = extent.point(cell); try require(point.x >= 200 && point.x <= extent.contentSize.width - 200 && point.y >= 125 && point.y <= extent.contentSize.height - 125, "grid-limit devices must reach viewport center without moving group cells") }
         for cell in cells { try require(layout.cell(layout.point(cell)) == cell, "every chain and branch cell must round-trip through drag coordinates") }
         try require(layout.point(cells[2]).x > layout.point(cells[1]).x && layout.point(cells[1]).x > layout.point(cells[0]).x, "multi-level neighbours must occupy distinct consecutive positions")
         try require(cells[2].adjacent("bottom") == cells[4], "relative placement must work from any non-local device")

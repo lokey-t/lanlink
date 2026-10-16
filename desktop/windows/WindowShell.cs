@@ -51,6 +51,7 @@ namespace LanLink.Desktop {
         case "maximize": geometry = "M6,6 L18,6 L18,18 L6,18 Z"; break;
         case "sidebar": geometry = "M4,5 L20,5 L20,19 L4,19 Z M15,5 L15,19"; break;
         case "collapse-left": geometry = "M15,6 L9,12 L15,18"; break;
+        case "arrow-right": geometry = "M3,12 L21,12 M15,6 L21,12 L15,18"; break;
         case "expand-right": geometry = "M9,6 L15,12 L9,18"; break;
         case "return": geometry = "M9,7 L4,12 L9,17 M4,12 L15,12 C22,12 22,20 15,20"; break;
         case "files": geometry="M3,7 L3,4 L10,4 L13,7 L21,7 L21,21 L3,21 Z M3,9 L21,9";break;
@@ -59,6 +60,7 @@ namespace LanLink.Desktop {
         case "power": geometry = "M12,2 L12,12 M7,5 A8,8 0 1 0 17,5"; break;
         case "layout": geometry = "M3,4 L10,4 L10,11 L3,11 Z M14,4 L21,4 L21,11 L14,11 Z M3,15 L10,15 L10,22 L3,22 Z M14,15 L21,15 L21,22 L14,22 Z"; break;
         case "pointer": geometry = "M6,3 L6,20 L11,15 L15,21 L18,19 L14,13 L21,12 Z"; break;
+        case "keyboard": geometry = "M2,6 L22,6 L22,19 L2,19 Z M5,9 L6,9 M9,9 L10,9 M13,9 L14,9 M17,9 L19,9 M5,12 L6,12 M9,12 L10,12 M13,12 L14,12 M17,12 L19,12 M7,16 L17,16"; break;
         default: geometry = "M3,4 L21,4 L21,17 L3,17 Z M12,17 L12,21 M7,21 L17,21"; break;
       }
       return new Viewbox { Width = size, Height = size, Child = new System.Windows.Shapes.Path { Data = Geometry.Parse(geometry), Stroke = MainWindow.Brush(name=="clipboard-upload"||name=="clipboard-download"||name=="plus"?"#4169CE":"#637596"), StrokeThickness = 1.55, StrokeLineJoin = PenLineJoin.Round, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round, Width = 24, Height = 24 } };

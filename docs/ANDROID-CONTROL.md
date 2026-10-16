@@ -23,7 +23,7 @@
 
 Mac、Windows 主控端在安卓连接中断时弹窗说明原因尚待确认；手机重连后，按上次运行的会话标识核对退出记录并更新说明。仅检测到后台限制时会说明“可能有关”，不会直接认定是省电杀进程；同一进程恢复网络连接会撤下待确认提示，主动切组和退出不会触发此提示。
 
-电脑每隔约 10 秒检查 USB 调试设备。识别为本组且尚未完成授权的手机插入后，自动打开现有 ADB 引导；同一次插入关闭提示后不重复打扰，完成授权也不会自动发起控制。已有有效组身份及 USB 序列号绑定的手机可在系统显示未授权时提示；首次连接且系统 USB 调试尚未允许的未知手机无法读取组身份，需先在手机允许系统调试，再核验身份并显示引导。软件不会根据同型号或仅连接一台手机来猜测组归属。
+电脑每隔约 10 秒检查 ADB 调试连接，包括 USB 和已连接的无线 ADB。核验为同组手机、手机已允许系统调试且应用输入权限允许时，电脑会自动配置并启动 ADB 助手，保存经过验证的恢复绑定；确认助手已就绪后，Windows 和 macOS 弹出“设备已授权，已经可以正常使用”。同一次连接不会重复弹窗，也不会自动发起键鼠控制。配置失败或仍需手机确认时保留原有引导，失败不会显示成功通知。已撤销的应用授权不会自动恢复，需先在手机上允许；允许后会自动继续配置。首次连接且系统 USB 调试尚未允许的未知手机无法读取组身份，需先在手机允许系统调试，再核验身份。软件不会根据同型号或仅连接一台手机来猜测组归属。
 
 系统参考：[进程退出记录](https://developer.android.com/reference/android/app/ApplicationExitInfo)、[后台限制状态](https://developer.android.com/reference/android/app/ActivityManager#isBackgroundRestricted())、[省电白名单状态](https://developer.android.com/reference/android/os/PowerManager#isIgnoringBatteryOptimizations(java.lang.String))。厂商自启动页面仍需在对应 ROM 上验证。
 

@@ -5,6 +5,7 @@ import {constants} from 'node:fs';
 import {receiveBulk,receiveQuicFile} from './bulk.js';
 import {withAbort} from './abort.js';
 import {safeName} from './service.js';
+import {previewOrder,validPreview} from './stage-preview.js';
 const MAX=2*1024**3,COUNT=1000,UUID=/^[a-f0-9-]{36}$/i;
 export function stagePath(value){
   if(typeof value!=='string'||value.length>1024||value.split('/').length>32)throw Error('文件路径无效');
@@ -23,6 +24,22 @@ export function validateStage(o){
 export class Staging {
   constructor(service){this.service=service;this.rows=new Map();this.exports=new Map();this.sent=new Map();this.tasks=new Map();this.controllers=new Map();this.sharing=new Map();this.saving=new Set();this.ended=new Set();this.tail=Promise.resolve();this.write=Promise.resolve();}
   get root(){return path.join(this.service.dir,'staging');}
+  nextPreview(session){this.previewClock=Math.max(Date.now(),(this.previewClock||0)+1,(this.preview?.revision||0)+1);return {group:this.service.group.data.id,origin:this.service.config.id,id:randomUUID(),revision:this.previewClock};}
+  async applyPreview(peer,value){
+    const s=this.service;
+    if(!validPreview(value,s.group.data.id)||value.origin!==(peer?.remote.id||s.config.id)||s.group.excluded(value.origin))throw Error('预传输信息无效');
+    if(this.preview?.group!==value.group)this.preview=null;
+    if(this.preview&&previewOrder(value,this.preview)<0)return {current:false};
+    if(this.preview&&previewOrder(value,this.preview)===0)return {current:true};
+    this.preview={...value};
+    for(const [id,r]of this.rows)if(r.state==='pending'&&!this.tasks.has(id)&&r.preview?.id!==value.id)this.rows.delete(id);
+    for(const [id,o]of this.exports)if(o.ephemeral&&!o.started&&o.state==='pending'&&o.preview?.id!==value.id){this.exports.delete(id);this.sent.delete(id);s.offers.delete(id);}
+    await this.save();s.emit('change');return {current:true};
+  }
+  announcePreview(){if(this.preview?.origin!==this.service.config.id)return;for(const p of this.service.peers.values())if(!p.closed)p.request('stage-preview',{preview:this.preview},3000).catch(()=>{});}
+  incoming(){return this.list().filter(r=>r.state==='pending').map(({files,...r})=>({...r,token:this.rows.get(r.id)?.preview?.id||r.id}));}
+  async decide(token,accepted){const pending=[...this.rows.values()].filter(r=>r.state==='pending'&&!this.tasks.has(r.id)&&(r.preview?.id||r.id)===token);for(const r of pending){if(accepted)this.start(r.id).catch(e=>this.service.log(e.message));else{await this.cancel(r.id);await this.remove(r.id);}}return {};}
+  async transferSlot(signal){while((this.activeTransfers||0)>=4){await withAbort(new Promise(resolve=>{(this.transferWaiters||=[]).push(resolve);}),signal);signal.throwIfAborted();}signal.throwIfAborted();this.activeTransfers=(this.activeTransfers||0)+1;return ()=>{this.activeTransfers--;const waiting=this.transferWaiters||[];this.transferWaiters=[];for(const resolve of waiting)resolve();};}
   location(row){return path.join(this.root,row.id,row.offer.name);}
   async load(){
     await mkdir(this.root,{recursive:true});
@@ -68,16 +85,20 @@ export class Staging {
   share(target,paths,start=true,session=null){const key=JSON.stringify([target,paths,start,session]);if(this.sharing.has(key))return this.sharing.get(key);const work=this.shareBatch(target,paths,start,session);this.sharing.set(key,work);work.finally(()=>this.sharing.delete(key)).catch(()=>{});return work;}
   async shareBatch(target,paths,start=true,session=null){
     if(!start){session ||= this.service.active===target?this.service.activeSession?.edgeSession:null;if(!UUID.test(session||''))throw Error('请在本次拖动或鼠标控制会话中发送待传输文件');if(this.ended.has(session))throw Error('本次鼠标操作已结束');}
+    const preview=!start?this.nextPreview(session):null;
     const offers=await this.prepare(paths,target);let attempted=null;const accepted=new Set();
-    if(!start)for(const offer of offers){this.exports.get(offer.id).ephemeral=session;this.service.offers.get(offer.id).ephemeral=session;}
-    try{const peer=this.service.getPeer(target);for(const offer of offers){if(!start&&this.ended.has(session))throw Error('本次鼠标操作已结束');const o=this.exports.get(offer.id);if(!o||o.state==='cancelled')continue;attempted=offer.id;this.remember(o,start?'queued':'pending');await peer.request('stage-offer',{offer,start,...(!start?{ephemeral:session}:{})},15000);accepted.add(offer.id);if(!start&&this.ended.has(session))throw Error('本次鼠标操作已结束');}}
+    if(!start){for(const offer of offers){this.exports.get(offer.id).ephemeral=session;this.exports.get(offer.id).preview=preview;this.service.offers.get(offer.id).ephemeral=session;}const applied=await this.applyPreview(null,preview);if(!applied.current){for(const offer of offers){this.exports.delete(offer.id);this.sent.delete(offer.id);this.service.offers.delete(offer.id);}await this.save();throw Error('预传输已被新的文件替换');}this.announcePreview();}
+    try{const peer=this.service.getPeer(target);for(const offer of offers){if(!start&&this.ended.has(session))throw Error('本次鼠标操作已结束');const o=this.exports.get(offer.id);if(!o||o.state==='cancelled')continue;attempted=offer.id;this.remember(o,start?'queued':'pending');await peer.request('stage-offer',{offer,start,...(!start?{ephemeral:session,preview}:{})},15000);accepted.add(offer.id);if(!start&&this.ended.has(session))throw Error('本次鼠标操作已结束');}}
     catch(error){for(const offer of offers){const o=this.exports.get(offer.id);if(!o||accepted.has(offer.id))continue;const ambiguous=offer.id===attempted&&(/响应超时|连接已断开|设备未连接|设备不在线/.test(error.message)||o.started);this.remember(o,'failed',ambiguous?'未能确认接收状态，可重试或取消':error.message);if(!ambiguous){this.exports.delete(offer.id);this.service.offers.delete(offer.id);}}if(!start)this.end(session);await this.save();throw error;}
     await this.save();return {message:!accepted.size?'发送已取消':start?'已开始发送，接收完成后会更新状态':'待传输文件已添加到对方暂存区'};
   }
   async accept(peer,args){
     this.service.authorize(peer,'clipboard');const offer=validateStage(args.offer);let row=[...this.rows.values()].find(r=>r.source===peer.remote.id&&r.offer.id===offer.id);
+    if(args.preview&&!(await this.applyPreview(peer,args.preview)).current)throw Error('预传输已被新的文件替换');
+    if(args.preview&&previewOrder(args.preview,this.preview)!==0)throw Error('预传输已被新的文件替换');
+    if(row&&!this.rows.has(row.id))row=null;
     if(args.ephemeral!==undefined&&!UUID.test(args.ephemeral))throw Error('拖动会话无效');
-    if(!row){if(this.rows.size>=200)throw Error('暂存区已满，请先保存或移除文件');row={id:randomUUID(),offer,source:peer.remote.id,sourceName:peer.info?.name||'设备',created:Date.now(),state:'pending',received:0,...(args.ephemeral?{ephemeral:args.ephemeral}:{})};this.rows.set(row.id,row);await this.save();this.service.emit('change');}
+    if(!row){if(this.rows.size>=200)throw Error('暂存区已满，请先保存或移除文件');row={id:randomUUID(),offer,source:peer.remote.id,sourceName:peer.info?.name||'设备',created:Date.now(),state:'pending',received:0,...(args.ephemeral?{ephemeral:args.ephemeral}:{}),...(args.preview?{preview:args.preview}:{})};this.rows.set(row.id,row);await this.save();this.service.emit('change');}
     else if(JSON.stringify(row.offer)!==JSON.stringify(offer))throw Error('分享项目已改变');
     if(row.state==='ready')peer.request('stage-complete',{id:offer.id},4000).catch(()=>{});
     if(args.start===true&&row.state!=='ready'&&(row.state!=='cancelled'||args.resume===true))this.start(row.id,args.resume===true).catch(e=>this.service.log(e.message));return {id:row.id};
@@ -85,7 +106,7 @@ export class Staging {
   start(id,resume=true){
     if(this.saving.has(id))return Promise.reject(Error('文件正在保存或移除，请稍后重试'));
     if(this.tasks.has(id)){if(this.controllers.get(id)?.signal.aborted)return this.tasks.get(id).catch(()=>{}).then(()=>this.start(id,resume));return this.tasks.get(id);}
-    const controller=new AbortController();this.controllers.set(id,controller);const r=this.rows.get(id);if(r&&r.state!=='ready'){r.state='pending';r.error='';}const turn=this.tail.catch(()=>{});const work=withAbort(turn,controller.signal).then(()=>{controller.signal.throwIfAborted();return this.rows.has(id)?this.download(id,controller.signal,resume):{};}).catch(async error=>{const r=this.rows.get(id);if(r&&r.state!=='ready'){if(r.ephemeral&&!r.started&&!controller.signal.aborted)this.rows.delete(id);else{r.state=controller.signal.aborted?'cancelled':'failed';r.error=controller.signal.aborted?'已取消，可重新传输':error.message;}await this.save();this.service.emit('change');}throw error;});this.tasks.set(id,work);this.tail=Promise.allSettled([turn,work]);work.finally(()=>{this.tasks.delete(id);this.controllers.delete(id);}).catch(()=>{});return work;
+    const controller=new AbortController();this.controllers.set(id,controller);const r=this.rows.get(id);if(r&&r.state!=='ready'){r.state='pending';r.error='';}const turn=Promise.resolve();const work=this.transferSlot(controller.signal).then(async release=>{try{controller.signal.throwIfAborted();return this.rows.has(id)?await this.download(id,controller.signal,resume):{};}finally{release();}}).catch(async error=>{const r=this.rows.get(id);if(r&&r.state!=='ready'){if(r.ephemeral&&!r.started&&!controller.signal.aborted)this.rows.delete(id);else{r.state=controller.signal.aborted?'cancelled':'failed';r.error=controller.signal.aborted?'已取消，可重新传输':error.message;}await this.save();this.service.emit('change');}throw error;});this.tasks.set(id,work);this.tail=Promise.allSettled([turn,work]);work.finally(()=>{this.tasks.delete(id);this.controllers.delete(id);}).catch(()=>{});return work;
   }
   async download(id,signal,resume){
     if(this.closed||this.service.closing)throw Error('传输已取消');const r=this.rows.get(id);if(!r)throw Error('暂存文件不存在');if(r.state==='ready')return {message:'文件已接收'};
@@ -108,7 +129,7 @@ export class Staging {
     try{if(r.state==='cancelled'&&this.tasks.has(id))await this.tasks.get(id).catch(()=>{});else if(this.tasks.has(id)&&r.state!=='ready'||r.state==='receiving')throw Error('正在传输，请先取消后移除');await this.save({removeRow:id});await rm(path.join(this.root,r.id),{recursive:true,force:true});this.service.emit('change');return {message:'已移除暂存文件，发送端原文件保留'};}finally{this.saving.delete(id);}
   }
   async available(peer,id){const entry=this.service.offers.get(id);if(!entry||entry.target!==peer.remote.id||entry.until<Date.now()||entry.cancelled)return {available:false};try{const location=this.exports.get(id)?.rootLocation;if(location)await lstat(location);for(const file of entry.entries.values()){const st=await lstat(file.location);if(!st.isFile()||st.size!==file.size||st.mtimeMs!==file.mtime)return {available:false};}return {available:true};}catch{return {available:false};}}
-  async retract(peer,session){for(const r of [...this.rows.values()])if(r.source===peer.remote.id&&r.ephemeral===session&&r.state==='pending')this.rows.delete(r.id);await this.save();this.service.emit('change');return {};}
+  async retract(peer,session){for(const r of [...this.rows.values()])if(r.source===peer.remote.id&&r.ephemeral===session&&r.state==='pending'&&!this.tasks.has(r.id))this.rows.delete(r.id);await this.save();this.service.emit('change');return {};}
   async begin(peer,id,resume=false){const o=this.exports.get(id),entry=this.service.offers.get(id);if(o?.target===peer.remote.id&&entry?.cancelled&&!resume)throw Error('发送已取消，请手动重新传输');if(o?.target===peer.remote.id&&entry&&resume)entry.cancelled=false;if(!o||o.target!==peer.remote.id||(await this.available(peer,id)).available!==true)throw Error('源文件已删除或分享已结束');o.started=true;this.remember(o,'sending');await this.save();return {};}
   async complete(peer,id){const o=this.exports.get(id);if(o?.target===peer.remote.id){this.remember(o,'completed');this.exports.delete(id);this.service.offers.delete(id);await this.save();}return {};}
   async failed(peer,id,error){const o=this.exports.get(id);if(o?.target===peer.remote.id){if(o.state!=='cancelled')this.remember(o,'failed',String(error||'接收失败，请重试').slice(0,300));await this.save();}return {};}
@@ -135,6 +156,6 @@ export class Staging {
     }catch(error){if(created)await rm(destination,{recursive:true,force:true});if(error.code==='EEXIST')throw Error('此位置已有同名文件，请换一个名称');throw error;}finally{this.saving.delete(id);}
   }
   end(session){if(!session)return;this.ended.add(session);if(this.ended.size>512)this.ended.delete(this.ended.values().next().value);const targets=new Set();for(const [id,o]of this.exports)if(o.ephemeral===session){targets.add(o.target);if(!o.started){this.exports.delete(id);this.service.offers.delete(id);this.sent.delete(id);}}for(const target of targets)this.service.peers.get(target)?.request('stage-retract',{session},3000).catch(()=>{});this.save().catch(()=>{});}
-  async tick(){if(this.polling)return;this.polling=true;try{let changed=false;for(const r of [...this.rows.values()].filter(r=>r.ephemeral&&r.state==='pending')){let available=false;try{available=(await this.service.getPeer(r.source).request('stage-status',{id:r.offer.id},2500)).available===true;}catch{}if(!available&&r.state==='pending'){this.rows.delete(r.id);changed=true;}}if(changed){await this.save();this.service.emit('change');}}finally{this.polling=false;}}
-  clearExports(){for(const id of this.exports.keys())this.service.offers.delete(id);this.exports.clear();this.sent.clear();this.save().catch(()=>{});}
+  async tick(){if(this.polling)return;this.polling=true;try{if(Date.now()-(this.previewAnnounced||0)>3000){this.previewAnnounced=Date.now();this.announcePreview();}let changed=false;for(const r of [...this.rows.values()].filter(r=>r.ephemeral&&r.state==='pending'&&!this.tasks.has(r.id))){let available=false;try{available=(await this.service.getPeer(r.source).request('stage-status',{id:r.offer.id},2500)).available===true;}catch{}if(!available&&r.state==='pending'&&!this.tasks.has(r.id)){this.rows.delete(r.id);changed=true;}}if(changed){await this.save();this.service.emit('change');}}finally{this.polling=false;}}
+  clearExports(){this.preview=null;this.previewClock=0;for(const id of this.exports.keys())this.service.offers.delete(id);this.exports.clear();this.sent.clear();this.save().catch(()=>{});}
 }

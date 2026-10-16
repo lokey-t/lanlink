@@ -4,6 +4,7 @@ import { promisify } from 'node:util';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { randomUUID } from 'node:crypto';
 import { saveConfig } from './identity.js';
 
 const execute = promisify(execFile);
@@ -54,6 +55,16 @@ export class AdbManager {
   constructor(service, { locate = findAdb, run = execute, wait = delay } = {}) {
     Object.assign(this, { service, locate, run, wait }); this.busy = false; this.retries = new Map();
     this.usbPrompted = new Map(); this.ticking = false;
+    this.usbRetries = new Map(); this.authorizationNotices = [];
+  }
+  authorizationNotice() {
+    const service = this.service;
+    this.authorizationNotices = this.authorizationNotices.filter(item => service.group === item.group && !service.group.excluded(item.notice.id) && service.group.data.members[item.notice.id]?.key === item.key);
+    return this.authorizationNotices[0]?.notice || null;
+  }
+  dismissAuthorization(requestId) {
+    this.authorizationNotices = this.authorizationNotices.filter(item => item.notice.requestId !== requestId);
+    this.service.emit('change'); return {};
   }
   async remember(id, serial, peer) {
     if (!this.service.config) return;
@@ -72,7 +83,7 @@ export class AdbManager {
     if (this.busy || this.ticking || this.service.closing) return;
     this.ticking = true;
     try {
-      try { await this.scanUsb(); } catch { /* A temporary USB scan failure must not stop saved recovery. */ }
+      try { await this.scanUsb({ includeNetwork: true }); } catch { /* A temporary ADB scan failure must not stop saved recovery. */ }
       await this.recover();
     } finally { this.ticking = false; }
   }
@@ -99,7 +110,7 @@ export class AdbManager {
     if (!executable) return null;
     return parseDevices(await this.command(executable, ['devices', '-l'], 3000)).find(device => device.serial === serial) || null;
   }
-  async scanUsb() {
+  async scanUsb({ includeNetwork = false } = {}) {
     const service = this.service, guide = service.adbGuide;
     if (!guide?.usbDetected || this.busy || service.closing || service.changingGroup) return;
     const group = service.group;
@@ -108,11 +119,13 @@ export class AdbManager {
     const currentMember = (id, key) => service.group === group && !group.excluded(id) && group.data.members[id]?.key === key;
     const executable = await this.locate();
     if (!executable) return;
-    const devices = parseDevices(await this.command(executable, ['devices', '-l'], 3000)).filter(device => usbSerial(device.serial));
+    const devices = parseDevices(await this.command(executable, ['devices', '-l'], 3000)).filter(device => usbSerial(device.serial) || includeNetwork && !device.serial.startsWith('emulator-'));
     const attached = new Set(devices.map(device => device.serial));
     for (const serial of this.usbPrompted.keys()) if (!attached.has(serial)) this.usbPrompted.delete(serial);
-    if (guide.notice || this.busy || service.closing || service.changingGroup) return;
+    for (const serial of this.usbRetries.keys()) if (!attached.has(serial)) this.usbRetries.delete(serial);
+    if ((guide.notice && !(guide.notice.trigger === 'usb' && guide.notice.setupOnly)) || this.busy || service.closing || service.changingGroup) return;
     for (const [id, member] of members) {
+      if (guide.notice && guide.notice.id !== id) continue;
       const peer = service.peers.get(id);
       // Only authenticated, current group identities can supply live status.
       if (peer && !peer.closed && peer.info?.capabilities?.memberKey !== member.key) continue;
@@ -121,7 +134,7 @@ export class AdbManager {
       let report;
       for (const device of [...devices].sort((a, b) => Number(b.serial === bound) - Number(a.serial === bound))) {
         const noticeKey = `${id}:${member.key}`;
-        if (this.usbPrompted.get(device.serial)?.has(noticeKey)) continue;
+        if (this.usbPrompted.get(device.serial)?.has(noticeKey) && guide.notice?.id !== id) continue;
         let verified = false;
         if (device.status === 'unauthorized') {
           // ADB cannot read an application's identity before Android's system
@@ -133,11 +146,30 @@ export class AdbManager {
         } else if (device.status === 'device' && peer && !peer.closed) {
           if (!report) try { report = await peer.request('permission-status', {}, 3000); } catch { break; }
           const engine = report?.engine;
-          if (!engine || engine.root || engine.authorized !== false && !engine.revoked && (engine.ready || engine.authorized === true || engine.recovering)) break;
+          if (!engine || engine.root || !engine.revoked && (engine.ready || engine.recovering)) break;
           verified = await service.links?.verifyUsb(id, device.serial);
         }
-        if (!verified || this.busy || service.closing || service.changingGroup || guide.notice || !currentMember(id, member.key)) continue;
+        if (!verified || this.busy || service.closing || service.changingGroup || !currentMember(id, member.key)) continue;
         if (peer && (peer.closed || service.peers.get(id) !== peer || peer.info?.capabilities?.memberKey !== member.key)) continue;
+        if (device.status === 'device' && peer && !report?.engine?.revoked && Date.now() >= (this.usbRetries.get(device.serial) || 0)) {
+          this.usbRetries.set(device.serial, Date.now() + 30000);
+          const generation = guide.generation;
+          try {
+            const result = await this.authorize({ id, serial: device.serial, automatic: true, rememberBinding: true });
+            if (generation !== guide.generation) return;
+            if (result?.mode && !result.skipped && !service.closing && !service.changingGroup && currentMember(id, member.key) && service.peers.get(id) === peer && !peer.closed && peer.info?.capabilities?.memberKey === member.key && generation === guide.generation) {
+              if (guide.notice?.trigger === 'usb' && guide.notice.id === id) await guide.complete(guide.notice.requestId);
+              if (!currentMember(id, member.key) || service.peers.get(id) !== peer || peer.closed || service.closing || service.changingGroup) return;
+              if (!this.usbPrompted.has(device.serial)) this.usbPrompted.set(device.serial, new Set());
+              this.usbPrompted.get(device.serial).add(noticeKey);
+              this.authorizationNotice();
+              this.authorizationNotices.push({ group, key: member.key, notice: { id, name: member.name, requestId: randomUUID(), message: '设备已授权，已经可以正常使用。' } });
+              this.authorizationNotices = this.authorizationNotices.slice(-16);
+              service.emit('change'); return;
+            }
+          } catch { /* Keep the existing consent/setup guide available after a failed attempt. */ }
+        }
+        if (!usbSerial(device.serial) || guide.notice || !currentMember(id, member.key) || (peer && (service.peers.get(id) !== peer || peer.closed || peer.info?.capabilities?.memberKey !== member.key)) || service.closing || service.changingGroup) continue;
         const opened = await guide.usbDetected({ id, name: member.name, serial: device.serial, usbUnauthorized: device.status === 'unauthorized', report });
         if (!opened) continue;
         if (!this.usbPrompted.has(device.serial)) this.usbPrompted.set(device.serial, new Set());
@@ -190,7 +222,7 @@ export class AdbManager {
     }));
     return { devices };
   }
-  async authorize({ id, serial, automatic = false }) {
+  async authorize({ id, serial, automatic = false, rememberBinding = false }) {
     if (typeof id !== 'string' || serial !== undefined && (typeof serial !== 'string' || !serialPattern.test(serial))) throw Error('请选择目标手机和调试设备');
     if (this.busy) throw Error('正在为手机启用 ADB 键鼠，请稍候');
     this.busy = true;
@@ -241,7 +273,7 @@ export class AdbManager {
           peer.info.capabilities = { ...peer.info.capabilities, input: true, inputMode: 'adb/root' };
           this.service.emit('change');
           if (this.service.getPeer(id) !== peer) throw Error('手机连接已改变，请重试');
-          if (!automatic) await this.remember(id, serial, peer);
+          if (!automatic || rememberBinding) await this.remember(id, serial, peer);
           return { mode: 'adb/root', message: '已保存恢复绑定。助手就绪时，本组设备无需重复授权或连接数据线即可使用。手机重启后，需通过已信任的调试连接恢复助手。' };
         }
       }

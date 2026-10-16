@@ -28,6 +28,13 @@ public final class PermissionNoticeProbe {
     check(notices.peek(182000) == null, "stale requests expire");
     notices.reset();
     check(notices.offer("a", "电脑 A", "input", 62001), "account reset clears cooldown");
+    notices.openGuide("b", "目标设备请求", "screen", 63000);
+    PermissionNotice.Request explicit = notices.peek(63000);
+    check(explicit.explicit && explicit.needs.size() == 1 && explicit.needs.contains("screen"), "explicit guide selects exactly one permission");
+    notices.openGuide("b", "目标设备请求", "input", 63001);
+    check(notices.peek(63001) != explicit && notices.peek(63001).needs.contains("input"), "a deliberate guide request replaces the old guide");
+    notices.removePeer("b");
+    check(notices.peek(63001) == null, "disconnect dismisses explicit guides too");
     System.out.println("Permission notice lifecycle checks passed");
   }
 }

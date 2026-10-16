@@ -10,6 +10,7 @@ public class WindowsSharedLayoutProbe {
   var down=cells[2].Adjacent("bottom");Require(down.HasValue&&down.Value.X==2&&down.Value.Y==1,"Relative placement from a non-local node");
   var extent=new SharedLayoutGeometry(400,250,new[]{new SharedLayoutCell(-32,-32),new SharedLayoutCell(32,32)});
   Require(extent.Width>400&&extent.Height>250,"Large extents must scroll without shrinking indefinitely");
+  foreach(var cell in new[]{new SharedLayoutCell(-32,-32),new SharedLayoutCell(32,32)}){double x=extent.X(cell)-200,y=extent.Y(cell)-125;Require(x>=0&&x<=extent.Width-400&&y>=0&&y<=extent.Height-250,"Even grid-limit devices must be centerable without changing their cells");}
   Require(!extent.Cell(extent.X(new SharedLayoutCell(33,0)),extent.Y(new SharedLayoutCell(33,0))).HasValue&&!new SharedLayoutCell(32,0).Adjacent("right").HasValue,"Drop and button placement must respect bounds");
   Console.WriteLine("WINDOWS_SHARED_LAYOUT_OK");
  }

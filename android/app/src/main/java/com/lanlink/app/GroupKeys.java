@@ -50,10 +50,99 @@ final class GroupKeys implements AutoCloseable, Pairing.Members {
     save();
   }
 
-  synchronized boolean established() {
+  public synchronized boolean established() {
     return data.optLong("revision") > 0
         || data.optJSONObject("members").length() > 1
         || service.knownDevices().length() > 0;
+  }
+
+  public String credential() { return service.token; }
+
+  public synchronized void joinPaired(JSONObject result) throws Exception {
+    JSONObject meta = result.getJSONObject("group");
+    validateMeta(meta); parseToken(result.getString("token"));
+    rememberMigrations(result.optJSONObject("migrations"));
+    JSONObject records = migration(meta, result.getString("token"));
+    // The persisted pending transition makes crash recovery atomic across preference writes.
+    JSONObject pending = new JSONObject(result.toString()).put("migrations", records);
+    if (!prefs.edit().putString("pending_group_merge", pending.toString()).commit()) throw new IOException("加入信息保存失败");
+    rememberMigrations(records);
+    adopt(meta, result.getString("token"));
+    for (int i = 0; i < data.getJSONArray("removed").length(); i++) service.forgetDevice(data.getJSONArray("removed").getString(i));
+    service.groupChanged(); publish();
+    prefs.edit().remove("pending_group_merge").commit();
+  }
+
+  public synchronized void admitGroup(JSONObject meta) throws Exception {
+    validateMeta(meta);
+    JSONObject incoming = meta.getJSONObject("members"), current = data.getJSONObject("members");
+    Set<String> ids = new HashSet<>();
+    for (Iterator<String> it = current.keys(); it.hasNext();) ids.add(it.next());
+    for (Iterator<String> it = incoming.keys(); it.hasNext();) {
+      String id = it.next(); ids.add(id);
+      if (current.has(id) && !current.getJSONObject(id).getString("key").equals(incoming.getJSONObject(id).getString("key"))) throw new IOException("设备公钥冲突，请重新配对");
+    }
+    if (ids.size() > 16) throw new IOException("每个组最多支持 16 台设备");
+    Set<String> removed = new LinkedHashSet<>();
+    for (JSONObject group : new JSONObject[] {data, meta}) {
+      JSONArray list = group.getJSONArray("removed");
+      for (int i = 0; i < list.length(); i++) {
+        String id = list.getString(i); if (!id(id)) throw new IOException("组成员无效");
+        if (!ids.contains(id)) removed.add(id);
+      }
+    }
+    if (removed.size() > 64) throw new IOException("组成员变更过多，请创建新组");
+    if (isDissolved()) throw new IOException("当前组已经解散");
+    checkHistory();
+    for (Iterator<String> it = incoming.keys(); it.hasNext();) {
+      String id = it.next(); if (id.equals(service.deviceId)) continue;
+      JSONObject member = new JSONObject(incoming.getJSONObject(id).toString());
+      Signature cert = Signature.getInstance("SHA256withRSA"); cert.initSign(keys.getPrivate());
+      cert.update(bytes("lanlink-member-v1|" + data.getString("id") + "|" + id + "|" + member.getString("key")));
+      member.put("certificate", obj("issuer", service.deviceId, "signature", b64(cert.sign()))); learn(member, true);
+    }
+    data.put("removed", new JSONArray(removed)); cacheRemoved();
+    for (String id : removed) service.forgetDevice(id);
+    data.put("revision", Math.max(System.currentTimeMillis(), data.getLong("revision") + 1)); refresh(); save(); publish();
+  }
+
+  public JSONObject migrations() throws Exception { return new JSONObject(prefs.getString("merged_groups", "{}")); }
+
+  static void validateMigrations(JSONObject records) throws Exception {
+    if (records.length() > 64 || records.toString().length() > 4000000) throw new IOException("离线成员合并记录已满");
+    for (Iterator<String> it = records.keys(); it.hasNext();) {
+      String id = it.next(); JSONArray boxes = records.getJSONArray(id);
+      if (!id.matches("[a-f0-9]{24}") || boxes.length() > 16) throw new IOException("组合并记录无效");
+      for (int i = 0; i < boxes.length(); i++) {
+        JSONObject b = boxes.getJSONObject(i);
+        if (!id.equals(b.optString("group")) || !b.optString("kind").equals("lanlink-group-update-v1") || !id(b.optString("to")) || !id(b.optString("issuer")) || b.getLong("revision") < 0 || b.getString("body").length() > 40000 || b.getString("signature").length() > 500 || b.getString("wrapped").length() > 500 || b.toString().length() > 60000) throw new IOException("组合并记录无效");
+      }
+    }
+  }
+
+  public synchronized void rememberMigrations(JSONObject records) throws Exception {
+    if (records == null) return; validateMigrations(records);
+    JSONObject saved = migrations(); boolean changed = false;
+    for (Iterator<String> it = records.keys(); it.hasNext();) {
+      String id = it.next(); JSONArray boxes = records.getJSONArray(id), old = saved.optJSONArray(id);
+      long revision = -1, prior = -1;
+      for (int i = 0; i < boxes.length(); i++) revision = Math.max(revision, boxes.getJSONObject(i).getLong("revision"));
+      for (int i = 0; old != null && i < old.length(); i++) prior = Math.max(prior, old.getJSONObject(i).getLong("revision"));
+      if (old == null || revision > prior) { saved.put(id, boxes); changed = true; }
+    }
+    validateMigrations(saved);
+    if (!changed) return;
+    if (!prefs.edit().putString("merged_groups", saved.toString()).commit()) throw new IOException("组合并记录保存失败");
+    publish();
+  }
+
+  JSONObject migration(JSONObject meta, String token) throws Exception {
+    JSONObject result = migrations(), members = data.getJSONObject("members"); JSONArray boxes = new JSONArray();
+    long revision = Math.max(System.currentTimeMillis(), data.getLong("revision") + 1);
+    for (Iterator<String> it = members.keys(); it.hasNext();) {
+      String id = it.next(); if (!excluded(id)) boxes.put(box(members.getJSONObject(id), meta, token, revision));
+    }
+    result.put(data.getString("id"), boxes); validateMigrations(result); return result;
   }
 
   boolean isDissolved() {
@@ -450,35 +539,15 @@ final class GroupKeys implements AutoCloseable, Pairing.Members {
     return null;
   }
 
-  synchronized JSONObject box(JSONObject member) throws Exception {
+  synchronized JSONObject box(JSONObject member) throws Exception { return box(member, null, service.token, data.getLong("revision")); }
+
+  synchronized JSONObject box(JSONObject member, JSONObject target, String token, long revision) throws Exception {
+    JSONObject payload = obj("token", token, "removed", (target == null ? data : target).getJSONArray("removed"), "members", (target == null ? data : target).getJSONObject("members"));
+    if (target != null) payload.put("group", obj("id", target.getString("id"), "revision", target.getLong("revision"), "anchors", target.optJSONObject("anchors") == null ? obj() : target.getJSONObject("anchors")));
     byte[] key = new byte[32];
     new SecureRandom().nextBytes(key);
-    JSONObject b =
-        obj(
-            "kind",
-            "lanlink-group-update-v1",
-            "group",
-            data.getString("id"),
-            "to",
-            member.getString("id"),
-            "revision",
-            data.getLong("revision"),
-            "issuer",
-            service.deviceId,
-            "chain",
-            certificateChain(),
-            "wrapped",
-            b64(rsa(Cipher.ENCRYPT_MODE, publicKey(member)).doFinal(key)),
-            "body",
-            seal(
-                key,
-                obj(
-                    "token",
-                    service.token,
-                    "removed",
-                    data.getJSONArray("removed"),
-                    "members",
-                    data.getJSONObject("members"))));
+    JSONObject b = obj("kind", "lanlink-group-update-v1", "group", data.getString("id"), "to", member.getString("id"), "revision", revision, "issuer", service.deviceId, "chain", certificateChain(), "wrapped", b64(rsa(Cipher.ENCRYPT_MODE, publicKey(member)).doFinal(key)), "body", seal(key, payload));
+    if (b.getString("body").length() > 40000) throw new IOException("组更新成员信息过多");
     Signature signature = Signature.getInstance("SHA256withRSA");
     signature.initSign(keys.getPrivate());
     signature.update(bytes(transcript(b)));
@@ -540,6 +609,12 @@ final class GroupKeys implements AutoCloseable, Pairing.Members {
         throw new IOException("成员变更无效");
     for (Iterator<String> it = members.keys(); it.hasNext(); )
       publicKey(members.getJSONObject(it.next()));
+    if (payload.has("group")) {
+      JSONObject meta = payload.getJSONObject("group").put("members", members).put("removed", removed).put("history", new JSONArray());
+      validateMeta(meta); adopt(meta, payload.getString("token"));
+      for (int i = 0; i < removed.length(); i++) service.forgetDevice(removed.getString(i));
+      service.groupChanged(); publish(); return;
+    }
     JSONObject oldMembers = data.getJSONObject("members");
     for (Iterator<String> it = oldMembers.keys(); it.hasNext(); ) {
       String id = it.next();
@@ -559,7 +634,9 @@ final class GroupKeys implements AutoCloseable, Pairing.Members {
     if (!m.optString("group").equals(data.getString("id"))) return;
     JSONObject members = m.optJSONObject("members");
     if (members == null || members.length() > 16) return;
-    boolean changed = false;
+    String priorMigrations = migrations().toString();
+    rememberMigrations(m.optJSONObject("migrations"));
+    boolean changed = !priorMigrations.equals(migrations().toString());
     for (Iterator<String> it = members.keys(); it.hasNext(); )
       changed = learn(members.getJSONObject(it.next()), false) || changed;
     JSONArray incoming = m.optJSONArray("history"), history = data.getJSONArray("history");
@@ -600,7 +677,7 @@ final class GroupKeys implements AutoCloseable, Pairing.Members {
                   "members",
                   data.getJSONObject("members"),
                   "history",
-                  data.getJSONArray("history")));
+                  data.getJSONArray("history"), "migrations", migrations()));
         } catch (Exception ignored) {
         }
   }
@@ -665,6 +742,13 @@ final class GroupKeys implements AutoCloseable, Pairing.Members {
         && query.optLong("revision", -1) >= 0) {
       JSONObject notice = dissolvedGroups().optJSONObject(query.optString("group"));
       if (notice != null) return notice;
+      JSONArray boxes = migrations().optJSONArray(query.optString("group"));
+      JSONObject found = null;
+      for (int i = 0; boxes != null && i < boxes.length(); i++) {
+        JSONObject box = boxes.getJSONObject(i);
+        if (box.optString("to").equals(query.optString("id")) && box.optLong("revision") > query.optLong("revision") && (found == null || box.optLong("revision") < found.optLong("revision"))) found = box;
+      }
+      if (found != null) return found;
     }
     if (!query.optString("kind").equals("lanlink-group-recovery-v1")
         || !query.optString("group").equals(data.optString("id"))

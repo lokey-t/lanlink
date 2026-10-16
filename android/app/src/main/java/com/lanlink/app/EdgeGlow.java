@@ -5,6 +5,7 @@ import android.animation.Keyframe;
 import android.animation.PropertyValuesHolder;
 import android.content.Context;
 import android.graphics.*;
+import android.os.Build;
 import android.provider.Settings;
 import android.view.*;
 
@@ -38,6 +39,10 @@ final class EdgeGlow extends View {
     EdgeGlow view=new EdgeGlow(context,edge);
     boolean vertical=edge.equals("left")||edge.equals("right");int strip=(int)(24*context.getResources().getDisplayMetrics().density);
     WindowManager.LayoutParams p=new WindowManager.LayoutParams(vertical?strip:-1,vertical?-1:strip,WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE|WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE|WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,PixelFormat.TRANSLUCENT);
+    // Insets otherwise move TOP below the status bar even with LAYOUT_IN_SCREEN.
+    // Anchor feedback to the physical screen edges, including cutout regions.
+    if(Build.VERSION.SDK_INT>=30){p.setFitInsetsTypes(0);p.layoutInDisplayCutoutMode=WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;}
+    else{p.flags|=WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;p.layoutInDisplayCutoutMode=WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;}
     p.gravity=edge.equals("left")?Gravity.LEFT|Gravity.TOP:edge.equals("right")?Gravity.RIGHT|Gravity.TOP:edge.equals("top")?Gravity.TOP|Gravity.LEFT:Gravity.BOTTOM|Gravity.LEFT;
     try{view.windows.addView(view,p);view.attached=true;return view;}catch(RuntimeException e){view.close();return null;}
   }

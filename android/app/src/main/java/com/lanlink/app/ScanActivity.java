@@ -53,7 +53,7 @@ public final class ScanActivity extends Activity {
     frame.addView(preview, new FrameLayout.LayoutParams(-1, -1));
     page.addView(frame, new LinearLayout.LayoutParams(-1, 0, 1));
     ui.gap(page, 16);
-    page.addView(ui.text(Language.t("二维码只在本机识别。未建组时识别成功将直接加入；已有组时需先确认解散。加入后同组设备可使用已开启的协作功能，可在设置中管理授权。"), 12, Ui.MUTED));
+    page.addView(ui.text(Language.t("二维码只在本机识别。配对成功后，双方已有设备组将合并，离线设备上线后自动同步。已有设备授权保留，可在设置中管理。"), 12, Ui.MUTED));
     setContentView(page);
     page.setOnApplyWindowInsetsListener(
         (v, insets) -> {

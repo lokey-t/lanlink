@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 110" fill="none" stroke="#4169ce" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="切换观看目标设备">
+<style>@keyframes travel{from{transform:translateX(-12px);opacity:.3}to{transform:translateX(12px);opacity:1}}.arrow{animation:travel 1.2s ease-in-out infinite}@media(prefers-reduced-motion:reduce){.arrow{animation:none}}</style>
+<path d="M15 20H85V70H15Z M50 70V85 M32 85H68" stroke="#637596"/>
+<path d="M195 20H265V70H195Z M230 70V85 M212 85H248"/>
+<path class="arrow" d="M112 50H164 M154 40L164 50L154 60"/>
+</svg>

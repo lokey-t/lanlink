@@ -32,6 +32,11 @@ final class StagingProbe {
         public void message(Wire p,JSONObject m){if("request".equals(m.optString("type"))&&"testStaging".equals(m.optString("method"))){service.jobs.execute(()->{try{JSONObject a=m.optJSONObject("args"),result=Wire.obj();String step=a.optString("step"),id=a.optString("id");
           if(step.equals("status")){JSONArray rows=service.staging.list();for(int i=0;i<rows.length();i++){JSONObject row=rows.getJSONObject(i);if(row.optString("state").equals("ready")){JSONArray files=row.getJSONArray("files");for(int j=0;j<files.length();j++){JSONObject f=files.getJSONObject(j);try(InputStream in=activity.getContentResolver().openInputStream(service.staging.uri(row.getString("id"),f.getString("relative")))){f.put("sha256",Wire.hex(Wire.sha(in.readAllBytes())));}}}}result.put("outgoing",service.staging.outgoingList());result.put("files",rows).put("owner",service.controlledBy()==null?JSONObject.NULL:service.controlledBy()).put("shell",service.shell.ready());}
           if(step.equals("start"))service.staging.start(id);
+          if(step.equals("accept-notification")){
+            Notification notification=null;long until=System.currentTimeMillis()+4000;
+            while(notification==null&&System.currentTimeMillis()<until){for(android.service.notification.StatusBarNotification n:service.getSystemService(NotificationManager.class).getActiveNotifications())if(n.getId()==17)notification=n.getNotification();if(notification==null)Thread.sleep(30);}
+            check(notification!=null&&notification.actions.length==2,"pending file has actionable system notification");notification.actions[0].actionIntent.send();
+          }
           if(step.equals("cancel"))service.staging.cancel(id);
           if(step.equals("cancel-outgoing")){service.staging.cancelOutgoing(id);boolean denied=false;try{service.staging.begin(p,id,false);}catch(Exception expected){denied=true;}check(denied,"late non-resume begin cannot reactivate cancelled export");service.staging.offerOutgoing(id,false);service.staging.remoteStopped(p,id,true,"late download failure");check(service.staging.exports.get(id).optString("state").equals("cancelled"),"queued initial send and late failure preserve cancellation");}
           if(step.equals("retry-outgoing"))service.staging.retryOutgoing(id);

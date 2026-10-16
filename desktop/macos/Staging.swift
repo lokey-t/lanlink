@@ -3,6 +3,20 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 @MainActor extension Model {
+    func refreshStageReceive(_ rows:[[String:Any]]) {
+        let signature=rows.compactMap{$0["id"] as? String}.sorted().joined(separator:"|")
+        guard signature != stageReceiveSignature else { return }
+        stageReceiveSignature=signature;stageReceivePanel?.close();stageReceivePanel=nil
+        guard !rows.isEmpty else { return }
+        let panel=NSPanel(contentRect:NSRect(x:0,y:0,width:370,height:190),styleMask:[.borderless,.nonactivatingPanel],backing:.buffered,defer:false)
+        panel.level = .floating;panel.isFloatingPanel=true;panel.hidesOnDeactivate=false;panel.collectionBehavior=[.canJoinAllSpaces,.fullScreenAuxiliary];panel.isReleasedWhenClosed=false
+        panel.contentView=NSHostingView(rootView:StageReceiveNotice(model:self,rows:rows))
+        if let frame=NSScreen.main?.visibleFrame { panel.setFrameOrigin(NSPoint(x:frame.maxX-388,y:frame.maxY-208)) }
+        stageReceivePanel=panel;panel.orderFrontRegardless()
+    }
+    func decideStageReceive(_ rows:[[String:Any]],_ accepted:Bool) {
+        Task { do { for token in Set(rows.compactMap{$0["token"] as? String}) { _=try await call("stage-preview-decide",["token":token,"accepted":accepted]) };await refresh() } catch { notice=error.localizedDescription } }
+    }
     func refreshStaging() async {
         let generation = serviceGeneration
         do { let result = try await call("stage-list"); guard generation == serviceGeneration else { return }; stagedFiles = result["files"] as? [[String: Any]] ?? []; outgoingFiles = result["outgoing"] as? [[String: Any]] ?? [] }
@@ -17,7 +31,7 @@ import UniformTypeIdentifiers
             let result = try await call(method, ["id": id])
             guard stageActionVersions[id] == version else { return }
             let defaults = ["stage-cancel": "传输已取消，可重新传输", "stage-remove": "已删除暂存文件", "stage-start": "已开始接收文件", "stage-outgoing-cancel": "发送已取消", "stage-outgoing-retry": "已重新开始发送", "stage-outgoing-remove": "已清除发送记录"]
-            notice = result["message"] as? String ?? defaults[method] ?? "操作已完成"
+            showSuccessToast(result["message"] as? String ?? defaults[method] ?? "操作已完成")
             await refreshStaging()
         } catch { if stageActionVersions[id] == version { notice = error.localizedDescription } } }
     }
@@ -35,7 +49,7 @@ import UniformTypeIdentifiers
         stageBusy.insert(id)
         Task { defer { stageBusy.remove(id) }; do {
             let result = try await call("stage-save", ["id": id, "destination": destination.path])
-            notice = "文件已保存到“" + destination.path + "”并移出暂存区"
+            showSuccessToast("文件已保存到“" + destination.path + "”并移出暂存区")
             await refreshStaging()
             NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: result["path"] as? String ?? destination.path)])
         } catch { notice = "保存失败：" + Model.readableMessage(error.localizedDescription) + "。暂存原件已保留，可更换位置或名称后重试。" } }
@@ -71,6 +85,17 @@ import UniformTypeIdentifiers
                 feature(device,["clipboard"]) { self.perform("stage-share",["id":device.id,"files":urls.map(\.path)],success:"已开始发送，文件将在对方暂存区排队接收") }
             }
         }
+    }
+}
+
+@MainActor private struct StageReceiveNotice:View {
+    var model:Model;var rows:[[String:Any]]
+    var body:some View {
+        VStack(alignment:.leading,spacing:14) {
+            Label(L("收到文件"),systemImage:"tray.and.arrow.down.fill").font(.system(size:19,weight:.semibold))
+            Text((rows.first?["sourceName"] as? String ?? "")+" · "+rows.compactMap{$0["name"] as? String}.joined(separator:"、")).font(.system(size:13)).foregroundColor(.secondary).lineLimit(3)
+            HStack { Button(L("接受")){model.decideStageReceive(rows,true)};Button(L("拒绝")){model.decideStageReceive(rows,false)} }.buttonStyle(FlatButtonStyle())
+        }.padding(22).frame(width:326,height:146,alignment:.topLeading).background(Color.white)
     }
 }
 
@@ -163,7 +188,7 @@ struct StagedDragOut:NSViewRepresentable {
     }
     func draggingSession(_ session:NSDraggingSession,sourceOperationMaskFor context:NSDraggingContext)->NSDragOperation { .copy }
     func ignoreModifierKeys(for session:NSDraggingSession)->Bool { true }
-    func draggingSession(_ session:NSDraggingSession,endedAt point:NSPoint,operation:NSDragOperation) { down=nil;preparing=false;if operation.contains(.copy) { model?.stageAction("stage-remove",id);model?.notice="已保存到目标位置并移出暂存区" } }
+    func draggingSession(_ session:NSDraggingSession,endedAt point:NSPoint,operation:NSDragOperation) { down=nil;preparing=false;if operation.contains(.copy) { model?.stageAction("stage-remove",id);model?.showSuccessToast("已保存到目标位置并移出暂存区") } }
 }
 
 @MainActor struct DeviceFileDrop:DropDelegate {
@@ -181,14 +206,14 @@ struct StagedDragOut:NSViewRepresentable {
                 } }
                 if let url,url.isFileURL { paths.append(url.path) }
             }
-            guard model.stageHoverSessions[device.id]==session,!paths.isEmpty else { return }
-            do { _=try await model.call("stage-share",["id":device.id,"files":paths,"start":false,"session":session]);model.notice="待传输文件已添加到对方暂存区" } catch { model.notice=error.localizedDescription }
-            if model.stageHoverSessions[device.id] != session { _=try? await model.call("stage-drag-end",["session":session]) }
+            guard (model.stageHoverSessions[device.id]==session || model.committedStageSessions.contains(session)),!paths.isEmpty else { return }
+            do { _=try await model.call("stage-share",["id":device.id,"files":paths,"start":false,"session":session]);model.showSuccessToast("待传输文件已添加到对方暂存区") } catch { model.notice=error.localizedDescription }
+            if model.stageHoverSessions[device.id] != session && model.committedStageSessions.remove(session)==nil { _=try? await model.call("stage-drag-end",["session":session]) }
         }
     }
     func dropUpdated(info:DropInfo)->DropProposal? { DropProposal(operation:.copy) }
     func dropExited(info:DropInfo) { end() }
-    func performDrop(info:DropInfo)->Bool { end();return false }
+    func performDrop(info:DropInfo)->Bool { guard let session=model.stageHoverSessions.removeValue(forKey:device.id) else { return false };model.committedStageSessions.insert(session);return true }
     func end() { if let session=model.stageHoverSessions.removeValue(forKey:device.id) { model.perform("stage-drag-end",["session":session]) } }
 }
 

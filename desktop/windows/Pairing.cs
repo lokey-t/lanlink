@@ -39,7 +39,7 @@ namespace LanLink.Desktop {
       Resources = owner.Resources;
       Padding = new Thickness(24); Background = MainWindow.Brush("#FFFFFF"); CornerRadius = new CornerRadius(20);
       var panel = MainWindow.Column(); panel.Children.Add(MainWindow.LText("让设备相遇", 25));
-      var hint = MainWindow.LText("在同一局域网中，扫码或输入配对码即可加入你的离线组。", 13, "#7B879D"); hint.Margin = new Thickness(0, 9, 0, 24); panel.Children.Add(hint);
+      var hint = MainWindow.LText("扫码或输入配对码，双方已有设备将自动合并为一组。", 13, "#7B879D"); hint.Margin = new Thickness(0, 9, 0, 24); panel.Children.Add(hint);
       var columns = new Grid(); columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(246) }); columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) }); columns.ColumnDefinitions.Add(new ColumnDefinition()); panel.Children.Add(columns);
       var qrPanel = new StackPanel(); var qrArea = new Grid { Height = 212 }; qrArea.Children.Add(placeholder); qrArea.Children.Add(qr); qrPanel.Children.Add(qrArea);
       // A neutral skeleton, never a blurred real credential before the user reveals it.
@@ -61,7 +61,7 @@ namespace LanLink.Desktop {
       copyCode = MainWindow.LButton("复制配对码", delegate { try { if(CurrentCode==null)throw new Exception(Locale.T("配对码正在刷新，请稍后再试。")); Clipboard.SetText(CurrentCode); status.Text=Locale.T("已复制八位配对码，可直接粘贴到另一台设备。"); } catch(Exception e) { status.Text=MainWindow.DisplayError(e.Message); } }); copyCode.IsEnabled=false; copyCode.HorizontalAlignment=HorizontalAlignment.Left; copyCode.Margin=new Thickness(0,0,0,12);right.Children.Add(copyCode);
       var track = new Border { Height = 5, CornerRadius = new CornerRadius(3), Background = MainWindow.Brush("#E6EBF6"), Child = progress }; track.SizeChanged += delegate { UpdateCountdown(); }; right.Children.Add(track);
       countdown.Margin = new Thickness(0, 8, 0, 14); right.Children.Add(countdown);
-      var note = MainWindow.LText("让新设备扫码，或在「加入其他组」中\n输入上方八位数字。", 12, "#8390A5"); note.LineHeight = 21; right.Children.Add(note); right.Children.Add(joinOption);
+      var note = MainWindow.LText("让另一台设备扫码，或输入本机八位配对码。\n双方已有分组会一并合并。", 12, "#8390A5"); note.LineHeight = 21; right.Children.Add(note); right.Children.Add(joinOption);
       joinPanel.Children.Add(MainWindow.LText("输入其他设备的八位配对码", 12, "#63728C"));
       System.Windows.Automation.AutomationProperties.SetName(input, Locale.T("其他设备的八位数字配对码")); input.PreviewTextInput += delegate(object sender, TextCompositionEventArgs e) { e.Handled = !Regex.IsMatch(e.Text, "^[0-9]+$"); if(e.Handled)status.Text=Locale.T("配对码只能包含八位数字，可粘贴带空格的分组码。"); };
       DataObject.AddPastingHandler(input, delegate(object sender, DataObjectPastingEventArgs e) {
@@ -94,7 +94,7 @@ namespace LanLink.Desktop {
 
     }
     internal static string NormalizeCode(string value) { return UiText.PairingCode(value); }
-    void UpdateJoinLabel() { joinOption.Content = JoiningVisible ? Locale.T("收起输入 ↑") : groupEstablished ? Locale.T("解散当前组并加入其他组 →") : Locale.T("加入其他组 →"); joinButton.Content = groupEstablished ? Locale.T("解散当前组并加入其他组") : Locale.T("配对并加入"); }
+    void UpdateJoinLabel() { joinOption.Content = JoiningVisible ? Locale.T("收起输入 ↑") : groupEstablished ? Locale.T("配对并合并设备组 →") : Locale.T("加入其他组 →"); joinButton.Content = groupEstablished ? Locale.T("配对并合并设备组") : Locale.T("配对并加入"); }
     public void ToggleJoin() { joinPanel.Visibility = JoiningVisible ? Visibility.Collapsed : Visibility.Visible; UpdateJoinLabel(); if (JoiningVisible) input.Focus(); }
     public async Task ToggleQR() { showing = !showing; qr.Visibility = Visibility.Collapsed; placeholder.Visibility = Visibility.Visible; if (!showing) qr.Source = null; reveal.Content = showing ? Locale.T("隐藏二维码") : Locale.T("点击查看二维码"); await RefreshCode(); }
     void UpdateCountdown() {
@@ -126,7 +126,7 @@ namespace LanLink.Desktop {
     public async Task Join() {
       if (joining) return; if (!Regex.IsMatch(input.Text, "^[0-9]{8}$")) { status.Text = Locale.T("请输入完整的八位数字配对码。"); return; }
       joining = true; joinButton.IsEnabled = false; input.IsEnabled = false;
-      try { var state = await client.Call("state"); groupEstablished = Json.Flag(state, "groupEstablished"); UpdateJoinLabel(); if (!confirm(groupEstablished)) return; status.Text = Locale.T("正在查找设备并配对…"); await client.Call("join", new { code = input.Text, dissolveCurrentGroup = groupEstablished, expectedGroup = Json.Text(state, "groupId") }); waitingConnection=true; initialPeers=new HashSet<string>(); status.Text=Locale.T("已配对，正在建立加密连接…"); input.Text = ""; joinPanel.Visibility = Visibility.Collapsed; showing = false; }
+      try { var state = await client.Call("state"); groupEstablished = Json.Flag(state, "groupEstablished"); UpdateJoinLabel(); if (!confirm(groupEstablished)) return; status.Text = Locale.T("正在查找设备并配对…"); await client.Call("join", new { code = input.Text, expectedGroup = Json.Text(state, "groupId") }); waitingConnection=true; initialPeers=new HashSet<string>(); status.Text=Locale.T("已配对，正在同步组内设备…"); input.Text = ""; joinPanel.Visibility = Visibility.Collapsed; showing = false; }
       catch (Exception e) { status.Text = MainWindow.DisplayError(e.Message); }
       finally { joining = false; joinButton.IsEnabled = true; input.IsEnabled = true; }
     }
