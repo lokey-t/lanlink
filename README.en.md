@@ -13,7 +13,35 @@ LanLink brings the computers and Android phones on your local network into one w
 
 No account is required, and everyday collaboration works without cloud services or internet access. Devices join a group through a temporary numeric code or QR code, then exchange data over encrypted direct connections. Desktop clients use native windows and ship with their runtime.
 
-> **Current version: 0.3.46 development preview.** This README describes the current working tree; it does not imply that every platform has passed physical-device acceptance testing. See [validation status](#validation) for the recorded scope. The repository does not yet include a project-wide license; see [licensing and third-party components](#license).
+> **Current version: 0.91.0.** This README describes the current working tree; it does not imply that every platform has passed physical-device acceptance testing. See [validation status](#validation) for the recorded scope. The repository does not yet include a project-wide license; see [licensing and third-party components](#license).
+
+
+<a id="downloads"></a>
+## v0.91 downloads and updates
+
+The package version is **0.91.0**, tagged `v0.91.0`. Links below target this release; select the attachment for your device.
+
+| Device / distribution | GitHub download | Gitee mirror |
+| --- | --- | --- |
+| Windows 10/11 x64 · portable | [ZIP: extract the complete folder](https://github.com/lokey-t/lanlink/releases/download/v0.91.0/LanLink-0.91.0-windows-x64.zip) | [Windows release](https://gitee.com/lokey-t/lanlink/releases/tag/v0.91.0) |
+| Windows 10/11 x64 · installer | [EXE: per-user installation](https://github.com/lokey-t/lanlink/releases/download/v0.91.0/LanLink-0.91.0-windows-x64-setup.exe) | [Windows release](https://gitee.com/lokey-t/lanlink/releases/tag/v0.91.0) |
+| macOS 14+ · Apple Silicon (arm64) | [DMG: Apple Silicon](https://github.com/lokey-t/lanlink/releases/tag/v0.91.0) | [Mac release](https://gitee.com/lokey-t/lanlink/releases/tag/v0.91.0) |
+| Android 10+ | [APK](https://github.com/lokey-t/lanlink/releases/download/v0.91.0/LanLink-0.91.0-android.apk) | [Android release](https://gitee.com/lokey-t/lanlink/releases/tag/v0.91.0) |
+| All devices · single delta asset | [Combined delta](https://github.com/lokey-t/lanlink/releases/download/v0.91.0/LanLink-0.91.0-delta.json.gz) | [Update assets](https://gitee.com/lokey-t/lanlink/releases/tag/v0.91.0) |
+
+The Windows installer creates Start menu and desktop shortcuts and registers an uninstall entry; the portable edition needs no installation. On macOS, drag the app from the DMG into Applications. Current Mac builds are ad-hoc signed and not notarized. Android requires system installation confirmation and the same APK signing key as the installed app.
+
+Automatic stable-release checks can be disabled in Settings; manual checks remain available. Each version has one combined delta for all included platforms. Unsupported base versions, missing patches and verification failures fall back to the platform's full update. Exit the desktop app after download to install; Android uses the system installer. Older clients without an updater require a manual first upgrade. See [update publishing instructions](docs/updates.md).
+
+### Where LanLink fits alongside other tools
+
+| Tool / workflow | Why choose LanLink for this scenario | Limits |
+| --- | --- | --- |
+| [Mouse Without Borders](https://learn.microsoft.com/en-us/windows/powertoys/mouse-without-borders): multi-PC keyboard and mouse | Extend one group across Windows, macOS and Android, including remote screens and a phone touchpad | Android still requires system permissions and ADB / Root preparation for enhanced control |
+| [Deskflow](https://github.com/deskflow/deskflow): cross-computer keyboard, mouse and clipboard | Combine device layout, Android screens, staged file reception and per-device permissions in native clients | Deskflow supports Linux; LanLink currently has no Linux client |
+| [scrcpy](https://github.com/Genymobile/scrcpy): Android display and control | Add computer-to-computer edge switching and phone-to-computer control to Android interaction | scrcpy focuses on Android; this compares scope, not measured latency, image quality or reliability |
+
+Comparisons use official project documentation reviewed on 2026-10-28. LanLink focuses on account-free LAN collaboration across mixed devices; no across-the-board performance superiority is claimed.
 
 ## Contents
 
@@ -135,7 +163,7 @@ npm run icons
 npm start
 ```
 
-Output: `dist/LanLink-0.3.46-windows-x64/` and a `.zip` with the same name. `-VideoRuntime` is optional, but without FFmpeg the desktop is limited to the JPEG fallback and cannot view phone screens that provide H.264 only. Build the native QUIC library before running the packaging script.
+Output: `dist/LanLink-0.91.0-windows-x64/` and a `.zip` with the same name. `-VideoRuntime` is optional, but without FFmpeg the desktop is limited to the JPEG fallback and cannot view phone screens that provide H.264 only. Build the native QUIC library before running the packaging script.
 
 </details>
 
@@ -151,7 +179,7 @@ npm start
 
 The script builds the Swift UI, system bridge, and Rust QUIC library. By default, it also builds and bundles FFmpeg from a pinned source release. Set `LANLINK_FFMPEG_DIST` to use an existing video runtime directory containing `bin/ffmpeg` and `LICENSE.txt`.
 
-Apple Silicon output: `dist/LanLink-0.3.46-macos-arm64/LanLink.app` and `dist/LanLink-0.3.46-macos-arm64.zip`. The Intel path uses `macos-x64` and still needs validation. The current script uses ad-hoc signing, without Apple Developer signing or notarization.
+Apple Silicon output: `dist/LanLink-0.91.0-macos-arm64/LanLink.app` and `dist/LanLink-0.91.0-macos-arm64.zip`. The Intel path uses `macos-x64` and still needs validation. The current script uses ad-hoc signing, without Apple Developer signing or notarization.
 
 </details>
 
@@ -449,3 +477,5 @@ The detailed guides and historical release notes are currently primarily in Chin
 **There is currently no root `LICENSE` covering the entire project.** The `license = "MIT"` declaration in `native/quic/Cargo.toml` applies to that Rust crate's metadata; it does not establish licensing for the whole repository. Third-party licenses likewise do not license LanLink itself. Confirm the applicable terms with the maintainer before reusing, modifying, or redistributing project code.
 
 LanLink uses quiche / BoringSSL, Koffi, werift, Android WebRTC, FFmpeg, qrcode-generator, and ZXing. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for component sources, licenses, and distribution requirements. Preserve the corresponding license notices and source / build information when packaging.
+
+The updater supports automatic checks on all three platforms, one combined delta per version, and full-download fallback. See [update publishing instructions](docs/updates.md).

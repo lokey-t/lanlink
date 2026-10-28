@@ -218,10 +218,12 @@ namespace LanLink.Desktop {
       tray.DoubleClick += delegate { Show(); WindowState = WindowState.Normal; Activate(); };
     }
     public async Task Quit(int code) { if (quitting) return; quitting = true; poll.Stop(); if (tray != null) tray.Dispose(); await Client.Stop(); Application.Current.Shutdown(code); }
+    string updateNoticeVersion="";
     async Task Refresh() {
       if (busy || quitting || dragging || serviceUnavailable) return; busy = true;
       try {
         State = await Client.Call("state"); Theme.Set(Json.Text(State,"theme")); Locale.Set(Json.Text(State,"language"));
+var updateInfo=Json.Get(State,"update");if(Json.Text(updateInfo,"phase")=="available"&&Json.Text(updateInfo,"version")!=updateNoticeVersion){updateNoticeVersion=Json.Text(updateInfo,"version");Notify("发现新版本 "+updateNoticeVersion+"，请在设置中下载更新");}
 RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardSettings"),"showShortcuts")?Visibility.Visible:Visibility.Collapsed;if(clipboardPage!=null && clipboardPage.Visibility==Visibility.Visible)RefreshClipboardPage();
         var shutdownAt = Json.Number(State, "shutdownAt", 0);
         shutdownNotice = shutdownAt > 0 ? Locale.T("收到关机请求，请点击本机设备菜单中的“取消关机”撤销。剩余 ") + Math.Max(0, Math.Ceiling((shutdownAt - (DateTime.UtcNow - new DateTime(1970, 1, 1)).TotalMilliseconds) / 1000)) + Locale.T(" 秒") : "";
@@ -894,7 +896,11 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
       startupOption=new CheckBox{Content=UiLocale.Content("登录 Windows 后自动启动 LanLink"),IsChecked=StartupEnabled() || Startup.ElevatedEnabled(),Margin=new Thickness(0,8,0,8)};
       adminStartupOption=new CheckBox{Content=UiLocale.Content("开机以管理员权限启动"),IsChecked=Startup.ElevatedEnabled(),Margin=new Thickness(0,8,0,8)};
       startupOption.Click+=async delegate{await ChangeStartup(false);};adminStartupOption.Click+=async delegate{await ChangeStartup(true);};basic.Children.Add(startupOption);basic.Children.Add(adminStartupOption);
-      var startupHint=LText("管理员模式在登录后直接启动；首次开启需要系统确认。",12,"#8B97AB");startupHint.TextWrapping=TextWrapping.Wrap;basic.Children.Add(startupHint);sections.Children.Add(SettingsCard("通用",basic));
+      var startupHint=LText("管理员模式在登录后直接启动；首次开启需要系统确认。",12,"#8B97AB");startupHint.TextWrapping=TextWrapping.Wrap;basic.Children.Add(startupHint);var updateAuto=new CheckBox{Content=UiLocale.Content("自动检测更新"),IsChecked=Json.Get(State,"autoCheckUpdates")==null||Json.Flag(State,"autoCheckUpdates"),Margin=new Thickness(0,8,0,8)};BindImmediateSetting(updateAuto,"autoCheckUpdates");basic.Children.Add(updateAuto);
+      var updateStatus=LText("",12,"#8B97AB");basic.Children.Add(updateStatus);
+      var updateCheck=LButton("检查更新",async delegate{try{var result=await Client.Call("update-check");updateStatus.Text=Json.Text(result,"phase")=="available"?"发现新版本 "+Json.Text(result,"version"):"已是最新版本";}catch(Exception e){updateStatus.Text=DisplayError(e.Message);}});basic.Children.Add(updateCheck);
+      var updateInstall=LButton("下载并准备更新",async delegate{try{var result=await Client.Call("update-install");updateStatus.Text=Json.Text(result,"message");}catch(Exception e){updateStatus.Text=DisplayError(e.Message);}});basic.Children.Add(updateInstall);
+      sections.Children.Add(SettingsCard("通用",basic));
       var switching=new StackPanel();switching.Children.Add(LText("键鼠主设备",13));settingsMaster=new ComboBox{Margin=new Thickness(0,10,0,14),MaxWidth=440,HorizontalAlignment=HorizontalAlignment.Left,MinWidth=280};settingsMaster.Style=(Style)FindResource("SoftChoice");settingsMaster.SelectionChanged+=delegate{MarkSettingsDirty();};switching.Children.Add(settingsMaster);
       switching.Children.Add(LText("使用所选电脑的键盘和鼠标；离线电脑将在上线后应用。",12,"#8B97AB"));
       settingsEdgeGlow=new CheckBox{Content=UiLocale.Content("键鼠切换时显示边缘光效"),Margin=new Thickness(0,16,0,8)};BindImmediateSetting(settingsEdgeGlow,"edgeGlow");switching.Children.Add(settingsEdgeGlow);

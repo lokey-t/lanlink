@@ -11,7 +11,7 @@ export async function applySettings(service,a){
   choice('language',languageIds,'请选择支持的界面语言');
   choice('switchMode',['dwell','hotkey'],'请选择有效的切换方式');
   choice('edgeHotkey',['ctrl-alt','ctrl-shift','alt-shift','meta-shift'],'请选择有效的快捷键');
-  for(const key of ['clipboardUpload','clipboardDownload','clipboardShortcuts','edgeGlow','edgeGlowHideAway','master'])if(a[key]!==undefined){if(typeof a[key]!=='boolean')throw Error('开关设置无效');patch[key]=a[key];}
+  for(const key of ['autoCheckUpdates','clipboardUpload','clipboardDownload','clipboardShortcuts','edgeGlow','edgeGlowHideAway','master'])if(a[key]!==undefined){if(typeof a[key]!=='boolean')throw Error('开关设置无效');patch[key]=a[key];}
   if(a.name!==undefined){if(typeof a.name!=='string'||!a.name.trim()||a.name.length>80)throw Error('设备名称应为 1–80 字符');patch.name=a.name.trim();}
   if(a.dwell!==undefined){if(!Number.isInteger(a.dwell)||a.dwell<0||a.dwell>3000)throw Error('边缘等待时间范围为 0–3000 毫秒');patch.dwell=a.dwell;}
   if(a.edges!==undefined){if(!a.edges||Array.isArray(a.edges)||typeof a.edges!=='object'||Object.entries(a.edges).some(([key,value])=>!['left','right','top','bottom'].includes(key)||typeof value!=='string'||value.length>64))throw Error('设备布局无效');patch.edges={...c.edges,...a.edges};}

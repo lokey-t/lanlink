@@ -8,6 +8,17 @@
 This file preserves the original release notes in Chinese, with same-version addenda grouped together.
 Historical entries describe their version at the time. For current behavior, permission defaults, build instructions, and validation scope, use the READMEs and the latest validation reports.
 
+## 0.91.0 · 三端更新与分发 / Updates and distribution
+
+- 三端自动检测版本更新，可在设置中关闭或手动检查；GitHub / Gitee Release 镜像。
+- 每个版本一个跨平台增量包；不匹配、损坏或合成失败时下载全量更新。桌面暂存后退出替换，Android 使用系统安装器。
+- Windows 便携 ZIP 与当前用户安装 EXE；macOS DMG 构建；Android APK。
+- 中英双语 README 增补平台下载、使用流程、同类工具比较与技术目录。
+- Automatic checks with a local opt-out, manual checks, and GitHub / Gitee release discovery.
+- One combined delta per version, verified reconstruction, and full-download fallback.
+- Windows portable ZIP and per-user setup EXE, macOS DMG packaging, and Android APK.
+- Bilingual documentation covers downloads, usage, comparisons, technology, and source layout.
+
 ## 0.3.47 混合设备控制与共享布局
 
 - 同组设备共享一张固定坐标布局；任意设备旁都可继续连接其他设备，支持多级串联和分支。布局修改、离线重连和主控鼠标选择在组内同步，切换主控不移动设备位置。

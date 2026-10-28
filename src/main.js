@@ -11,7 +11,7 @@ const service = new Service(await loadConfig(dir), dir, new NativeBridge({ disab
 let ui, closing = false, parentTimer;
 async function close() { if (closing) return; closing = true; clearInterval(parentTimer); ui?.server.close(); await service.close().catch(() => {}); }
 try {
-  await service.start(); ui = await startUI(service, Number(arg('--ui-port') || 45830));
+  await service.start(); if(!process.argv.includes("--simulate"))service.updater.start(); ui = await startUI(service, Number(arg('--ui-port') || 45830));
   service.once('stop', close);
   const parentPid = Number(arg('--parent-pid'));
   if (Number.isInteger(parentPid) && parentPid > 0) parentTimer = setInterval(() => { try { process.kill(parentPid, 0); } catch { close(); } }, 2000);

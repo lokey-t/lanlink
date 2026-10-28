@@ -112,9 +112,9 @@ import SwiftUI
                 }
             }
         }
-        let extent = SharedLayoutGeometry(size: CGSize(width: 400, height: 250), cells: [SharedLayoutCell(x: -32, y: -32), SharedLayoutCell(x: 32, y: 32)])
-        try require(extent.contentSize.width > 400 && extent.contentSize.height > 250, "large group extents must scroll instead of shrinking cards indefinitely")
-        try require(extent.cell(extent.point(SharedLayoutCell(x: 33, y: 0))) == nil && SharedLayoutCell(x: 32, y: 0).adjacent("right") == nil, "drag and directional placement must respect coordinate bounds")
+        let scrollExtent = SharedLayoutGeometry(size: CGSize(width: 400, height: 250), cells: [SharedLayoutCell(x: -32, y: -32), SharedLayoutCell(x: 32, y: 32)])
+        try require(scrollExtent.contentSize.width > 400 && scrollExtent.contentSize.height > 250, "large group extents must scroll instead of shrinking cards indefinitely")
+        try require(scrollExtent.cell(scrollExtent.point(SharedLayoutCell(x: 33, y: 0))) == nil && SharedLayoutCell(x: 32, y: 0).adjacent("right") == nil, "drag and directional placement must respect coordinate bounds")
     }
     static func require(_ condition: Bool, _ message: String) throws { if !condition { throw NSError(domain: "probe", code: 1, userInfo: [NSLocalizedDescriptionKey: message]) } }
 }

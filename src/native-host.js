@@ -20,7 +20,7 @@ async function close(exitCode = 0) {
 }
 process.stdin.on('end', () => close()); process.on('SIGTERM', () => close()); process.on('SIGINT', () => close());
 process.stdout.on('error', () => close()); service.once('stop', () => close());
-try { await service.start(); } catch (e) {
+try { await service.start(); if(!process.argv.includes("--simulate"))service.updater.start(); } catch (e) {
   write({ fatal: e.code === 'EADDRINUSE' ? 'LanLink 的连接端口已被占用。请打开已运行的 LanLink；若刚刚退出，请稍后重新启动。' : e.message, code: e.code });
   await close(1);
 }

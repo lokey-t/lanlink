@@ -423,10 +423,12 @@ public class MainActivity extends Activity {
     refreshCode.run();
   }
 
+  private AppUpdater appUpdater;
   public void onCreate(Bundle state) {
     Ui.applyTheme(this);
     super.onCreate(state);
     ui = new Ui(this);
+    appUpdater=new AppUpdater(this);
     if (state != null) {
       page = state.getString("page", "devices");
       selected = state.getString("selected", "local");
@@ -731,6 +733,8 @@ public class MainActivity extends Activity {
     options.addView(ui.item("settings", Language.t("后台运行与自启动"), Language.t("设置省电白名单，减少后台连接中断"), null, () -> showBackgroundGuide(null)));
     layout.addView(options);
     clipboardSettingsCard();
+    Switch updateAuto=new Switch(this);updateAuto.setText(Language.t("自动检测更新"));updateAuto.setChecked(getSharedPreferences("identity",0).getBoolean("auto_check_updates",true));updateAuto.setOnCheckedChangeListener((button,on)->getSharedPreferences("identity",0).edit().putBoolean("auto_check_updates",on).apply());identity.addView(updateAuto);
+    identity.addView(ui.item("settings",Language.t("检查更新"),Language.t("增量失败时自动使用全量更新"),null,()->appUpdater.check(true)));
     settingsFooter();
   }
 
@@ -2175,6 +2179,7 @@ public class MainActivity extends Activity {
 
   protected void onResume() {
     super.onResume();
+    if(appUpdater!=null){appUpdater.openInstaller();appUpdater.automatic();}
     resumed = true;
     if (Language.refresh(this)) renderPage();
     if(awaitingEdgeGlowPermission){awaitingEdgeGlowPermission=false;if(Settings.canDrawOverlays(this))getSharedPreferences("identity",0).edit().putBoolean("edge_glow",true).apply();if("settings".equals(page))renderPage();}

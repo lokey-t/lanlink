@@ -13,7 +13,35 @@ LanLink 让同一局域网里的电脑和 Android 手机一起工作：把鼠标
 
 无需注册账号，日常协作不依赖云端服务或互联网。设备通过临时数字码或二维码加入同一组，再以加密直连传输数据。桌面采用原生窗口，运行环境随软件包提供。
 
-> **当前版本：0.3.46 开发预览。** 本文描述当前工作树的实现，不等同于所有平台均已完成实机验收。构建与测试范围见[验证状态](#validation)。本仓库尚未提供覆盖整个项目的许可证，详见[许可与第三方组件](#license)。
+> **当前版本：0.91.0。** 本文描述当前工作树的实现，不等同于所有平台均已完成实机验收。构建与测试范围见[验证状态](#validation)。本仓库尚未提供覆盖整个项目的许可证，详见[许可与第三方组件](#license)。
+
+
+<a id="downloads"></a>
+## v0.91 下载与更新
+
+发布版本号为 **0.91.0**，标签为 `v0.91.0`。下列链接指向该版本 Release，按你的设备选择附件。
+
+| 设备 / 安装方式 | GitHub 下载 | Gitee 镜像 |
+| --- | --- | --- |
+| Windows 10/11 x64 · 便携版 | [ZIP，完整解压后运行](https://github.com/lokey-t/lanlink/releases/download/v0.91.0/LanLink-0.91.0-windows-x64.zip) | [Windows Release](https://gitee.com/lokey-t/lanlink/releases/tag/v0.91.0) |
+| Windows 10/11 x64 · 安装版 | [EXE，当前用户安装](https://github.com/lokey-t/lanlink/releases/download/v0.91.0/LanLink-0.91.0-windows-x64-setup.exe) | [Windows Release](https://gitee.com/lokey-t/lanlink/releases/tag/v0.91.0) |
+| macOS 14+ · Apple Silicon (arm64) | [DMG，Apple Silicon](https://github.com/lokey-t/lanlink/releases/tag/v0.91.0) | [Mac Release](https://gitee.com/lokey-t/lanlink/releases/tag/v0.91.0) |
+| Android 10+ | [APK](https://github.com/lokey-t/lanlink/releases/download/v0.91.0/LanLink-0.91.0-android.apk) | [Android Release](https://gitee.com/lokey-t/lanlink/releases/tag/v0.91.0) |
+| 所有设备 · 单一增量包 | [通用增量包](https://github.com/lokey-t/lanlink/releases/download/v0.91.0/LanLink-0.91.0-delta.json.gz) | [更新附件](https://gitee.com/lokey-t/lanlink/releases/tag/v0.91.0) |
+
+Windows 安装版创建开始菜单和桌面快捷方式，可从系统“已安装的应用”卸载；便携版无需安装。macOS 将 DMG 中的应用拖到 Applications；当前构建使用 ad-hoc 签名，未公证。Android 安装需系统确认，并须与旧 APK 使用相同签名才能覆盖升级。
+
+软件默认检测正式版本，设置中可关闭或手动检查。每个版本只发布一个包含各平台差异的增量包；跨版本、补丁不可用或校验失败时自动使用对应平台全量更新。桌面下载完成后退出软件安装；Android 通过系统安装器确认。首次从尚无更新功能的旧版升级，请手动下载。详见[更新与发布说明](docs/updates.md)。
+
+### 与同类工具相比，LanLink 适合什么场景
+
+| 工具 / 场景 | LanLink 的选择理由 | 边界 |
+| --- | --- | --- |
+| [Mouse Without Borders](https://learn.microsoft.com/en-us/windows/powertoys/mouse-without-borders) 的多电脑键鼠工作流 | 同一个组扩展到 Windows、macOS 与 Android，同时提供远程画面和手机触控板 | 手机系统权限与 ADB / Root 增强控制仍需准备 |
+| [Deskflow](https://github.com/deskflow/deskflow) 的跨电脑键鼠与剪贴板工作流 | 键鼠布局、Android 画面、文件暂存和逐设备权限集中在一套原生客户端 | Deskflow 提供 Linux 支持；LanLink 当前没有 Linux 客户端 |
+| [scrcpy](https://github.com/Genymobile/scrcpy) 的 Android 投屏与控制工作流 | 在手机控制之外，同一应用支持电脑之间跨屏和手机反向操作电脑 | scrcpy 专注 Android；此处是功能范围比较，不是延迟、画质或稳定性跑分 |
+
+比较依据为各项目官方说明（2026-10-28 查阅）。LanLink 的重点是无需账号的局域网混合设备协作；不宣称在全部性能指标上领先其他工具。
 
 ## 目录
 
@@ -135,7 +163,7 @@ npm run icons
 npm start
 ```
 
-输出：`dist/LanLink-0.3.46-windows-x64/` 与同名 `.zip`。`-VideoRuntime` 可省略，但缺少 FFmpeg 时桌面仅有 JPEG 兼容路径，无法查看只提供 H.264 的手机画面。打包脚本要求先完成 QUIC 原生库构建。
+输出：`dist/LanLink-0.91.0-windows-x64/` 与同名 `.zip`。`-VideoRuntime` 可省略，但缺少 FFmpeg 时桌面仅有 JPEG 兼容路径，无法查看只提供 H.264 的手机画面。打包脚本要求先完成 QUIC 原生库构建。
 
 </details>
 
@@ -151,7 +179,7 @@ npm start
 
 脚本编译 Swift 界面、系统桥接与 Rust QUIC 库，默认从固定版本源码构建并捆绑 FFmpeg。也可通过 `LANLINK_FFMPEG_DIST` 指定已有视频运行时目录，须含 `bin/ffmpeg` 和 `LICENSE.txt`。
 
-Apple Silicon 输出：`dist/LanLink-0.3.46-macos-arm64/LanLink.app` 与 `dist/LanLink-0.3.46-macos-arm64.zip`。Intel 路径使用 `macos-x64`，仍待验证。当前脚本使用 ad-hoc 签名，未进行 Apple 开发者签名或公证。
+Apple Silicon 输出：`dist/LanLink-0.91.0-macos-arm64/LanLink.app` 与 `dist/LanLink-0.91.0-macos-arm64.zip`。Intel 路径使用 `macos-x64`，仍待验证。当前脚本使用 ad-hoc 签名，未进行 Apple 开发者签名或公证。
 
 </details>
 
@@ -449,3 +477,5 @@ npm --prefix website run build
 **仓库目前没有覆盖整个项目的根目录 `LICENSE`。** `native/quic/Cargo.toml` 的 `license = "MIT"` 仅是该 Rust 子库的声明，不能代替全仓库授权；也不应将第三方组件的许可证视为 LanLink 的项目许可证。复用、修改或分发项目代码前，需要向维护者确认适用条款。
 
 LanLink 使用 quiche / BoringSSL、Koffi、werift、Android WebRTC、FFmpeg、qrcode-generator 和 ZXing 等组件。组件来源、许可证与分发要求见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)；打包时需保留对应的许可与源码 / 构建说明。
+
+更新器支持三端自动检测、单一通用增量包和全量回退；发布资产与构建方法见 [更新说明](docs/updates.md)。

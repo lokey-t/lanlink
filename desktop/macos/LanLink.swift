@@ -424,11 +424,13 @@ struct Device: Identifiable {
             else { notice = error.localizedDescription }
         } }
     }
+    private var updateNoticeVersion = ""
     func refresh() async {
         let generation = serviceGeneration
         do {
             let next = try await call("state")
             guard generation == serviceGeneration, !Task.isCancelled else { return }
+            if let update = next["update"] as? [String:Any], update["phase"] as? String == "available", let version = update["version"] as? String, version != updateNoticeVersion { updateNoticeVersion = version; notice = "发现新版本 " + version + "，请在设置中下载更新" }
             state = next; applyTheme(); applyLanguage(); var all = [Device(id: state["id"] as? String ?? "local", name: state["name"] as? String ?? "本机", platform: "darwin", online: true, local: true)]
             showFirstDevicePermissionGuideIfNeeded(wasFirstDevice: (state["groupMemberCount"] as? Int ?? 1) > 1 || !(state["knownDevices"] as? [String: Any] ?? [:]).isEmpty)
             refreshRequests(); startupEnabled = SMAppService.mainApp.status == .enabled
@@ -1335,23 +1337,74 @@ struct PermissionCellView: View {
         if online && (state=="unready" || row["app"] as? String == "未开启" || row["consent"] as? String == "未允许" && row["system"] as? String != "已就绪") { Button(L("一键开启"),action:guide) }
         if !local { Button(L("管理此设备使用本机的权限")) { menu=false;model.managingDevice=Device(id:device["id"] as? String ?? "",name:device["name"] as? String ?? "设备",platform:device["platform"] as? String ?? "",online:online) } }
     }
-    var body: some View {
-        Button { menu.toggle() } label: {
-            PermissionGlyph(key:key).stroke(style:StrokeStyle(lineWidth:1.6,lineCap:.round,lineJoin:.round)).frame(width:26,height:26).foregroundStyle(permissionColor(state)).frame(width:48,height:48).background(permissionColor(state).opacity(0.10),in:RoundedRectangle(cornerRadius:12)).overlay(alignment:.topTrailing){Image(systemName:state=="ready" ? "checkmark.circle.fill" : state=="unready" ? "exclamationmark.circle.fill" : state=="unknown" ? "questionmark.circle.fill" : "minus.circle.fill").font(.system(size:12)).foregroundStyle(permissionColor(state)).padding(3)}
-        }.buttonStyle(.plain).help(L(permissionTitles[key] ?? key)+" · "+L(permissionStateTitle(state))).accessibilityLabel((device["name"] as? String ?? "")+" · "+L(permissionTitles[key] ?? key)+" · "+L(permissionStateTitle(state)))
-        .contextMenu { commands }
-        .popover(isPresented:$menu,arrowEdge:.bottom) {
-            VStack(alignment:.leading,spacing:14) {
-                Label(L(permissionTitles[key] ?? key),systemImage:"checkmark.shield").font(.headline)
-                Text(device["name"] as? String ?? "").font(.caption).foregroundStyle(Palette.muted)
-                Label(L(permissionStateTitle(state)),systemImage:"circle.fill").foregroundStyle(permissionColor(state));Divider()
-                Text(L("应用：")+L(row["app"] as? String ?? "未知")+" · "+L("系统：")+L(row["system"] as? String ?? "未知")).font(.caption).foregroundStyle(Palette.muted)
-                if canToggle { Toggle(L(local ? "允许本组设备使用" : "允许本机使用此设备"),isOn:Binding(get:{enabled},set:change)).toggleStyle(.switch).disabled(busy) }
-                if online && (state=="unready" || row["app"] as? String == "未开启" || row["consent"] as? String == "未允许" && row["system"] as? String != "已就绪") { Button(L("一键开启"),action:guide);Text(L(local ? "在本机打开权限引导":"在目标设备打开权限引导")).font(.caption).foregroundStyle(Palette.muted) }
-                if !online || state=="unknown" || state=="unsupported" { Text(L(!online ? "设备离线，请等待设备重新连接" : state=="unsupported" ? "此设备不支持该功能" : "请刷新状态，或升级目标设备后重试")).font(.caption).foregroundStyle(Palette.muted) }
-                if !local { Button(L("管理此设备使用本机的权限")){menu=false;model.managingDevice=Device(id:device["id"] as? String ?? "",name:device["name"] as? String ?? "设备",platform:device["platform"] as? String ?? "",online:online)} }
-            }.padding(20).frame(width:280).buttonStyle(FlatButtonStyle())
+    private var statusSymbol: String {
+        switch state {
+        case "ready": return "checkmark.circle.fill"
+        case "unready": return "exclamationmark.circle.fill"
+        case "unknown": return "questionmark.circle.fill"
+        default: return "minus.circle.fill"
         }
+    }
+    private var permissionIcon: some View {
+        let color = permissionColor(state)
+        return PermissionGlyph(key: key)
+            .stroke(style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
+            .frame(width: 26, height: 26).foregroundStyle(color)
+            .frame(width: 48, height: 48)
+            .background(color.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+            .overlay(alignment: .topTrailing) {
+                Image(systemName: statusSymbol).font(.system(size: 12)).foregroundStyle(color).padding(3)
+            }
+    }
+    private var title: String { L(permissionTitles[key] ?? key) }
+    private var statusTitle: String { L(permissionStateTitle(state)) }
+    private var helpText: String { title + " · " + statusTitle }
+    private var accessibleName: String { (device["name"] as? String ?? "") + " · " + helpText }
+    private var applicationState: String {
+        let app = L(row["app"] as? String ?? "未知")
+        let system = L(row["system"] as? String ?? "未知")
+        return L("应用：") + app + " · " + L("系统：") + system
+    }
+    private var needsGuide: Bool {
+        online && (state == "unready" || row["app"] as? String == "未开启" || (row["consent"] as? String == "未允许" && row["system"] as? String != "已就绪"))
+    }
+    private var unavailableHint: String {
+        if !online { return L("设备离线，请等待设备重新连接") }
+        if state == "unsupported" { return L("此设备不支持该功能") }
+        return L("请刷新状态，或升级目标设备后重试")
+    }
+    private func manage() {
+        menu = false
+        model.managingDevice = Device(id: device["id"] as? String ?? "", name: device["name"] as? String ?? "设备", platform: device["platform"] as? String ?? "", online: online)
+    }
+    private var permissionPopover: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label(title, systemImage: "checkmark.shield").font(.headline)
+            Text(device["name"] as? String ?? "").font(.caption).foregroundStyle(Palette.muted)
+            Label(statusTitle, systemImage: "circle.fill").foregroundStyle(permissionColor(state))
+            Divider()
+            Text(applicationState).font(.caption).foregroundStyle(Palette.muted)
+            permissionOptions
+        }.padding(20).frame(width: 280).buttonStyle(FlatButtonStyle())
+    }
+    @ViewBuilder private var permissionOptions: some View {
+        if canToggle {
+            Toggle(L(local ? "允许本组设备使用" : "允许本机使用此设备"), isOn: Binding(get: { enabled }, set: change)).toggleStyle(.switch).disabled(busy)
+        }
+        if needsGuide {
+            Button(L("一键开启"), action: guide)
+            Text(L(local ? "在本机打开权限引导" : "在目标设备打开权限引导")).font(.caption).foregroundStyle(Palette.muted)
+        }
+        if !online || state == "unknown" || state == "unsupported" {
+            Text(unavailableHint).font(.caption).foregroundStyle(Palette.muted)
+        }
+        if !local { Button(L("管理此设备使用本机的权限"), action: manage) }
+    }
+    var body: some View {
+        Button { menu.toggle() } label: { permissionIcon }
+            .buttonStyle(.plain).help(helpText).accessibilityLabel(accessibleName)
+            .contextMenu { commands }
+            .popover(isPresented: $menu, arrowEdge: .bottom) { permissionPopover }
     }
 }
 struct SwitchDeviceGuideView: View {
@@ -1524,6 +1577,10 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 16) {
                     Text(L("通用")).font(.headline)
+                    Toggle(L("自动检测更新"),isOn:Binding(get:{model.state["autoCheckUpdates"] as? Bool ?? true},set:{model.perform("settings",["autoCheckUpdates":$0])}))
+                    HStack { Button(L("检查更新")){model.perform("update-check")}; Button(L("下载并准备更新")){model.perform("update-install")} }
+                    Text((model.state["update"] as? [String:Any])?["message"] as? String ?? ((model.state["update"] as? [String:Any])?["version"] as? String ?? "")).font(.caption)
+
                     Text(L("名称需点击保存；语言、外观和登录启动立即保存。")).font(.caption).foregroundStyle(.secondary)
                     Picker(L("语言"), selection: Binding(get: { model.languagePreference }, set: { model.setLanguage($0) })) {
                         ForEach(LanLinkLocale.shared.languages) { language in

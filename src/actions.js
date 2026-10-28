@@ -14,6 +14,8 @@ export function createActions(service) {
   const adb = service.adb || new AdbManager(service);
   const actions = {
     state: () => service.state(),
+    'update-check':()=>service.updater.check(),
+    'update-install':()=>service.updater.install(),
     'stage-list':()=>({files:service.staging.list(),outgoing:service.staging.outgoingList()}),
     'stage-outgoing-list':()=>({files:service.staging.outgoingList()}),
     'stage-outgoing-retry':a=>service.staging.retryOutgoing(a.id),
