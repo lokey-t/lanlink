@@ -1,9 +1,23 @@
 plugins { id 'com.android.application' }
+def releaseSigningFile = rootProject.file('../.tools/android-release/signing.properties')
+def releaseSigning = new Properties()
+if (releaseSigningFile.exists()) {
+    releaseSigningFile.withInputStream { releaseSigning.load(it) }
+}
 android {
     namespace 'com.lanlink.app'
     compileSdk 35
     defaultConfig { applicationId 'com.lanlink.app'; minSdk 29; targetSdk 35; versionCode 91; versionName '0.91.0'; testInstrumentationRunner 'com.lanlink.app.PermissionFlowTest' }
     signingConfigs {
+        release {
+            if (releaseSigningFile.exists()) {
+                storeFile new File(releaseSigningFile.parentFile, releaseSigning.getProperty('storeFile'))
+                storeType releaseSigning.getProperty('storeType', 'PKCS12')
+                storePassword releaseSigning.getProperty('storePassword')
+                keyAlias releaseSigning.getProperty('keyAlias')
+                keyPassword releaseSigning.getProperty('keyPassword')
+            }
+        }
         debug {
             // Reuse this workspace's existing test signer so Studio can update the
             // previously supplied debug APK without uninstalling its local account.
@@ -16,6 +30,9 @@ android {
                 keyPassword 'android'
             }
         }
+    }
+    buildTypes {
+        release { signingConfig signingConfigs.release }
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }
