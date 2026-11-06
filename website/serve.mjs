@@ -1,3 +1,4 @@
+import './bundle.mjs';
 import http from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';

@@ -19,6 +19,7 @@ let lastTime = 0;
 let currentProgress = null;
 let activeChapter = -1;
 let metrics = {};
+let renderDownloads = () => {};
 
 function applyLanguage(preference) {
   languagePreference = preference;
@@ -184,5 +185,16 @@ const userAgent = navigator.userAgent.toLowerCase();
 const platform = /android/.test(userAgent) ? 'android' : /windows/.test(userAgent) ? 'windows' : /macintosh|mac os x/.test(userAgent) && !/iphone|ipad/.test(userAgent) ? 'mac' : null;
 if (platform) document.querySelector(`[data-platform="${platform}"]`)?.classList.add('is-platform');
 document.querySelector('#year').textContent = new Date().getFullYear();
+// Initialize the core page before loading optional network/download features.
 applyLanguage(languagePreference);
 applyMotion();
+import('./downloads.js').then(({ setupDownloads }) => {
+  renderDownloads = setupDownloads({ document, storage, getText: key => (dictionaries[locale] || dictionaries.en)[key], onChange(state) {
+    const text = dictionaries[locale] || dictionaries.en;
+    document.querySelector('#download-source-status').textContent = state.source === 'gitee' ? 'Gitee' : 'GitHub';
+    document.querySelector('[data-i18n="preview"]').textContent = state.version ? 'v' + state.version : text.preview;
+    scheduleMeasure();
+  } });
+}).catch(error => {
+  console.warn('Download controls unavailable; use the Release links.', error);
+});
