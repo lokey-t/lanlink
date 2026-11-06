@@ -17,7 +17,7 @@ test('ADB preflight creates one notice and never invokes Android permission prom
   const f=fixture();await assert.rejects(f.guide.check(f.peer,f.intent),/ADB_SETUP_REQUIRED/);
   const id=f.guide.notice.requestId;
   await assert.rejects(f.guide.check(f.peer,f.intent),/ADB_SETUP_REQUIRED/);
-  assert.equal(f.guide.notice.requestId,id);assert.deepEqual(f.calls,['permission-status']);
+  assert.equal(f.guide.notice.requestId,id);assert.deepEqual(f.calls,['permission-status','permission-status']);
   assert.equal((await f.guide.status(id)).ready,false);
   await assert.rejects(f.guide.complete(id),/ADB_SETUP_REQUIRED/);
   f.engine.ready=true;const intent=await f.guide.complete(id);assert.equal(intent.capture,true);assert.equal(f.guide.notice,null);
@@ -97,4 +97,12 @@ test('screen and keyboard control cannot acquire input or enable capture before 
     await assert.rejects(Service.prototype.switchTo.call(s,'phone','right',capture,true,false,!capture),/ADB_SETUP_REQUIRED/);
     assert.deepEqual(f.calls,['permission-status']);assert.equal(s.switching,false);assert.equal(f.guide.notice.capture,capture);assert.equal(f.guide.notice.screen,!capture);
   }
+});
+
+test('a recovered Android helper clears stale setup and allows edge switching preflight',async()=>{
+ const f=fixture({ready:false,authorized:true});
+ await assert.rejects(f.guide.check(f.peer,f.intent),/ADB_SETUP_REQUIRED/);
+ f.engine.ready=true;
+ await f.guide.check(f.peer,f.intent);
+ assert.equal(f.guide.notice,null);
 });

@@ -23,13 +23,18 @@ export class AdbGuide {
   }
   async check(peer, intent) {
     if (peer.info?.platform !== 'android') return;
-    if (this.notice?.id === intent.id) throw Error('ADB_SETUP_REQUIRED: 请先完成电脑上的手机连接引导');
     const generation = this.generation;
     const report = await peer.request('permission-status', {}, 4000);
     if (generation !== this.generation) throw Error('CONTROL_ENDED: 控制请求已取消');
     if (this.service.getPeer(intent.id) !== peer) throw Error('CONTROL_ENDED: 手机连接已改变');
     const engine = report?.engine;
-    if (!engine || engine.ready && (engine.root || !engine.revoked && engine.authorized!==false)) return;
+    if (!engine || engine.ready && (engine.root || !engine.revoked && engine.authorized!==false)) {
+      // USB recovery can finish while an old setup card is still open.
+      if (engine?.ready && this.notice?.id === intent.id && !this.notice.usbUnauthorized) { this.notice=null; this.service.emit('change'); }
+      else if(this.notice?.id === intent.id) throw Error('ADB_SETUP_REQUIRED: 请先完成电脑上的手机连接引导');
+      return;
+    }
+    if (this.notice?.id === intent.id) throw Error('ADB_SETUP_REQUIRED: 请先完成电脑上的手机连接引导');
     if (this.notice) throw Error('ADB_SETUP_REQUIRED: 请先完成或关闭另一台手机的连接引导');
     if(engine.root){
       if(engine.ready)return;

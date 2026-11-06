@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 import ServiceManagement
+import Carbon
 
 enum Palette {
     static func adaptive(_ light: UInt32, _ dark: UInt32) -> Color {
@@ -902,6 +903,10 @@ struct DeviceActions: View {
             Button(L("取消关机")) { model.perform("cancel-shutdown"); model.selected = nil }.disabled(model.state["shutdownAt"] == nil || model.state["shutdownAt"] is NSNull)
         } else {
             Group {
+                Button(L("连接质量分析")) {
+                    model.selected = nil; model.notice = "正在分析连接质量…"
+                    Task { do { let result = try await model.call("connection-quality", ["id": device.id]); let alert = NSAlert(); alert.messageText = L("连接质量分析"); alert.informativeText = result["message"] as? String ?? ""; alert.runModal() } catch { model.notice = error.localizedDescription } }
+                }
                 Button(L("设备详情与权限")) { model.selected = nil; model.sidebarPage = "permissions"; model.permissionsVisible = true }
                 feature("桌面控制",["input","screen"]) { model.selected = nil; model.openRemote(device) }
                 feature("切换键鼠到此设备",["input"]) { model.switchControl(device); model.selected = nil }
@@ -1771,6 +1776,9 @@ struct PairingView: View {
         super.init()
     }
     private(set) var instance: InstanceLease?
+    private var launchedInBackground: Bool {
+        CommandLine.arguments.contains("--background") || NSAppleEventManager.shared().currentAppleEvent?.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem
+    }
     private var redirecting = false
     func applicationWillFinishLaunching(_ notification: Notification) {
         let args = CommandLine.arguments
@@ -1778,7 +1786,7 @@ struct PairingView: View {
         model.initializeLanguage(dataDirectory: data)
         let lease = InstanceLease(dataDirectory: data); instance = lease
         do {
-            guard try lease.acquire() else { redirectToExistingInstance(); return }
+            guard try lease.acquire() else { if launchedInBackground { redirecting = true; NSApp.terminate(nil) } else { redirectToExistingInstance() }; return }
             // Older released bundles have no lease implementation. Prefer their
             // existing default-profile window instead of starting a rival host.
             let defaultDirectory = InstanceLease(dataDirectory: InstanceLease.defaultDirectory).directory
@@ -1837,7 +1845,7 @@ struct PairingView: View {
         mainWindow = MainAppWindow(contentRect: NSRect(x: 0, y: 0, width: 1024, height: 720), styleMask: [.borderless, .closable, .resizable, .miniaturizable], backing: .buffered, defer: false)
         mainWindow.collectionBehavior.insert(.fullScreenPrimary)
         mainWindow.title = "LanLink"; mainWindow.titleVisibility = .hidden; mainWindow.titlebarAppearsTransparent = false; mainWindow.titlebarSeparatorStyle = .none; mainWindow.isOpaque = false; mainWindow.backgroundColor = .clear; mainWindow.isReleasedWhenClosed = false; mainWindow.delegate = self
-        mainWindow.contentViewController = NSHostingController(rootView: Home(model: model).foregroundStyle(Palette.ink).font(.system(size: 14))); if !mainWindow.setFrameUsingName("LanLink.MainWindow") { mainWindow.center() }; mainWindow.setFrameAutosaveName("LanLink.MainWindow"); mainWindow.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); model.launch();NSApp.servicesProvider=self;NSUpdateDynamicServices()
+        mainWindow.contentViewController = NSHostingController(rootView: Home(model: model).foregroundStyle(Palette.ink).font(.system(size: 14))); if !mainWindow.setFrameUsingName("LanLink.MainWindow") { mainWindow.center() }; mainWindow.setFrameAutosaveName("LanLink.MainWindow"); if !launchedInBackground { mainWindow.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }; model.launch();NSApp.servicesProvider=self;NSUpdateDynamicServices()
         installMainMenu()
     }
     func installMainMenu() {

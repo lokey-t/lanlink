@@ -1272,6 +1272,12 @@ public class MainActivity extends Activity {
 
   private void showDeviceActions(Wire peer) {
     LinearLayout box = sheet(peer.info.optString("name", Language.t("设备操作")));
+    box.addView(ui.item("settings", Language.t("连接质量分析"), Language.t("延迟、抖动与探测超时率"), null, () -> {
+      ((Dialog)box.getTag()).dismiss();
+      AlertDialog progress=new AlertDialog.Builder(this).setTitle(Language.t("连接质量分析")).setMessage(Language.t("正在分析连接质量…")).setNegativeButton(Language.t("取消"),null).create();
+      progress.show();
+      run(() -> { String report=ConnectionQuality.analyze(peer); main.post(() -> { if(!progress.isShowing()||isFinishing())return; progress.dismiss(); new AlertDialog.Builder(this).setTitle(Language.t("连接质量分析")).setMessage(report).setPositiveButton(Language.t("确定"),null).show(); }); });
+    }));
     box.addView(
         ui.item(
             "settings",

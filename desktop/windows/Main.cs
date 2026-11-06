@@ -178,6 +178,7 @@ namespace LanLink.Desktop {
       Loaded += async delegate {
         try {
           MakeTray();
+          try { if (StartupEnabled()) SetStartup(true); } catch { /* A login-entry migration must not stop the device service. */ }
           string options = "--data \"" + DataDir + "\"";
           if (Arguments.Contains("--simulate") || (testing && !Arguments.Contains("--native"))) options += " --simulate";
           if (Arguments.Contains("--no-discovery") || testing) options += " --no-discovery";
@@ -505,6 +506,7 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
       var online = new StackPanel { HorizontalAlignment = HorizontalAlignment.Right }; online.Children.Add(LText("在线状态：", 10, "#8290A7")); var statusRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 0) }; statusRow.Children.Add(new Ellipse { Width = 6, Height = 6, Fill = Brush(color), Margin = new Thickness(0, 0, 6, 0), VerticalAlignment = VerticalAlignment.Center }); var statusText = LText(status, 13, color); System.Windows.Automation.AutomationProperties.SetAutomationId(statusText, "layoutDeviceStatus"); statusRow.Children.Add(statusText); online.Children.Add(statusRow); Grid.SetColumn(online, 1); info.Children.Add(online); body.Children.Add(info);
       body.Children.Add(new Border { Height = 1, Background = Brush("#E3E8F3"), Margin = new Thickness(0, 0, 0, 8) });
       body.Children.Add(LayoutActionButton(MouseControlAction(d), "控制鼠标：", "pointer", "layoutMouseAction", d.Local ? "设备鼠标" : "远程鼠标控制"));
+      if (!d.Local) body.Children.Add(LayoutActionButton(QualityAction(d), "连接质量分析", "settings", "layoutQualityAction"));
       body.Children.Add(LayoutActionButton(SendFilesAction(d), "发送文件…", "file", "layoutFileAction"));
       if (d.Id != MasterId) { var master = Menu(Locale.T("设置此设备为键鼠主设备"), () => ChooseLayoutMaster(d), (d.Platform == "darwin" || d.Platform == "win32") && !layoutMasterSaving); if (d.Platform == "android") master.ToolTip = Locale.T("Android 暂不支持作为键鼠主设备"); body.Children.Add(LayoutActionButton(master, "设置此设备为键鼠主设备", "keyboard", "layoutMasterAction", "", true)); }
       var card = new Border { Child = body, Width = 280, Padding = new Thickness(16), CornerRadius = new CornerRadius(16), BorderThickness = new Thickness(1), BorderBrush = Brush("#DFE6F1"), Background = Brush("#F8FAFF"), Resources = Resources }; System.Windows.Documents.TextElement.SetFontFamily(card, FontFamily); return card;
@@ -513,6 +515,11 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
       if (layoutDeviceMenu != null) layoutDeviceMenu.IsOpen = false; if (layoutActionsPopup != null) layoutActionsPopup.IsOpen = false;
       selected = d.Id; layoutActionsPopup = new Popup { Child = BuildLayoutActions(d), PlacementTarget = anchor, Placement = PlacementMode.Bottom, VerticalOffset = 8, AllowsTransparency = true, StaysOpen = false, PopupAnimation = PopupAnimation.Fade }; layoutActionsPopup.IsOpen = true;
     }
+    MenuItem QualityAction(Device d) { return Menu(Locale.T("连接质量分析"), async () => {
+      NotifyTransient(Locale.T("正在分析连接质量…"));
+      var result=await Client.Call("connection-quality",new{id=d.Id});
+      MessageBox.Show(this,Json.Text(result,"message"),Locale.T("连接质量分析"));
+    },d.Online && !d.Local); }
     public ContextMenu BuildMenu(Device d) {
       var menu = new ContextMenu { Resources = Resources }; WindowShell.GlassMenu(menu, this); menu.Items.Add(new MenuItem { Header = d.Name, FontWeight = FontWeights.SemiBold, FontSize = 15, IsHitTestVisible = false, Focusable = false, Icon = DeviceGlyph(d, 19) }); menu.Items.Add(new Separator());
       menu.Items.Add(Menu(Locale.T("设备详情与权限"), () => { ShowDevicePermissions(); return Task.FromResult(0); }, true));
@@ -527,6 +534,7 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
 
         menu.Items.Add(Feature(d,Locale.T("粘贴共享内容"),new[]{"input","clipboard"}, async () => { await Client.Call("device-paste", new { id = d.Id }); NotifyTransient(Locale.T("已向 ") + d.Name + Locale.T(" 粘贴共享内容")); }));
         menu.Items.Add(SendFilesAction(d));
+        menu.Items.Add(QualityAction(d));
         menu.Items.Add(new Separator());
         menu.Items.Add(Menu(Locale.T("移出设备…"), async () => { if (!Confirm(this,Locale.T("移出设备"),Locale.T("将 ")+d.Name+Locale.T(" 移出组？该设备需要重新配对，其他离线成员会保留身份。"))) return; await Client.Call("device-remove",new { id=d.Id }); await Refresh(); NotifyTransient(Locale.T("设备已移出组")); },true));
         if (d.Platform == "win32" || d.Platform == "darwin") {
@@ -654,8 +662,8 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
     }
     static readonly string[] PermissionKeys = { "input", "screen", "clipboard", "shutdown" };
     static readonly string[] PermissionLabels = { "键鼠标操作", "屏幕共享", "剪贴板文件共享", "远程关机" };
-    string StartupCommand() { return "\"" + System.Reflection.Assembly.GetExecutingAssembly().Location + "\" --data \"" + (DataDir.EndsWith("\\") ? DataDir + "\\" : DataDir) + "\""; }
-    bool StartupEnabled() { using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run")) return key != null && String.Equals(Convert.ToString(key.GetValue("LanLink")), StartupCommand(), StringComparison.OrdinalIgnoreCase); }
+    string StartupCommand() { return "\"" + System.Reflection.Assembly.GetExecutingAssembly().Location + "\" --background --data \"" + (DataDir.EndsWith("\\") ? DataDir + "\\" : DataDir) + "\""; }
+    bool StartupEnabled() { using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run")) return key != null && (String.Equals(Convert.ToString(key.GetValue("LanLink")), StartupCommand(), StringComparison.OrdinalIgnoreCase) || String.Equals(Convert.ToString(key.GetValue("LanLink")), StartupCommand().Replace(" --background", ""), StringComparison.OrdinalIgnoreCase)); }
     void SetStartup(bool enabled) {
       using (var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run")) {
         if (enabled) key.SetValue("LanLink", StartupCommand(), Microsoft.Win32.RegistryValueKind.String);
@@ -896,7 +904,7 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
       startupOption=new CheckBox{Content=UiLocale.Content("登录 Windows 后自动启动 LanLink"),IsChecked=StartupEnabled() || Startup.ElevatedEnabled(),Margin=new Thickness(0,8,0,8)};
       adminStartupOption=new CheckBox{Content=UiLocale.Content("开机以管理员权限启动"),IsChecked=Startup.ElevatedEnabled(),Margin=new Thickness(0,8,0,8)};
       startupOption.Click+=async delegate{await ChangeStartup(false);};adminStartupOption.Click+=async delegate{await ChangeStartup(true);};basic.Children.Add(startupOption);basic.Children.Add(adminStartupOption);
-      var startupHint=LText("管理员模式在登录后直接启动；首次开启需要系统确认。",12,"#8B97AB");startupHint.TextWrapping=TextWrapping.Wrap;basic.Children.Add(startupHint);var updateAuto=new CheckBox{Content=UiLocale.Content("自动检测更新"),IsChecked=Json.Get(State,"autoCheckUpdates")==null||Json.Flag(State,"autoCheckUpdates"),Margin=new Thickness(0,8,0,8)};BindImmediateSetting(updateAuto,"autoCheckUpdates");basic.Children.Add(updateAuto);
+      var startupHint=LText("登录后在后台运行，不显示主窗口，可从系统托盘打开。管理员模式首次开启需要系统确认。",12,"#8B97AB");startupHint.TextWrapping=TextWrapping.Wrap;basic.Children.Add(startupHint);var updateAuto=new CheckBox{Content=UiLocale.Content("自动检测更新"),IsChecked=Json.Get(State,"autoCheckUpdates")==null||Json.Flag(State,"autoCheckUpdates"),Margin=new Thickness(0,8,0,8)};BindImmediateSetting(updateAuto,"autoCheckUpdates");basic.Children.Add(updateAuto);
       var updateStatus=LText("",12,"#8B97AB");basic.Children.Add(updateStatus);
       var updateCheck=LButton("检查更新",async delegate{try{var result=await Client.Call("update-check");updateStatus.Text=Json.Text(result,"phase")=="available"?"发现新版本 "+Json.Text(result,"version"):"已是最新版本";}catch(Exception e){updateStatus.Text=DisplayError(e.Message);}});basic.Children.Add(updateCheck);
       var updateInstall=LButton("下载并准备更新",async delegate{try{var result=await Client.Call("update-install");updateStatus.Text=Json.Text(result,"message");}catch(Exception e){updateStatus.Text=DisplayError(e.Message);}});basic.Children.Add(updateInstall);
@@ -967,7 +975,7 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
       var actionCard = (Border)layoutActionsPopup.Child; actionCard.UpdateLayout();
       if (((TextBlock)FindLayoutElement(actionCard, "layoutDeviceType")).Text != "Mac" || ((TextBlock)FindLayoutElement(actionCard, "layoutDeviceStatus")).Text != "未就绪") throw new Exception("Left-click card must identify device type and readiness");
       var actions = ((StackPanel)actionCard.Child).Children.OfType<Button>().Select(b => System.Windows.Automation.AutomationProperties.GetAutomationId(b)).ToArray();
-      if (actions.Length != 2 || !actions.Contains("layoutMouseAction") || !actions.Contains("layoutFileAction")) throw new Exception("A master device's left-click card must contain only mouse and file actions");
+      if (actions.Length != 3 || !actions.Contains("layoutMouseAction") || !actions.Contains("layoutFileAction") || !actions.Contains("layoutQualityAction")) throw new Exception("A remote master device must expose mouse, file and connection quality actions");
       SavePreview(actionCard, "native-layout-menu.png"); layoutActionsPopup.IsOpen = false;
       card = canvas.Children.OfType<Border>().First(b => Convert.ToString(b.Tag) == local.Id);
       card.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left) { RoutedEvent = UIElement.MouseLeftButtonDownEvent });
@@ -1225,9 +1233,9 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
       int shareIndex=Array.IndexOf(args,"--share");if(shareIndex>=0&&shareIndex+1<args.Length)FileShareShell.Enqueue(new[]{args[shareIndex+1]});
       string hash; using (var sha = System.Security.Cryptography.SHA256.Create()) hash = BitConverter.ToString(sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(DataDir.ToLowerInvariant()))).Replace("-", "");
       bool first; using (var mutex = new Mutex(true, "Local\\LanLinkNative-" + hash, out first)) {
-        if (!first) { if(shareIndex<0)MessageBox.Show(Locale.T("LanLink 已在运行，请从系统托盘打开。"), "LanLink"); return 0; }
+        if (!first) { if(shareIndex<0 && !args.Contains("--background"))MessageBox.Show(Locale.T("LanLink 已在运行，请从系统托盘打开。"), "LanLink"); return 0; }
         var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
-        try { return app.Run(new MainWindow()); } catch (Exception ex) { File.WriteAllText(System.IO.Path.Combine(DataDir, "startup-error.txt"), ex.ToString()); if (!args.Contains("--self-test")) MessageBox.Show(ex.Message, Locale.T("LanLink 启动失败")); return 1; }
+        try { var window=new MainWindow(); if(args.Contains("--background")) { window.ShowActivated=false; window.ShowInTaskbar=false; window.Opacity=0; window.Loaded+=delegate { window.Dispatcher.BeginInvoke(new Action(delegate { window.Hide(); window.Opacity=1; window.ShowInTaskbar=true; }), DispatcherPriority.ApplicationIdle); }; } return app.Run(window); } catch (Exception ex) { File.WriteAllText(System.IO.Path.Combine(DataDir, "startup-error.txt"), ex.ToString()); if (!args.Contains("--self-test")) MessageBox.Show(ex.Message, Locale.T("LanLink 启动失败")); return 1; }
       }
     }
   }

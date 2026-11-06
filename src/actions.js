@@ -1,4 +1,5 @@
 import { parseToken, saveConfig } from './identity.js';
+import { analyzeConnection } from './connection-quality.js';
 import { startDiscovery } from './discovery.js';
 import qrcode from '../vendor/qrcode.mjs';
 import { Group } from './group.js';
@@ -14,6 +15,7 @@ export function createActions(service) {
   const adb = service.adb || new AdbManager(service);
   const actions = {
     state: () => service.state(),
+    'connection-quality': a => analyzeConnection(service.peers.get(a.id)),
     'update-check':()=>service.updater.check(),
     'update-install':()=>service.updater.install(),
     'stage-list':()=>({files:service.staging.list(),outgoing:service.staging.outgoingList()}),
