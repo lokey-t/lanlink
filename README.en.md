@@ -31,7 +31,7 @@ The package version is **0.91.0**, tagged `v0.91.0`. Links below target this rel
 
 The Windows installer creates Start menu and desktop shortcuts and registers an uninstall entry; the portable edition needs no installation. On macOS, drag the app from the DMG into Applications. Current Mac builds are ad-hoc signed and not notarized. Android requires system installation confirmation and the same APK signing key as the installed app.
 
-Automatic stable-release checks can be disabled in Settings; manual checks remain available. Each version has one combined delta for all included platforms. Unsupported base versions, missing patches and verification failures fall back to the platform's full update. Exit the desktop app after download to install; Android uses the system installer. Older clients without an updater require a manual first upgrade. See [update publishing instructions](docs/updates.md).
+Updates default to the stable channel. In Settings, you can choose the stable or beta channel, disable automatic checks, or check manually. Each version has one combined delta for all included platforms. Unsupported base versions, missing patches and verification failures fall back to the platform's full update. Exit the desktop app after download to install; Android uses the system installer. Older clients without an updater require a manual first upgrade. See [update publishing instructions](docs/updates.md).
 
 ### Where LanLink fits alongside other tools
 
@@ -106,7 +106,7 @@ On all three platforms, **Settings → Language** offers Simplified Chinese, Tra
 
 ### 2. Pair your devices
 
-Open **Add device (添加设备)** on one device. On the other, choose **Join another group (加入其他组)** and enter the **8-digit code**. Android can also scan the QR code or recognize it from an image.
+Open **Add device (添加设备)** on one device to find its **8-digit pairing code**. On the other computer, open **Add device** and enter it in **Enter the other device’s code**. On Android, choose **Join another group (加入其他组)** to enter the code, or scan the QR code with the camera or from an image.
 
 - Codes refresh every 60 seconds and may contain leading zeros. Keep the inviting device's Add device window open.
 - An invitation is consumed after a successful pairing and revoked when its window closes. The QR code does not contain the long-term group secret.

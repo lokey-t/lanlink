@@ -424,6 +424,8 @@ public class MainActivity extends Activity {
   }
 
   private AppUpdater appUpdater;
+  void refreshUpdateChannel() { if (page.equals("settings")) renderPage(); }
+
   public void onCreate(Bundle state) {
     Ui.applyTheme(this);
     super.onCreate(state);
@@ -465,7 +467,10 @@ public class MainActivity extends Activity {
     }
   }
 
+  private TextView readiness;
+
   private void renderPage() {
+    readiness = null;
     groupLayoutPanel = null;
     permissionSwitches.clear();
     signature = "";
@@ -577,6 +582,12 @@ public class MainActivity extends Activity {
               renderPage();
             }));
     layout.addView(local);
+    ui.gap(layout, 12);
+    readiness = ui.text(Language.t("未就绪 · 查看授权教程"), 14, Ui.INK);
+    readiness.setPadding(ui.dp(16), ui.dp(14), ui.dp(16), ui.dp(14));
+    readiness.setBackground(ui.touch(Ui.LILAC, 14));
+    readiness.setOnClickListener(v -> startActivity(new Intent(this, ReadinessGuideActivity.class)));
+    layout.addView(readiness);
     ui.gap(layout, 16);
     status = ui.text(Language.t("正在启动…"), 12, Ui.MUTED);
     layout.addView(status);
@@ -734,6 +745,8 @@ public class MainActivity extends Activity {
     layout.addView(options);
     clipboardSettingsCard();
     Switch updateAuto=new Switch(this);updateAuto.setText(Language.t("自动检测更新"));updateAuto.setChecked(getSharedPreferences("identity",0).getBoolean("auto_check_updates",true));updateAuto.setOnCheckedChangeListener((button,on)->getSharedPreferences("identity",0).edit().putBoolean("auto_check_updates",on).apply());identity.addView(updateAuto);
+    identity.addView(ui.item("settings", Language.t("更新通道"),
+        Language.t(appUpdater.beta() ? "测试版" : "正式版"), null, appUpdater::chooseChannel));
     identity.addView(ui.item("settings",Language.t("检查更新"),Language.t("增量失败时自动使用全量更新"),null,()->appUpdater.check(true)));
     settingsFooter();
   }
@@ -1813,6 +1826,10 @@ public class MainActivity extends Activity {
         }
       }
       if(page.equals("clipboard") && !clipboardHistorySignature.equals(clipboardHistoryKey())){renderPage();return;}
+    if (readiness != null) {
+      boolean ready = s != null && s.shell != null && s.shell.ready();
+      readiness.setVisibility(ready ? View.GONE : View.VISIBLE);
+    }
     refreshConsent(s);
       return;
     }

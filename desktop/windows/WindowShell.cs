@@ -36,6 +36,9 @@ namespace LanLink.Desktop {
       string geometry;
       switch (name) {
         case "brand": geometry = "M4,3 L14,3 Q16,3 16,5 L16,15 L6,15 Q4,15 4,13 Z M9,9 L20,9 L20,21 L9,21 Z"; break;
+        case "play": geometry = "M7,4 L20,12 L7,20 Z"; break;
+        case "stop": geometry = "M6,6 L18,6 L18,18 L6,18 Z"; break;
+        case "quality": geometry = "M3,3 L3,21 L22,21 M6,17 L11,10 L15,13 L21,5"; break;
         case "settings": geometry = "M9,3 L15,3 L16,6 L19,7 L21,10 L19,13 L19,17 L16,19 L13,19 L10,21 L7,19 L6,16 L3,14 L3,10 L6,8 L7,5 Z M16,12 A4,4 0 1 1 8,12 A4,4 0 1 1 16,12"; break;
         case "account": geometry = "M16,7 A4,4 0 1 1 8,7 A4,4 0 1 1 16,7 M4,21 L4,19 C4,12 20,12 20,19 L20,21"; break;
         case "permissions": geometry = "M12,2 L21,6 L20,14 Q18,20 12,23 Q6,20 4,14 L3,6 Z M7,12 L11,16 L17,9"; break;

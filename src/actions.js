@@ -1,5 +1,5 @@
 import { parseToken, saveConfig } from './identity.js';
-import { analyzeConnection } from './connection-quality.js';
+import { ConnectionQuality, analyzeConnection } from './connection-quality.js';
 import { startDiscovery } from './discovery.js';
 import qrcode from '../vendor/qrcode.mjs';
 import { Group } from './group.js';
@@ -13,9 +13,15 @@ import {initializeMaster} from './master.js';
 // the optional developer HTTP harness delegates to the same implementation.
 export function createActions(service) {
   const adb = service.adb || new AdbManager(service);
+  const quality = new ConnectionQuality(service);
+  const qualityAction = run => async args => { await quality.load(); return run(args); };
   const actions = {
     state: () => service.state(),
     'connection-quality': a => analyzeConnection(service.peers.get(a.id)),
+    'quality-state': qualityAction(() => quality.state()),
+    'quality-start': qualityAction(a => quality.start(a.id)),
+    'quality-stop': qualityAction(() => quality.stop()),
+    'quality-export': qualityAction(() => quality.export()),
     'update-check':()=>service.updater.check(),
     'update-install':()=>service.updater.install(),
     'stage-list':()=>({files:service.staging.list(),outgoing:service.staging.outgoingList()}),

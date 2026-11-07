@@ -81,7 +81,7 @@ export class LinkManager {
       let result;
       if (m.method === 'linkPing') result = {};
       else if (m.method === 'linkUse') { this.activate(primary, link); result = {}; }
-      else if (controlMethods.has(m.method)) result = await this.service.handle(primary, m.method, m.args || {});
+      else if (m.method === 'qualityTransfer' || controlMethods.has(m.method)) result = await this.service.handle(primary, m.method, m.args || {});
       else throw Error('辅助通道不支持此操作');
       if (!link.peer.closed) link.peer.send({ type: 'response', id: m.id, result });
     } catch (error) { if (!link.peer.closed) link.peer.send({ type: 'response', id: m.id, error: error.message }); }
@@ -153,17 +153,37 @@ export class LinkManager {
     } catch { if (link) await this.drop(link); else await tunnel?.close(); }
     finally { this.pending.delete(id); }
   }
-  async verifyUsb(id, serial) {
-    const primary=this.service.getPeer(id);let tunnel,peer,timer;
+  async openVerifiedUsb(primary, serial) {
+    if (!this.valid(primary)) throw Error('设备连接已结束');
+    let tunnel, peer, timer;
+    const close = async () => { clearTimeout(timer); peer?.close(); await tunnel?.close(); };
     try {
-      const info=await primary.request('linkOpen',{},3000);
-      tunnel=await this.forward(serial,info.port);
-      const socket=net.connect({host:'127.0.0.1',port:tunnel.port});socket.on('error',()=>{});
-      peer=new Peer(socket,this.service.identity(),parseToken(info.secret));
-      await new Promise((resolve,reject)=>{timer=setTimeout(()=>reject(Error('USB 身份验证超时')),2500);peer.once('ready',resolve);peer.once('closed',()=>reject(Error('USB 设备不匹配')));});
-      if(peer.remote.id!==id || !this.valid(primary))return false;
-      await peer.request('linkPing',{},1500);return true;
-    } catch {return false;} finally {clearTimeout(timer);peer?.close();await tunnel?.close();}
+      const info = await primary.request('linkOpen',{},3000);
+      tunnel = await this.forward(serial,info.port);
+      const socket = net.connect({host:'127.0.0.1',port:tunnel.port});
+      socket.on('error',() => {});
+      peer = new Peer(socket,this.service.identity(),parseToken(info.secret));
+      await new Promise((resolve,reject) => {
+        timer=setTimeout(() => reject(Error('USB 身份验证超时')),2500);
+        peer.once('ready',resolve);
+        peer.once('closed',() => reject(Error('USB 设备不匹配')));
+      });
+      clearTimeout(timer);
+      if (peer.remote.id !== primary.remote.id || !this.valid(primary)) throw Error('USB 设备不匹配');
+      return {peer,close};
+    } catch (error) {
+      await close();
+      throw error;
+    }
+  }
+  async verifyUsb(id, serial) {
+    let link;
+    try {
+      link=await this.openVerifiedUsb(this.service.getPeer(id),serial);
+      await link.peer.request('linkPing',{},1500);
+      return true;
+    } catch { return false; }
+    finally { await link?.close(); }
   }
   async tick() {
     if (this.closed || this.scanning) return;

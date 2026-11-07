@@ -4798,6 +4798,24 @@
     "输入其他组的配对码": {
       "en": "Enter another group's pairing code"
     },
+    "分享本机配对码": {
+      "en": "Share this device’s code"
+    },
+    "让对方在 LanLink 扫码，或输入下方配对码。": {
+      "en": "On the other device, scan the QR code in LanLink or enter the code below."
+    },
+    "输入对方配对码": {
+      "en": "Enter the other device’s code"
+    },
+    "让两台设备连接同一局域网，并打开 LanLink。": {
+      "en": "Connect both devices to the same local network and open LanLink."
+    },
+    "双方已有分组会一并合并。": {
+      "en": "Pairing merges both devices’ existing groups."
+    },
+    "二维码": {
+      "en": "QR code"
+    },
     "输入助手已连接 · ADB / Root": {
       "en": "Input helper connected · ADB / Root"
     },
@@ -5382,6 +5400,204 @@
     },
     "开启本机权限并允许请求设备": {
       "en": "Enable this feature and allow the requesting device"
+    },
+    "更新通道": {
+      "en": "Update channel"
+    },
+    "正式版": {
+      "en": "Stable"
+    },
+    "测试版": {
+      "en": "Beta"
+    },
+    "未就绪 · 查看授权教程": {
+      "en": "Not ready · View setup guide"
+    },
+    "有 Root 权限的手机也可以在 LanLink 设置中启用 Root 模式。": {
+      "en": "On a rooted phone, you can also enable Root mode in LanLink settings."
+    },
+    "暂无可用的测试版发行": {
+      "en": "No beta release is available."
+    },
+    "暂无可用的正式版发行": {
+      "en": "No stable release is available."
+    },
+    "当前版本高于所选通道的发行版": {
+      "en": "The installed version is newer than the release on this channel."
+    },
+    "更新通道已更改，请重新检查更新": {
+      "en": "The update channel changed. Check for updates again."
+    },
+    "发现新版本": {
+      "en": "New version available"
+    },
+    "已是最新版本": {
+      "en": "You are up to date."
+    },
+    "当前更新正在安装或已准备好，请完成后再切换通道": {
+      "en": "Finish the pending update before changing channels."
+    },
+    "获取 Android SDK Platform-Tools": {
+      "en": "Get Android SDK Platform-Tools"
+    },
+    "开始测试全组": {
+      "en": "Test all devices"
+    },
+    "测试此设备": {
+      "en": "Test this device"
+    },
+    "取消测试": {
+      "en": "Cancel test"
+    },
+    "另存为文本": {
+      "en": "Save as text"
+    },
+    "正在取消测试": {
+      "en": "Cancelling the test"
+    },
+    "等待测试": {
+      "en": "Queued"
+    },
+    "测试中": {
+      "en": "Testing"
+    },
+    "已完成": {
+      "en": "Completed"
+    },
+    "测试失败": {
+      "en": "Test failed"
+    },
+    "验证 USB 通道": {
+      "en": "Verifying USB path"
+    },
+    "延迟与稳定性": {
+      "en": "Latency and stability"
+    },
+    "鼠标通道延迟": {
+      "en": "Mouse path latency"
+    },
+    "上传速度": {
+      "en": "Upload throughput"
+    },
+    "下载速度": {
+      "en": "Download throughput"
+    },
+    "选择设备或测试全组，获取从本机到目标设备的连接数据。": {
+      "en": "Select a device or test the group to measure connections from this computer."
+    },
+    "单台设备": {
+      "en": "One device"
+    },
+    "最近一次测试未包含此设备。": {
+      "en": "The latest run did not include this device."
+    },
+    "对端构建": {
+      "en": "Peer build"
+    },
+    "当前鼠标通道": {
+      "en": "Active mouse path"
+    },
+    "平均 / 峰值": {
+      "en": "Average / peak"
+    },
+    "抖动": {
+      "en": "Jitter"
+    },
+    "响应 / 总次数": {
+      "en": "Replies / attempts"
+    },
+    "超时": {
+      "en": "Timeouts"
+    },
+    "鼠标 RTT": {
+      "en": "Mouse RTT"
+    },
+    "上传 / 下载": {
+      "en": "Upload / download"
+    },
+    "诊断代码": {
+      "en": "Diagnostic codes"
+    },
+    "对端版本仅支持基础延迟测试。": {
+      "en": "The peer version supports basic latency tests only."
+    },
+    "采样": {
+      "en": "Sample"
+    },
+    "USB 通道已验证": {
+      "en": "Verified USB path"
+    },
+    "ADB 已授权，USB 通道未建立": {
+      "en": "ADB authorized; USB path unavailable"
+    },
+    "等待手机确认 USB 调试": {
+      "en": "Waiting for USB debugging approval on the phone"
+    },
+    "ADB 设备离线": {
+      "en": "ADB device offline"
+    },
+    "电脑没有访问 USB 设备的权限": {
+      "en": "The computer cannot access the USB device"
+    },
+    "未找到 ADB，无法检查数据线": {
+      "en": "ADB unavailable; USB not checked"
+    },
+    "未检测到 USB 调试设备": {
+      "en": "No USB debugging device detected"
+    },
+    "检测到 USB 设备，尚无法确认是这台手机": {
+      "en": "USB device detected; identity unverified"
+    },
+    "无法检查 USB 调试状态": {
+      "en": "Unable to inspect USB debugging"
+    },
+    "正在测试连接质量": {
+      "en": "A connection quality test is running."
+    },
+    "请先完成连接质量测试": {
+      "en": "Complete a connection quality test first."
+    },
+    "{0} 台在线 · {1} 台离线": {
+      "en": "{0} online · {1} offline"
+    },
+    "从本机到本组设备": {
+      "en": "From this computer to the group"
+    },
+    "最近一次": {
+      "en": "Last run"
+    },
+    "暂无测量数据": {
+      "en": "No measurements yet"
+    },
+    "传输速度": {
+      "en": "Throughput"
+    },
+    "设备明细": {
+      "en": "Device details"
+    },
+    "显示当前通道": {
+      "en": "Active paths"
+    },
+    "连接通道": {
+      "en": "Connection path"
+    },
+    "往返延迟趋势": {
+      "en": "Round-trip latency trend"
+    },
+    "实测传输速度": {
+      "en": "Measured throughput"
+    },
+    "通道稳定性": {
+      "en": "Path stability"
+    },
+    "平均": {
+      "en": "Average"
+    },
+    "峰值": {
+      "en": "Peak"
+    },
+    "查看诊断明细": {
+      "en": "Show diagnostics"
     }
   }
 }

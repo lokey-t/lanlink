@@ -31,3 +31,31 @@ test('concurrent permission edits and settings preserve both denials in memory a
 test('a committed setting remains visibly saved if native cleanup fails afterwards',async t=>{const {a,b}=await pair(t);a.owner={id:b.config.id};const call=a.native.call.bind(a.native);a.native.call=async(method,args)=>{if(method==='release')throw Error('native unavailable');return call(method,args);};try{const result=await a.settings({permissions:{input:false}});assert.equal(a.config.permissions.input,false);assert.equal(JSON.parse(await readFile(path.join(a.dir,'config.json'))).permissions.input,false);assert.match(result.message,/设置已保存/);assert.ok(result.warning);}finally{a.native.call=call;}});
 test('failed staging manifest commit preserves the receipt across reload and removes only the new destination',async t=>{const {a,b,dir}=await pair(t),file=path.join(dir,'atomic.txt');await writeFile(file,'preserve');await a.staging.share(b.config.id,[file]);await until(()=>b.staging.list()[0]?.state==='ready');await until(()=>!b.staging.tasks.size);const row=b.staging.list()[0],destination=path.join(dir,'saved-atomic.txt'),blocked=path.join(b.staging.root,'state.json.tmp');await mkdir(blocked);try{await assert.rejects(b.staging.saveTo(row.id,destination));assert.equal(b.staging.list()[0].state,'ready');const restored=new Staging(b);await restored.load();assert.equal(restored.list()[0].id,row.id);assert.equal(await readFile((await restored.ready(row.id)).path,'utf8'),'preserve');await assert.rejects(access(destination));}finally{await rm(blocked,{recursive:true,force:true});}});
 test('cancelling or clearing an unoffered batch item never sends a ghost offer',async t=>{const {a,b,dir}=await pair(t),files=[];for(let i=0;i<3;i++){const file=path.join(dir,'batch-race-'+i+'.txt');await writeFile(file,'value');files.push(file);}const peer=a.getPeer(b.config.id),request=peer.request.bind(peer);let release,entered=false;const gate=new Promise(r=>release=r);peer.request=async(method,args,...rest)=>{if(method==='stage-offer'&&!entered){entered=true;await gate;}return request(method,args,...rest);};const share=a.staging.share(b.config.id,files);try{await until(()=>entered);const rows=a.staging.outgoingList();await a.staging.cancelOutgoing(rows.find(r=>r.name==='batch-race-1.txt').id);await a.staging.removeOutgoing(rows.find(r=>r.name==='batch-race-2.txt').id);release();await share;await until(()=>b.staging.list()[0]?.state==='ready');assert.equal(b.staging.list().length,1);assert.equal(b.staging.list()[0].name,'batch-race-0.txt');}finally{release();}});
+
+test('diagnostics transfers synthetic blocks over a live authenticated control connection',async t=>{
+ const {a,b}=await pair(t);
+ const id=b.config.id;
+ await until(()=>a.group.data.members[id]);
+ const actions=createActions(a);
+ const peer=a.getPeer(id);
+ assert.equal(peer.info.capabilities.qualityProbe,1);
+ assert.match(peer.info.capabilities.qualityBuild,/^\d+\.\d+\.\d+/);
+ await actions('quality-start',{id});
+ let result;
+ for(let i=0;i<100;i++){
+  result=(await actions('quality-state')).session;
+  if(result.status!=='running') break;
+  await pause(30);
+ }
+ const tcp=result.devices[0].routes[0];
+ assert.equal(result.status,'completed');
+ assert.equal(tcp.latency.received,8);
+ assert.equal(tcp.uploadSummary.completed,6);
+ assert.equal(tcp.downloadSummary.completed,6);
+ assert.ok(!a.active);
+ assert.doesNotMatch((await actions('quality-export')).text,new RegExp(id));
+ await Promise.allSettled([...a.messageTasks]);
+ const reloaded=await createActions(a)('quality-state');
+ assert.equal(reloaded.session.startedAt,result.startedAt);
+ assert.equal(reloaded.session.devices[0].routes[0].downloadSummary.completed,6);
+});

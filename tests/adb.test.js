@@ -207,3 +207,13 @@ test('automatic recovery checks live helper health despite stale ready capabilit
   f.peer.request=async method=>{assert.equal(method,'permission-status');return {permissions:{input:{appEnabled:true,peerAllowed:true,systemGranted:true}}};};
   await f.manager.tick(); assert.equal(f.commands.length,0);
 });
+
+test('macOS Finder launches find Homebrew ADB with the system PATH', async () => {
+ const adb = await findAdb({
+  platform:'darwin', home:'/Users/test', env:{PATH:'/usr/bin:/bin'},
+  exists:async candidate => {
+   if (candidate !== '/opt/homebrew/bin/adb') throw Error('missing');
+  }
+ });
+ assert.equal(adb,'/opt/homebrew/bin/adb');
+});

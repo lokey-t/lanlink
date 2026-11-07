@@ -199,7 +199,13 @@ struct Device: Identifiable {
     @Published var successToast = ""
     @Published var successToastSymbol = "checkmark.circle.fill"
     var successToastTask: Task<Void, Never>?
-    @Published var startupEnabled = SMAppService.mainApp.status == .enabled
+    private static let startupAgent = SMAppService.agent(plistName: "com.lanlink.login.plist")
+    private static var startupRegistered: Bool {
+        [startupAgent.status, SMAppService.mainApp.status].contains {
+            $0 == .enabled || $0 == .requiresApproval
+        }
+    }
+    @Published var startupEnabled = Model.startupRegistered
     var pendingFeatureID:String?;var pendingFeature:(()->Void)?
     var accessController:AccessController?;var lastAccess="";var disclosure:ConsentDisclosure?;var adbGuide: AdbGuideController?; var lastAdbGuide = ""; var consentAlert: NSAlert?; var consentRequest = ""; var permissionWindow: NSWindow?
     var androidDisconnectAlert: NSAlert?; var androidDisconnectRequest = ""; var seenAndroidDisconnectRequests: Set<String> = []
@@ -434,7 +440,7 @@ struct Device: Identifiable {
             if let update = next["update"] as? [String:Any], update["phase"] as? String == "available", let version = update["version"] as? String, version != updateNoticeVersion { updateNoticeVersion = version; notice = "发现新版本 " + version + "，请在设置中下载更新" }
             state = next; applyTheme(); applyLanguage(); var all = [Device(id: state["id"] as? String ?? "local", name: state["name"] as? String ?? "本机", platform: "darwin", online: true, local: true)]
             showFirstDevicePermissionGuideIfNeeded(wasFirstDevice: (state["groupMemberCount"] as? Int ?? 1) > 1 || !(state["knownDevices"] as? [String: Any] ?? [:]).isEmpty)
-            refreshRequests(); startupEnabled = SMAppService.mainApp.status == .enabled
+            refreshRequests(); startupEnabled = Self.startupRegistered
             for (id, info) in state["knownDevices"] as? [String: [String: Any]] ?? [:] { all.append(Device(id: id, name: info["name"] as? String ?? "已配对设备", platform: info["platform"] as? String ?? "")) }
             for info in state["peers"] as? [[String: Any]] ?? [] {
                 guard let id = info["id"] as? String else { continue }; all.removeAll { $0.id == id }
@@ -592,12 +598,26 @@ struct Device: Identifiable {
         let owner = state["owner"] as? String ?? ""
         guard let id = owner.isEmpty ? (state["viewers"] as? [String])?.first : owner, !id.isEmpty else { return nil }; return devices.first { $0.id==id }?.name ?? "其他设备"
     }
-    func setStartup(_ enabled: Bool) {
-        do { if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }; startupEnabled = SMAppService.mainApp.status == .enabled; if SMAppService.mainApp.status == .requiresApproval { SMAppService.openSystemSettingsLoginItems(); notice = "请在系统登录项中允许 LanLink" } }
-        catch { notice = error.localizedDescription; startupEnabled = SMAppService.mainApp.status == .enabled }
+    func migrateStartup() {
+        if SMAppService.mainApp.status == .enabled { setStartup(true, openSettings: false) }
+    }
+    func setStartup(_ enabled: Bool, openSettings: Bool = true) {
+        let agent = Self.startupAgent
+        let legacy = SMAppService.mainApp
+        defer { startupEnabled = Self.startupRegistered }
+        do {
+            if enabled && agent.status != .enabled && agent.status != .requiresApproval {
+                try agent.register()
+            }
+            if legacy.status == .enabled || legacy.status == .requiresApproval { try legacy.unregister() }
+            if !enabled && (agent.status == .enabled || agent.status == .requiresApproval) { try agent.unregister() }
+            if enabled && agent.status == .requiresApproval {
+                if openSettings { SMAppService.openSystemSettingsLoginItems() }
+                notice = "请在系统登录项中允许 LanLink"
+            }
+        } catch { notice = error.localizedDescription }
     }
     func refreshRequests() {
-        refreshAdbAuthorization()
         let access=state["accessNotice"] as? [String:Any]
         if let current=accessController, !current.ended, !current.completing, current.requestID != access?["requestId"] as? String { current.showEnded("授权请求已结束，请重新请求或返回设备列表。") }
         if let access, let id = access["requestId"] as? String {
@@ -619,6 +639,10 @@ struct Device: Identifiable {
                 handlingFallback = false
             }
         }
+        // These notices use sheets attached to the main window. Wait for the
+        // user to open it after login; independent request windows still work.
+        if appDelegate?.waitingForFirstOpen == true { return }
+        refreshAdbAuthorization()
         let requests = state["consentRequests"] as? [[String: Any]] ?? []
         if let alert = consentAlert, !requests.contains(where: { $0["requestId"] as? String == consentRequest }) { alert.window.sheetParent?.endSheet(alert.window, returnCode: .cancel); consentAlert = nil }
         if consentAlert == nil, let request = requests.first, let main = (appDelegate)?.mainWindow {
@@ -903,10 +927,6 @@ struct DeviceActions: View {
             Button(L("取消关机")) { model.perform("cancel-shutdown"); model.selected = nil }.disabled(model.state["shutdownAt"] == nil || model.state["shutdownAt"] is NSNull)
         } else {
             Group {
-                Button(L("连接质量分析")) {
-                    model.selected = nil; model.notice = "正在分析连接质量…"
-                    Task { do { let result = try await model.call("connection-quality", ["id": device.id]); let alert = NSAlert(); alert.messageText = L("连接质量分析"); alert.informativeText = result["message"] as? String ?? ""; alert.runModal() } catch { model.notice = error.localizedDescription } }
-                }
                 Button(L("设备详情与权限")) { model.selected = nil; model.sidebarPage = "permissions"; model.permissionsVisible = true }
                 feature("桌面控制",["input","screen"]) { model.selected = nil; model.openRemote(device) }
                 feature("切换键鼠到此设备",["input"]) { model.switchControl(device); model.selected = nil }
@@ -1133,7 +1153,7 @@ struct AppTitleBar: View {
 }
 
 struct Home: View {
-    @ObservedObject var model: Model; @State var settings = false; @State var pairing = false
+    @ObservedObject var model: Model; @State var settings = false
     func navigate(_ page: String) { model.layoutDragID = nil; settings = page == "settings"; model.adbDevice = nil; model.permissionsVisible = page == "permissions"; model.sidebarPage = page }
     var body: some View { ZStack {
         Glass(material: .sidebar)
@@ -1145,10 +1165,11 @@ struct Home: View {
         HStack(spacing: 0) {
         VStack(alignment: .leading, spacing: 14) {
             Label("LanLink", systemImage: "square.on.square").font(.title2).padding(.bottom, 18)
-            SidebarItem(title: L("设备"), icon: "desktopcomputer", selected: model.sidebarPage == "devices") { navigate("devices") }
+            SidebarItem(title: L("设备"), icon: "desktopcomputer", selected: model.sidebarPage == "devices" || model.sidebarPage == "pairing") { navigate("devices") }
             SidebarItem(title: L("暂存文件"), icon: "folder", selected: model.sidebarPage == "staging") { navigate("staging") }
             SidebarItem(title: L("本组设备权限"), icon: "checkmark.shield", selected: model.sidebarPage == "permissions") { navigate("permissions") }
             SidebarItem(title: L("安卓授权"), icon: "iphone.gen3.radiowaves.left.and.right", selected: model.sidebarPage == "adb") { navigate("adb") }
+            SidebarItem(title: L("连接质量分析"), icon: "chart.xyaxis.line", selected: model.sidebarPage == "quality") { navigate("quality") }
             SidebarItem(title: L("剪贴板"), icon: "doc.on.clipboard", selected: model.sidebarPage == "clipboard") { navigate("clipboard") }
             SidebarItem(title: L("设置"), icon: "gearshape", selected: model.sidebarPage == "settings") { navigate("settings") }
             Spacer()
@@ -1158,7 +1179,7 @@ struct Home: View {
         VStack(alignment: .leading, spacing: 12) {
         ZStack {
             VStack(alignment: .leading, spacing: 18) {
-                HStack(spacing:12) { Text(L("设备与布局")).font(.system(size: 26, weight: .semibold)); Spacer();if model.clipboardSettings["showShortcuts"] as? Bool ?? false{HStack(spacing:8){ClipboardQuickButton(upload:true){model.clipboardAction("clipboard-upload")};ClipboardQuickButton(upload:false){model.clipboardAction("clipboard-download")}}}; Button(L("＋ 添加设备")) { model.sidebarPage = "information" }.buttonStyle(FlatButtonStyle()) }
+                HStack(spacing:12) { Text(L("设备与布局")).font(.system(size: 26, weight: .semibold)); Spacer();if model.clipboardSettings["showShortcuts"] as? Bool ?? false{HStack(spacing:8){ClipboardQuickButton(upload:true){model.clipboardAction("clipboard-upload")};ClipboardQuickButton(upload:false){model.clipboardAction("clipboard-download")}}}; Button(L("＋ 添加设备")) { navigate("pairing") }.buttonStyle(FlatButtonStyle()) }
                 ScrollView(.horizontal) { HStack(spacing: 10) { ForEach(model.devices) { d in DeviceTile(model: model, device: d, compact: true).opacity(model.layoutDragID == d.id ? 0.35 : 1) } }.padding(1) }.frame(height: 82)
                 Text(L("同组布局与主设备标识自动同步。点击设备查看操作，拖动调整位置。")).font(.caption).foregroundStyle(.secondary)
                 LayoutCanvas(model: model).padding(10).frame(maxHeight: .infinity).layoutPriority(1).background(Palette.canvas, in: RoundedRectangle(cornerRadius: 20))
@@ -1167,9 +1188,11 @@ struct Home: View {
             SettingsView(model: model, active: settings).opacity(settings && model.adbDevice == nil && !model.permissionsVisible ? 1 : 0).allowsHitTesting(settings && model.adbDevice == nil && !model.permissionsVisible).accessibilityHidden(!settings || model.adbDevice != nil || model.permissionsVisible)
             if model.permissionsVisible { DevicePermissionsView(model: model) }
             if model.sidebarPage == "adb", model.adbDevice == nil { AdbHubView(model: model) }
+            if model.sidebarPage=="quality"{ConnectionQualityView(model:model)}
             if model.sidebarPage=="staging"{StagingView(model:model)}
             if model.sidebarPage=="clipboard"{ClipboardHistoryView(model:model)}
             if model.sidebarPage == "information" { InformationView(model: model) }
+            if model.sidebarPage == "pairing" { PairingView(model: model) { navigate("devices") } }
             if let device = model.adbDevice { Group { if device.id.isEmpty { LocalAdbAuthorizationView(model:model) } else { AdbAuthorizationView(model:model,device:device) } }.id(device.id) }
         }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         GlobalNoticeView(model: model)
@@ -1226,7 +1249,7 @@ struct InformationView: View {
             Text(L("所属组：") + (model.state["groupId"] as? String ?? "")).textSelection(.enabled)
             BuildInformationView(build: model.state["buildInfo"] as? [String: Any] ?? [:])
         }.padding(24).frame(maxWidth: .infinity, alignment: .leading).background(Palette.card, in: RoundedRectangle(cornerRadius: 20))
-        PairingView(model: model)
+        Button(L("添加设备")) { model.sidebarPage = "pairing" }
     }.frame(maxWidth: .infinity, alignment: .leading) }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).buttonStyle(FlatButtonStyle()) }
 }
 struct AdbHubView: View {
@@ -1583,6 +1606,13 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     Text(L("通用")).font(.headline)
                     Toggle(L("自动检测更新"),isOn:Binding(get:{model.state["autoCheckUpdates"] as? Bool ?? true},set:{model.perform("settings",["autoCheckUpdates":$0])}))
+                    Picker(L("更新通道"), selection: Binding(
+                        get: { model.state["updateChannel"] as? String ?? "stable" },
+                        set: { model.perform("settings", ["updateChannel": $0]) }
+                    )) {
+                        Text(L("正式版")).tag("stable")
+                        Text(L("测试版")).tag("beta")
+                    }
                     HStack { Button(L("检查更新")){model.perform("update-check")}; Button(L("下载并准备更新")){model.perform("update-install")} }
                     Text((model.state["update"] as? [String:Any])?["message"] as? String ?? ((model.state["update"] as? [String:Any])?["version"] as? String ?? "")).font(.caption)
 
@@ -1639,10 +1669,11 @@ struct SettingsView: View {
     }
 }
 struct PairingView: View {
-    @ObservedObject var model: Model; @Environment(\.dismiss) var dismiss
+    @ObservedObject var model: Model
+    let back: () -> Void
     @Environment(\.colorScheme) private var colorScheme
     @State private var code = ""; @State private var input = ""; @State private var qr: NSImage?
-    @State private var showing = false; @State private var joining = false; @State private var busy = false
+    @State private var showing = false; @State private var busy = false
     @State private var loading = false; @State private var alive = true; @State private var error = ""
     @State private var deadline = Date.distantPast; @State private var now = Date(); @State private var duration = 60.0
     @State private var host = ""
@@ -1657,65 +1688,117 @@ struct PairingView: View {
     private var formatted: String { code.count == 8 && remaining > 0 ? String(code.prefix(4)) + " " + String(code.suffix(4)) : "···· ····" }
     private var darkQRCode: Bool { (model.state["theme"] as? String == "dark") || (model.state["theme"] as? String != "light" && colorScheme == .dark) }
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text(L("让设备相遇")).font(.system(size: 25, weight: .semibold))
-            Text(L("扫码或输入配对码，双方已有设备将自动合并为一组。")).font(.callout).foregroundStyle(.secondary)
-            HStack(alignment: .center, spacing: 28) {
-                VStack(spacing: 12) {
-                    ZStack {
-                        if showing, remaining > 0, let qr {
-                            if darkQRCode {
-                                Image(nsImage: qr).resizable().interpolation(.none).scaledToFit().colorInvert()
-                                    .padding(10).background(Color.black, in: RoundedRectangle(cornerRadius: 12))
-                            } else {
-                                Image(nsImage: qr).resizable().interpolation(.none).scaledToFit()
-                                    .padding(10).background(Color.white, in: RoundedRectangle(cornerRadius: 12))
-                            }
-                        }
-                    }.frame(width: 190, height: 190)
-                    Button(L(showing ? "隐藏二维码" : "点击查看二维码")) { showing.toggle(); qr = nil; Task { await refresh() } }.disabled(loading)
-                    Text(L("二维码与数字码同步刷新")).font(.caption).foregroundStyle(.secondary)
-                }.padding(18).background(Palette.canvas, in: RoundedRectangle(cornerRadius: 22))
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(L("其他设备加入本组"))
-                    Text(formatted).font(.system(size: 34, weight: .semibold, design: .monospaced)).foregroundStyle(.indigo).textSelection(.enabled)
-                    Button(L(copiedCode ? "配对码已复制" : "复制配对码")) {
-                        NSPasteboard.general.clearContents(); NSPasteboard.general.setString(code, forType: .string); copiedCode = true
-                    }.disabled(code.count != 8 || remaining <= 0)
-                    ProgressView(value: min(remaining / duration, 1)).tint(.indigo)
-                    Text(remaining > 0 ? LF("{0} 秒后刷新 · 每分钟自动更换", String(Int(ceil(remaining)))) : L("正在刷新配对码…")).font(.caption).foregroundStyle(.secondary)
-                    Text(L("让另一台设备扫码，或输入本机八位配对码。双方已有分组会一并合并。")).font(.caption).foregroundStyle(.secondary)
-                    Button(L(joining ? "收起输入 ↑" : groupEstablished ? "配对并合并设备组 →" : "加入其他组 →")) { joining.toggle() }.disabled(busy)
-                    if joining {
-                        TextField(L("其他设备的八位数字配对码"), text: $input).textFieldStyle(.roundedBorder).disabled(busy)
-                            .onChange(of: input) { _, value in
-                                let normalized = PairingCode.normalized(value)
-                                if normalized != value { input = normalized }
-                                if !normalized.isEmpty && !PairingCode.valid(normalized) { error = "配对码应为八位数字，可粘贴带空格或换行的分组码。" }
-                                else if PairingCode.valid(normalized) { error = "" }
-                            }
-                        Button(L(busy ? "正在配对…" : groupEstablished ? "配对并合并设备组" : "配对并加入")) { Task { await join() } }.disabled(busy)
-                    }
-                }.frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                Text(L("添加设备")).font(.system(size: 26, weight: .semibold)).accessibilityAddTraits(.isHeader)
+                Spacer()
+                Button(action: back) { Label(L("返回设备"), systemImage: "chevron.left") }.disabled(busy)
             }
-            if !error.isEmpty {
-                Text(Model.displayMessage(error)).font(.callout).foregroundStyle(Palette.ink)
-                    .fixedSize(horizontal: false, vertical: true).padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Palette.canvas, in: RoundedRectangle(cornerRadius: 10))
-            }
-            DisclosureGroup(L("已配对设备无法自动连接？")) {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack { TextField(L("已配对设备的局域网 IP"), text: $host).textFieldStyle(.roundedBorder).disabled(connecting)
-                        Button(L(connecting ? "正在连接…" : "手动连接")) { Task { await connect() } }.disabled(connecting)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text(L("让两台设备连接同一局域网，并打开 LanLink。")).font(.callout).foregroundStyle(.secondary)
+                    pairingStatus
+                    HStack(alignment: .top, spacing: 16) {
+                        shareCard
+                        joinCard
                     }
-                    if !connectionMessage.isEmpty { Text(Model.displayMessage(connectionMessage)).fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("manualConnectionStatus") }
-                }.padding(.top, 8)
-            }.font(.caption).foregroundStyle(.secondary)
-        }.buttonStyle(FlatButtonStyle()).interactiveDismissDisabled(busy)
+                    manualConnection
+                }.frame(maxWidth: 900, alignment: .leading).frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .buttonStyle(FlatButtonStyle())
         .task { alive = true; await refresh() }
         .onReceive(timer) { value in now = value; if remaining <= 0 { qr = nil }; Task { await refresh() } }
         .onDisappear { alive = false; qr = nil; Task { _ = try? await model.call("pairing-stop") } }
+    }
+    private func cardHeading(_ title: String, icon: String, hint: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(L(title), systemImage: icon).font(.headline).foregroundStyle(Palette.ink)
+                .accessibilityAddTraits(.isHeader)
+            Text(L(hint)).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+    private func card<Content: View>(_ background: Color, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12, content: content)
+            .padding(20).frame(maxWidth: .infinity, alignment: .leading)
+            .background(background, in: RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Palette.line))
+    }
+    private var shareCard: some View {
+        card(Palette.canvas) {
+            cardHeading("分享本机配对码", icon: "qrcode", hint: "让对方在 LanLink 扫码，或输入下方配对码。")
+            Text(formatted).font(.system(size: 36, weight: .semibold, design: .monospaced))
+                .foregroundStyle(Palette.adaptive(0x354CC2, 0xB8C4FF)).textSelection(.enabled)
+            ProgressView(value: min(remaining / duration, 1)).tint(.indigo)
+            Text(remaining > 0 ? LF("{0} 秒后刷新 · 每分钟自动更换", String(Int(ceil(remaining)))) : L("正在刷新配对码…"))
+                .font(.caption).foregroundStyle(.secondary)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { copyButton; qrButton }.fixedSize(horizontal: true, vertical: false)
+                VStack(alignment: .leading, spacing: 8) { copyButton; qrButton }
+            }
+            if showing, remaining > 0, let qr {
+                let image = Image(nsImage: qr).resizable().interpolation(.none).scaledToFit()
+                Group {
+                    if darkQRCode { image.colorInvert() } else { image }
+                }
+                    .frame(width: 168, height: 168).padding(10)
+                    .background(darkQRCode ? Color.black : Color.white, in: RoundedRectangle(cornerRadius: 12))
+                    .accessibilityLabel(L("二维码"))
+            }
+        }
+    }
+    private var copyButton: some View {
+        Button(L(copiedCode ? "配对码已复制" : "复制配对码")) {
+            NSPasteboard.general.clearContents(); NSPasteboard.general.setString(code, forType: .string); copiedCode = true
+        }.disabled(code.count != 8 || remaining <= 0)
+    }
+    private var qrButton: some View {
+        Button(L(showing ? "隐藏二维码" : "点击查看二维码")) { showing.toggle(); qr = nil; Task { await refresh() } }.disabled(loading || busy)
+    }
+    private var joinCard: some View {
+        card(Palette.card) {
+            cardHeading("输入对方配对码", icon: "keyboard", hint: "输入对方「添加设备」页面的八位数字")
+            Text(L("八位数字配对码")).font(.caption).foregroundStyle(.secondary)
+            TextField(L("其他设备的八位数字配对码"), text: $input, prompt: Text("0000 0000"))
+                .font(.system(size: 24, design: .monospaced))
+                .textFieldStyle(.plain).padding(12)
+                .background(Palette.canvas, in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Palette.line))
+                .disabled(busy || waitingConnection)
+                .onSubmit { Task { await join() } }
+                .onChange(of: input) { _, value in
+                    let normalized = PairingCode.normalized(value)
+                    if normalized != value { input = normalized }
+                    guard !waitingConnection else { return }
+                    if normalized.count > 8 || !normalized.utf8.allSatisfy({ (48...57).contains($0) }) {
+                        error = "配对码应为八位数字，可粘贴带空格或换行的分组码。"
+                    } else {
+                        error = ""
+                    }
+                }
+            Button(L(busy ? "正在配对…" : groupEstablished ? "配对并合并设备组" : "配对并加入")) { Task { await join() } }
+                .buttonStyle(.borderedProminent).controlSize(.large).disabled(busy || waitingConnection)
+            Text(L("双方已有分组会一并合并。")).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+    @ViewBuilder private var pairingStatus: some View {
+        if !error.isEmpty {
+            Text(Model.displayMessage(error)).font(.callout).foregroundStyle(Palette.ink)
+                .fixedSize(horizontal: false, vertical: true).padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Palette.canvas, in: RoundedRectangle(cornerRadius: 10))
+        }
+    }
+    private var manualConnection: some View {
+        DisclosureGroup(L("已配对设备无法自动连接？")) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    TextField(L("已配对设备的局域网 IP"), text: $host).textFieldStyle(.roundedBorder).disabled(connecting)
+                    Button(L(connecting ? "正在连接…" : "手动连接")) { Task { await connect() } }.disabled(connecting)
+                }
+                if !connectionMessage.isEmpty { Text(Model.displayMessage(connectionMessage)).fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("manualConnectionStatus") }
+            }.padding(.top, 8)
+        }.font(.caption).foregroundStyle(.secondary)
     }
     private func refresh() async {
         guard alive, !loading, !busy else { return }; loading = true; defer { loading = false }
@@ -1745,7 +1828,7 @@ struct PairingView: View {
     private func join() async {
         input = PairingCode.normalized(input)
         guard PairingCode.valid(input) else { error = "请输入完整的八位数字配对码。"; return }
-        guard !busy else { return }
+        guard !busy, !waitingConnection else { return }
         busy = true; error = "正在准备加入…"; defer { busy = false }
         do {
             let state = try await model.call("state")
@@ -1764,7 +1847,7 @@ struct PairingView: View {
             guard response == .alertFirstButtonReturn else { error = "已取消加入。"; return }
             error = "正在查找设备并配对…"
             _ = try await model.call("join", ["code": input, "expectedGroup": state["groupId"] as? String ?? ""])
-            await model.refresh(); model.showFirstDevicePermissionGuideIfNeeded(wasFirstDevice: wasFirstDevice); waitingConnection = true; initialPeers = []; input = ""; joining = false; showing = false; qr = nil; error = "已配对，正在同步组内设备…"
+            await model.refresh(); model.showFirstDevicePermissionGuideIfNeeded(wasFirstDevice: wasFirstDevice); waitingConnection = true; initialPeers = []; input = ""; showing = false; qr = nil; error = "已配对，正在同步组内设备…"
         } catch { self.error = error.localizedDescription }
     }
 }
@@ -1776,11 +1859,17 @@ struct PairingView: View {
         super.init()
     }
     private(set) var instance: InstanceLease?
-    private var launchedInBackground: Bool {
-        CommandLine.arguments.contains("--background") || NSAppleEventManager.shared().currentAppleEvent?.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem
+    private var launchedInBackground = CommandLine.arguments.contains("--background")
+    private func captureLoginEvent() {
+        if NSAppleEventManager.shared().currentAppleEvent?.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem {
+            launchedInBackground = true
+        }
     }
     private var redirecting = false
+    var waitingForFirstOpen: Bool { launchedInBackground && !openedMain }
+    private var openedMain = false
     func applicationWillFinishLaunching(_ notification: Notification) {
+        captureLoginEvent()
         let args = CommandLine.arguments
         let data = args.firstIndex(of: "--data").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? InstanceLease.defaultDirectory
         model.initializeLanguage(dataDirectory: data)
@@ -1797,7 +1886,9 @@ struct PairingView: View {
                           let url = app.bundleURL else { return false }
                     return Bundle(url: url)?.object(forInfoDictionaryKey: "LanLinkInstanceProtocol") as? Int != 1
                 }).sorted(by: { ($0.launchDate ?? .distantPast) < ($1.launchDate ?? .distantPast) }).first {
-                redirectToExistingInstance(legacy); return
+                if launchedInBackground { redirecting = true; NSApp.terminate(nil) }
+                else { redirectToExistingInstance(legacy) }
+                return
             }
             DistributedNotificationCenter.default().addObserver(self, selector: #selector(receiveReopen(_:)), name: InstanceLease.reopenNotification, object: lease.directory)
         } catch {
@@ -1837,7 +1928,11 @@ struct PairingView: View {
         }
     }
     @objc private func receiveReopen(_ notification: Notification) { if instance?.isOwner == true && !redirecting { showMain() } }
-    func applicationDidFinishLaunching(_ notification: Notification) { startMainInterface() }
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        captureLoginEvent()
+        startMainInterface()
+        if instance?.isOwner == true, !redirecting { model.migrateStartup() }
+    }
     private func startMainInterface() {
         guard instance?.isOwner == true, !redirecting, mainWindow == nil else { return }
         model.appDelegate = self
@@ -1891,7 +1986,7 @@ struct PairingView: View {
         return true
     }
     func closeMainWindow() { mainWindow.orderOut(nil); model.releaseAll() }
-    @objc func showMain() { guard let mainWindow, !model.closing else { return }; NSApp.unhide(nil); mainWindow.deminiaturize(nil); mainWindow.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
+    @objc func showMain() { guard let mainWindow, !model.closing else { return }; openedMain = true; NSApp.unhide(nil); mainWindow.deminiaturize(nil); mainWindow.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
     @objc func releaseControl() { model.releaseAll() }
     @objc func quitApp() { NSApp.terminate(nil) }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showMain(); return true }
@@ -1914,6 +2009,16 @@ struct PairingView: View {
 // so it cannot replace the responder-chain editing menu after launch/reactivation.
 @main enum LanLinkApp {
     @MainActor static func main() {
+        if CommandLine.arguments.contains("--login-launcher") {
+            // Start a separate app instance through Launch Services so the UI
+            // process outlives the login agent and can be reopened normally.
+            let opener = Process()
+            opener.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+            opener.arguments = ["-g", "-n", "-a", Bundle.main.bundleURL.path, "--args", "--background"]
+            do { try opener.run(); opener.waitUntilExit() }
+            catch { NSLog("Could not start LanLink at login: %@", error.localizedDescription) }
+            return
+        }
         let application = NSApplication.shared
         let delegate = AppDelegate(); application.delegate = delegate
         application.setActivationPolicy(delegate.model.dockIconHidden ? .accessory : .regular)

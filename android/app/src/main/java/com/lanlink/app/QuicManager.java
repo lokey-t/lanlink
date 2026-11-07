@@ -11,6 +11,7 @@ final class QuicManager implements AutoCloseable {
   final LinkService service;QuicNative nativeEngine;JSONObject info;volatile boolean enabled;
   final Map<Long,Wire> connections=new ConcurrentHashMap<>();
   final Map<Long,QuicMotion.Pacing> motionRates=new ConcurrentHashMap<>();
+  final Map<Long,Long> qualityReplies=new ConcurrentHashMap<>();
   final Map<String,Wire> offers=new ConcurrentHashMap<>();
   final Map<String,QuicVideo> videos=new ConcurrentHashMap<>();
   final Set<Wire> opening=ConcurrentHashMap.newKeySet();
@@ -51,8 +52,17 @@ final class QuicManager implements AutoCloseable {
     if(type.equals("video")){QuicVideo video=videos.get(conn+":"+e.optLong("channel"));if(video!=null)video.receive(e);return;}
     if(type.equals("stats")){QuicMotion.Pacing pacing=motionRates.get(conn);if(pacing!=null&&e.has("queued"))pacing.feedback(null,e.optLong("queued"));for(QuicVideo video:videos.values())if(video.conn==conn)video.queued=e.optLong("queued");return;}
     if(p==null||!valid(p)||p.quicConn!=conn)return;
-    if(type.equals("datagram")){try{JSONObject motion=new JSONObject(new String(decode(e),java.nio.charset.StandardCharsets.UTF_8));p.quicInputs.add(motion,()->{try{if(valid(p)&&p.quicConn==conn)applyMotion(p,motion);}catch(Exception ignored){}});}catch(Exception ignored){}return;}
+    if(type.equals("datagram")){try{JSONObject motion=new JSONObject(new String(decode(e),java.nio.charset.StandardCharsets.UTF_8));if(motion.has("qualityPing")){replyQualityDatagram(conn,motion.optString("qualityPing"));return;}p.quicInputs.add(motion,()->{try{if(valid(p)&&p.quicConn==conn)applyMotion(p,motion);}catch(Exception ignored){}});}catch(Exception ignored){}return;}
     if(type.equals("request")){try{JSONObject message=new JSONObject(new String(decode(e),java.nio.charset.StandardCharsets.UTF_8));String method=message.getString("method");if(AuxLink.CONTROL.contains(method)||method.equals("prepare"))p.quicInputs.add(null,()->incoming(p,e,message));else service.jobs.execute(()->incoming(p,e,message));}catch(Exception error){drop(p);}}
+  }
+  void replyQualityDatagram(long conn, String token) {
+    if (!token.matches("[a-f0-9]{16}")) return;
+    long now=android.os.SystemClock.elapsedRealtime();
+    Long last=qualityReplies.get(conn);
+    if (last != null && now-last < 40) return;
+    qualityReplies.put(conn,now);
+    nativeEngine.callAsync("datagram",Wire.obj("conn",conn,
+        "data",encode(Wire.bytes(Wire.obj("qualityAck",token).toString())),"timeout",800));
   }
   void motion(long conn,byte[] bytes){Wire p=connections.get(conn);if(p==null||!valid(p)||p.quicConn!=conn)return;try{JSONObject m=QuicMotion.decode(bytes);p.quicInputs.add(m,()->{try{if(valid(p)&&p.quicConn==conn)applyMotion(p,m);}catch(Exception ignored){}});}catch(Exception ignored){}}
   void applyMotion(Wire p,JSONObject motion)throws Exception{
@@ -71,7 +81,7 @@ final class QuicManager implements AutoCloseable {
   }
   byte[] file(Wire p,JSONObject a)throws Exception{JSONObject response=nativeEngine.call("request",Wire.obj("conn",p.quicConn,"data",encode(Wire.bytes(Wire.obj("method","quicFile","args",a).toString())),"timeout",15000));byte[] data=decode(response);if(data.length<33||data[0]!=0)throw new IOException("QUIC 文件传输失败");byte[] bytes=Arrays.copyOfRange(data,33,data.length);if(!java.security.MessageDigest.isEqual(Wire.sha(bytes),Arrays.copyOfRange(data,1,33)))throw new IOException("QUIC 文件校验失败");return bytes;}
   QuicVideo video(Wire p,long channel)throws Exception{if(!valid(p)||p.quicConn==0)throw new IOException("QUIC 串流未就绪");QuicVideo video=new QuicVideo(this,p.quicConn,channel);QuicVideo old=videos.put(p.quicConn+":"+channel,video);if(old!=null)old.close();return video;}
-  synchronized void drop(Wire p){long conn=p.quicConn;if(conn==0)return;p.quicConn=0;p.quicRetry=System.currentTimeMillis()+15000;connections.remove(conn);motionRates.remove(conn);for(QuicVideo video:new ArrayList<>(videos.values()))if(video.conn==conn)video.close();nativeEngine.callAsync("close",Wire.obj("conn",conn));service.inputJobs.execute(()->{try{service.handle(p,"release",Wire.obj());}catch(Exception ignored){}});service.jobs.execute(()->{try{if(p.connected)p.requestDirect("release",Wire.obj(),1500);}catch(Exception ignored){}});}
+  synchronized void drop(Wire p){long conn=p.quicConn;if(conn==0)return;p.quicConn=0;p.quicRetry=System.currentTimeMillis()+15000;connections.remove(conn);motionRates.remove(conn);qualityReplies.remove(conn);for(QuicVideo video:new ArrayList<>(videos.values()))if(video.conn==conn)video.close();nativeEngine.callAsync("close",Wire.obj("conn",conn));service.inputJobs.execute(()->{try{service.handle(p,"release",Wire.obj());}catch(Exception ignored){}});service.jobs.execute(()->{try{if(p.connected)p.requestDirect("release",Wire.obj(),1500);}catch(Exception ignored){}});}
   void reset(){offers.clear();for(Wire p:new ArrayList<>(connections.values()))drop(p);if(nativeEngine!=null)nativeEngine.callAsync("resetTickets",Wire.obj());}
   public void close(){enabled=false;clock.shutdownNow();reset();if(nativeEngine!=null)nativeEngine.close();}
 }

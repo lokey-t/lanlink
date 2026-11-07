@@ -51,6 +51,7 @@ tasks.named('preBuild').configure { dependsOn(generateBuildIdentity) }
 // Package the same curated language catalog used by both desktop clients.
 def generateLanguageAssets = tasks.register('generateLanguageAssets', Copy) {
     from(rootProject.file('../src/locales.json'))
+    from(rootProject.file('../src/assets/adb-connect.svg'))
     into(layout.buildDirectory.dir('generated/languageAssets'))
 }
 android.sourceSets.main.assets.srcDir(layout.buildDirectory.dir('generated/languageAssets'))

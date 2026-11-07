@@ -15,6 +15,7 @@ $refs += (Join-Path $PSScriptRoot 'UiLocale.cs')
 $refs += (Join-Path $PSScriptRoot 'EdgeGlow.cs')
 $refs += (Join-Path $PSScriptRoot 'Startup.cs')
 $refs += (Join-Path $PSScriptRoot 'Staging.cs')
+$refs += (Join-Path $PSScriptRoot 'ConnectionQuality.cs')
 $refs += (Join-Path $PSScriptRoot 'FileDragEdges.cs')
 $version = (Get-Content (Join-Path $root 'package.json') -Raw | ConvertFrom-Json).version
 if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Native version must use major.minor.patch format.' }

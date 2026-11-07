@@ -572,13 +572,23 @@ public class LinkService extends Service implements Wire.Listener {
     return START_NOT_STICKY;
   }
 
+  private volatile String qualityBuild = "";
+  private final ConnectionQualityProbe qualityProbe = new ConnectionQualityProbe();
+
   public JSONObject capabilities() {
+    if (qualityBuild.isEmpty()) {
+      try (java.io.InputStream input = getAssets().open("build-info.json")) {
+        qualityBuild = new JSONObject(new String(input.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8))
+            .optString("buildId", "unknown");
+      } catch (Exception ignored) { qualityBuild = "unknown"; }
+    }
     android.util.DisplayMetrics m = displayMetrics();
     return obj(
         "backgroundSessionId", backgroundRecovery == null ? "" : backgroundRecovery.sessionId,
         "backgroundPolicy", backgroundRecovery == null ? JSONObject.NULL : backgroundRecovery.policy(),
         "backgroundRecovery", backgroundRecovery == null || backgroundRecovery.recovery() == null
             ? JSONObject.NULL : backgroundRecovery.recovery(),
+        "qualityProbe",1,"qualityBuild",qualityBuild,
         "staging",1,"quic",quic.enabled?1:0,"bulk",1,"rtcVideo",1,"dualLink",
         true,
         "controlPrepare",
@@ -1214,6 +1224,7 @@ public class LinkService extends Service implements Wire.Listener {
       return link.info();
     }
     if (method.equals("linkPing")) return obj();
+    if (method.equals("qualityTransfer")) return qualityProbe.transfer(p,a);
     if (method.equals("inputReset")) {
       requireOwner(p);
       shell.request(obj("method", "release"));

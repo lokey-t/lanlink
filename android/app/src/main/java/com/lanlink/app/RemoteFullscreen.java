@@ -177,7 +177,7 @@ final class RemoteFullscreen implements AutoCloseable {
     if (closed || active) return;
     active = true;
     menuVisible = false;
-    dialog.setOnKeyListener((d, keyCode, event) -> {
+    if (Build.VERSION.SDK_INT < 33) dialog.setOnKeyListener((d, keyCode, event) -> {
       if (keyCode != KeyEvent.KEYCODE_BACK || !active) return false;
       if (event.getAction() == KeyEvent.ACTION_UP && !event.isCanceled()) handleBack();
       return true;
@@ -241,7 +241,7 @@ final class RemoteFullscreen implements AutoCloseable {
     }
     activity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
     if (Build.VERSION.SDK_INT >= 33) {
-      backCallback = () -> handleBack();
+      backCallback = Build.VERSION.SDK_INT >= 34 ? predictiveBack() : () -> handleBack();
       dialog.getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
           android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT, backCallback);
     }
@@ -273,6 +273,27 @@ final class RemoteFullscreen implements AutoCloseable {
   private void hideKeyboard() {
     activity.getSystemService(InputMethodManager.class).hideSoftInputFromWindow(keyboard.getWindowToken(), 0);
     keyboard.clearFocus();
+  }
+
+  @android.annotation.TargetApi(34)
+  private android.window.OnBackAnimationCallback predictiveBack() {
+    return new android.window.OnBackAnimationCallback() {
+      @Override public void onBackProgressed(android.window.BackEvent event) {
+        float scale = 1f - 0.06f * event.getProgress();
+        outer.setScaleX(scale);
+        outer.setScaleY(scale);
+      }
+      @Override public void onBackCancelled() { resetBackPreview(); }
+      @Override public void onBackInvoked() {
+        resetBackPreview();
+        handleBack();
+      }
+    };
+  }
+
+  private void resetBackPreview() {
+    outer.setScaleX(1f);
+    outer.setScaleY(1f);
   }
 
   /** System Back reveals the intermediate menu without putting a button over the stream. */
@@ -393,6 +414,7 @@ final class RemoteFullscreen implements AutoCloseable {
     menuVisible = false;
     endPresentationTransition();
     dialog.setOnKeyListener(null);
+    resetBackPreview();
     leftPad.cancelGesture(); rightPad.cancelGesture();
     hideKeyboard();
     viewport.setRemoteGestures(false, true, null, null);

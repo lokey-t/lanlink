@@ -37,3 +37,29 @@ test('broken delta automatically downloads full tree, failed full leaves origina
  globalThis.fetch=async()=>new Response('invalid');await assert.rejects(prepareUpdate({root,stage,target:'win32-x64',version:'0.3.0',manifest,releases}));assert.equal(await readFile(path.join(root,'app'),'utf8'),'old');
  }finally{globalThis.fetch=original;await rm(dir,{recursive:true,force:true});}
 });
+
+test('stable and beta use separate releases, and switching channels hides the old result', async () => {
+ const original = globalThis.fetch;
+ const manifestAsset = {name:'lanlink-update.json', browser_download_url:'https://example.com/manifest'};
+ const entry = (version, prerelease, draft=false) => ({tag_name:'v'+version, prerelease, draft, assets:[
+  {...manifestAsset, browser_download_url:manifestAsset.browser_download_url+'/'+version}
+ ]});
+ try {
+  globalThis.fetch = async url => {
+   const value = String(url);
+   const response = value.startsWith(manifestAsset.browser_download_url)
+    ? {format:1, version:value.split('/').at(-1)}
+    : value.endsWith('/latest') ? entry('99.1.0',false)
+    : [entry('99.4.0',true,true),entry('99.3.0',false),entry('99.2.0',true)];
+   return new Response(JSON.stringify(response));
+  };
+  const service = {config:{}};
+  const updater = new Updater(service);
+  assert.equal((await updater.check()).version,'99.1.0');
+  service.config.updateChannel = 'beta';
+  assert.equal(updater.state().phase,'idle');
+  assert.equal((await updater.check()).version,'99.2.0');
+  service.config.updateChannel = 'stable';
+  assert.equal(updater.state().phase,'idle');
+ } finally { globalThis.fetch = original; }
+});

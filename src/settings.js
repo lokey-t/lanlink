@@ -7,6 +7,9 @@ import {languageIds} from './language.js';
 export async function applySettings(service,a){
   const c=service.config,patch={};
   const choice=(key,values,message)=>{if(a[key]!==undefined){if(!values.includes(a[key]))throw Error(message);patch[key]=a[key];}};
+  choice('updateChannel',['stable','beta'],'请选择正式版或测试版更新通道');
+  if(patch.updateChannel!==undefined&&patch.updateChannel!==(c.updateChannel||'stable')&&service.updater?.canChangeChannel()===false)
+    throw Error('当前更新正在安装或已准备好，请完成后再切换通道');
   choice('theme',['system','dark','light'],'请选择跟随系统、深色或浅色主题');
   choice('language',languageIds,'请选择支持的界面语言');
   choice('switchMode',['dwell','hotkey'],'请选择有效的切换方式');

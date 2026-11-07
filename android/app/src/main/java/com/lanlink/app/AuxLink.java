@@ -50,7 +50,7 @@ final class AuxLink implements AutoCloseable, Wire.Listener {
           }
         }
         peer.send(Wire.obj("type", "response", "id", message.optString("id"), "result", Wire.obj()));
-      } else if (CONTROL.contains(method)) service.message(primary, message, peer);
+      } else if (method.equals("qualityTransfer") || CONTROL.contains(method)) service.message(primary, message, peer);
       else peer.send(Wire.obj("type", "response", "id", message.optString("id"), "error", "辅助通道不支持此操作"));
     } catch (Exception ignored) { close(); }
   }

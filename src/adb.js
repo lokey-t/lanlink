@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { access } from 'node:fs/promises';
+import { access, constants } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import os from 'node:os';
 import path from 'node:path';
@@ -21,10 +21,12 @@ export async function findAdb({ env = process.env, platform = process.platform, 
     platform === 'darwin' ? paths.join(home, 'Library', 'Android', 'sdk') : paths.join(home, 'Android', 'Sdk')];
   const candidates = [env.LANLINK_ADB, paths.join(root, 'runtime', 'platform-tools', name),
     ...sdkRoots.filter(Boolean).map(p => paths.join(p, 'platform-tools', name)),
+    // Finder and login launches do not inherit Homebrew's shell PATH.
+    ...(platform === 'darwin' ? ['/opt/homebrew/bin/adb', '/usr/local/bin/adb'] : []),
     ...(env.PATH || env.Path || '').split(platform === 'win32' ? ';' : ':').filter(Boolean).map(p => paths.join(p.replace(/^"|"$/g, ''), name))];
   for (const candidate of candidates.filter(Boolean)) {
     if (!paths.isAbsolute(candidate)) continue;
-    try { await exists(candidate); return candidate; } catch {}
+    try { await exists(candidate, platform === 'win32' ? constants.F_OK : constants.X_OK); return candidate; } catch {}
   }
   return null;
 }

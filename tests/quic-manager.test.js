@@ -19,6 +19,8 @@ test('QUIC manager uses Datagram for movement and keeps permission checks and re
   const pa=peer('b'),pb=peer('a');a.peers.set('b',pa);b.peers.set('a',pb);pa.lanRequest=(m)=>b.quic.offer(pb);pb.lanRequest=(m)=>a.quic.offer(pa);
   try{
     await a.quic.start();await b.quic.start();assert.equal(a.quic.enabled,true);assert.equal(b.quic.enabled,true);const accepted=once(b,'change');await a.quic.connect(pa);await accepted;assert.ok(pa.quicConn);assert.ok(pb.quicConn);
+    await a.quic.qualityPing(pa,800);
+    assert.deepEqual(calls,[], 'diagnostic Datagram must not inject mouse input');
     await pa.lanRequest('acquire',{});
     await pa.lanRequest('input',{kind:'relative',dx:14,dy:3});
     await pa.lanRequest('input',{kind:'button',button:0,down:true});

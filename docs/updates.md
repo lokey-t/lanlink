@@ -4,9 +4,15 @@ Windows、macOS 和 Android 默认自动检查正式版本，每 6 小时检查�
 
 Windows and macOS check stable releases at startup and every six hours. Android checks when returning to the foreground if six hours have elapsed. The local setting disables automatic checks; manual checks remain available.
 
+设置中的“更新通道”决定检查和下载哪个发行版。正式版通道只接受正式发行，测试版通道只接受公开的预发行版。切换通道后可手动检查；若已安装版本高于该通道的版本，更新器会保留当前版本。
+
+The update channel controls which releases can be checked and downloaded. Stable accepts stable releases and Beta accepts public prereleases. After changing the channel, check manually to look for an update immediately. The updater keeps the installed version when it is newer than the release on the selected channel.
+
 ## Release 资产
 
 在 GitHub `lokey-t/lanlink` 和 Gitee 同名仓库的 Release 上传**完全相同**的资产，tag 使用 `v版本号`。客户端先尝试 GitHub，再尝试 Gitee；下载按清单中的 SHA-256 和字节数校验。尚未上传更新清单的旧 Release 不会触发更新。
+
+发布测试版时，在镜像上都标为预发行版，并为每次构建使用独立的数字版本号，例如 `v0.92.0`。后续要让测试版用户升级到正式版时，正式版的数字版本号和 Android `versionCode` 均需更高。
 
 每个版本只有一个 `LanLink-版本-delta.json.gz`，同时包含所有已构建平台的增量数据；另上传 `lanlink-update.json` 和各平台全量资产。桌面全量资产为完整安装树的压缩清单，Android 全量资产为 APK。常规 ZIP/安装包可继续发布，更新器使用此脚本生成的 full 资产。
 

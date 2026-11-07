@@ -12,6 +12,9 @@ struct LocalAdbAuthorizationView:View {
             Button{serial=id}label:{HStack{Image(systemName:serial==id ? "largecircle.fill.circle":"circle");Text((d["model"] as? String ?? "Android")+" · "+id);Spacer();Text(L(ready ? "已就绪":d["status"] as? String == "device" ? "可授权":"等待 USB 调试"))}}.disabled(ready || d["status"] as? String != "device" || busy)
         }}}
         Text(Model.displayMessage(message)).font(.callout).foregroundStyle(.secondary)
+        if message.contains("Platform-Tools") {
+            Link(L("获取 Android SDK Platform-Tools"), destination: URL(string: "https://developer.android.com/tools/releases/platform-tools")!)
+        }
         HStack{Button(L("刷新设备")){Task{await refresh()}}.disabled(busy);Spacer();Button(L("为选中的手机授权")){Task{await authorize()}}.disabled(serial.isEmpty || busy)}
     }.buttonStyle(FlatButtonStyle()).task{await refresh()}}
 }
@@ -32,6 +35,9 @@ struct AdbAuthorizationView: View {
             Text(L("助手就绪后，同组其他电脑可直接使用，无需重复连接数据线。手机重启后，连接已信任的电脑恢复助手即可。系统 USB 调试信任按电脑分别保存，新电脑恢复助手时仍需手机确认。")).font(.callout).padding(16).background(Color.blue.opacity(0.06),in:RoundedRectangle(cornerRadius:14))
         }.frame(maxWidth:.infinity,alignment:.leading)}
         Text(Model.displayMessage(message)).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal:false,vertical:true)
+        if message.contains("Platform-Tools") {
+            Link(L("获取 Android SDK Platform-Tools"), destination: URL(string: "https://developer.android.com/tools/releases/platform-tools")!)
+        }
         HStack {if guide{Button(L("取消")){model.adbGuide?.window.close()}};Spacer();Button(L("检测连接")){Task{await scan()}}.disabled(busy);Button(L(busy ? "正在处理…":"连接")){Task{await connect()}}.disabled(busy || !connected)}
     }.buttonStyle(FlatButtonStyle()).task {while !Task.isCancelled {await scan();try? await Task.sleep(for:.seconds(6))}}}
 }

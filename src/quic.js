@@ -10,7 +10,7 @@ const notifyTypes=new Set(['clipboard','clipboard-record','clipboard-inventory',
 const wire=v=>Buffer.from(JSON.stringify(v)).toString('base64');
 const controlPriority=method=>controlMethods.has(method)||method==='linkPing'?0:127;
 export class QuicManager {
-  constructor(service){this.service=service;this.connections=new Map();this.offers=new Map();this.opening=new Set();this.videos=new Map();this.enabled=false;}
+  constructor(service){this.service=service;this.connections=new Map();this.offers=new Map();this.opening=new Set();this.videos=new Map();this.qualityPings=new Map();this.qualityReplies=new WeakMap();this.enabled=false;}
   async start(){if(this.service.options?.noQuic||!quicPath())return;try{this.native=new QuicNative();this.info=await this.native.start(path.join(this.service.dir,'quic'),this.service.options?.host?this.service.options.host+':0':'0.0.0.0:0');this.enabled=true;
     this.native.on('connected',e=>{const p=this.offers.get(e.owner);if(p)this.bind(p,e.conn);});
     this.native.on('request',e=>this.incoming(e).catch(error=>{if(process.env.LANLINK_QUIC_DEBUG)process.stderr.write('QUIC incoming failure: '+error.message+' conn '+e.conn+' known '+this.connections.has(e.conn)+'\n');this.native.call('close',{conn:e.conn}).catch(()=>{});}));
@@ -51,8 +51,34 @@ export class QuicManager {
       if(m.afterInput>p.inputRx){if(!p.heldMotion||m.seq>p.heldMotion.seq)p.heldMotion=m;return;}
     }
 const inputs=p.quicRx.accept(m);if(this.service.motionInputs)await this.service.motionInputs(p,inputs);else for(const input of inputs)await this.service.handle(p,'input',input);}
+  async qualityPing(peer, timeout) {
+    if (!this.valid(peer) || !peer.quicConn) throw Error('QUIC 连接已结束');
+    const conn=peer.quicConn, token=randomBytes(8).toString('hex');
+    let timer;
+    const reply=new Promise((resolve,reject) => {
+      timer=setTimeout(() => reject(Error('QUIC Datagram timeout')),timeout);
+      this.qualityPings.set(token,{conn,resolve});
+    });
+    try {
+      await Promise.all([reply,this.native.call('datagram',{conn,data:wire({qualityPing:token})},timeout)]);
+    } finally { clearTimeout(timer); this.qualityPings.delete(token); }
+  }
+  async qualityDatagram(peer, conn, value) {
+    if (typeof value.qualityAck === 'string') {
+      const pending=this.qualityPings.get(value.qualityAck);
+      if (pending?.conn === conn) pending.resolve();
+      return true;
+    }
+    if (typeof value.qualityPing !== 'string') return false;
+    const now=performance.now(), last=this.qualityReplies.get(peer);
+    if (/^[a-f0-9]{16}$/.test(value.qualityPing) && (last === undefined || now-last >= 40)) {
+      this.qualityReplies.set(peer,now);
+      await this.native.call('datagram',{conn,data:wire({qualityAck:value.qualityPing})},800);
+    }
+    return true;
+  }
   motion(e){return this.track(this.receiveMotion(e));}
-  async receiveMotion(e){const p=this.connections.get(e.conn);if(!p||!this.valid(p)||p.quicConn!==e.conn)return;const m=e.bytes?decodeMotion(e.bytes):JSON.parse(Buffer.from(e.data,'base64'));await this.inputQueue(p).request('input',{kind:m.kind,motion:m,conn:e.conn});}
+  async receiveMotion(e){const p=this.connections.get(e.conn);if(!p||!this.valid(p)||p.quicConn!==e.conn)return;const m=e.bytes?decodeMotion(e.bytes):JSON.parse(Buffer.from(e.data,'base64'));if(!e.bytes && (m?.qualityPing !== undefined || m?.qualityAck !== undefined) && await this.qualityDatagram(p,e.conn,m))return;await this.inputQueue(p).request('input',{kind:m.kind,motion:m,conn:e.conn});}
   incoming(e){return this.track(this.receiveRequest(e));}
   async receiveRequest(e){const p=this.connections.get(e.conn);if(!p||!this.valid(p)||p.quicConn!==e.conn){if(process.env.LANLINK_QUIC_DEBUG)process.stderr.write('QUIC rejected state '+JSON.stringify({conn:e.conn,current:p?.quicConn,enabled:this.enabled,closing:this.service.closing,changing:this.service.changingGroup,closed:p?.closed,primary:p&&this.service.peers.get(p.remote.id)===p,excluded:p&&this.service.group.excluded(p.remote.id)})+'\n');throw Error('QUIC 会话已结束');}const m=JSON.parse(Buffer.from(e.data,'base64'));let bytes;
     const run=async()=>{if(!this.valid(p)||p.quicConn!==e.conn)throw Error('设备连接已结束');const a={...m.args};
