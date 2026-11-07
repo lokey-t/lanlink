@@ -25,6 +25,7 @@ import org.json.*;
 public class LinkService extends Service implements Wire.Listener {
   public static volatile LinkService instance;
   StagingFiles staging;
+  final RuntimeLogs runtimeLogs = new RuntimeLogs();
   public volatile JSONObject remoteCursor;
   public volatile String cursorPeer;
   public final ConcurrentHashMap<String, Wire> peers = new ConcurrentHashMap<>();
@@ -41,7 +42,9 @@ public class LinkService extends Service implements Wire.Listener {
   GroupKeys group;
   final GroupLayout groupLayout = new GroupLayout(this);
   private EdgeGlow edgeGlow;
-  private final Set<String> pausedPeers = ConcurrentHashMap.newKeySet();
+  private long inboundGeneration;
+  private final Map<Wire,String> preparedInbound = new WeakHashMap<>();
+  private final Map<Wire,LinkedHashSet<String>> stoppedInbound = new WeakHashMap<>();
   public volatile String endedPeer;
   public volatile long endedAt;
   public String deviceId, name;
@@ -181,6 +184,7 @@ public class LinkService extends Service implements Wire.Listener {
   private volatile long ownerUntil;
   private String outgoingPending, outgoingViewer;
   private boolean outgoingCancelled, outgoingReleasing;
+  private String outgoingSession;
   private final Map<String, Long> screenViewers = new ConcurrentHashMap<>();
   private volatile boolean running;
   private ServerSocket server;
@@ -377,7 +381,6 @@ public class LinkService extends Service implements Wire.Listener {
 
   private void requireConsent(Wire p, String key) throws IOException {
     if (group != null && group.isDissolved()) throw new IOException("当前组已解散");
-    if (pausedPeers.contains(p.id)) throw new IOException("CONTROL_ENDED: 被控设备已结束控制，请重新请求");
     if (group != null && group.excluded(p.id) || peers.get(p.id) != p)
       throw new IOException("设备连接已结束");
     if (key.equals("clipboard") && canShareClipboard(p.id)) return;
@@ -400,7 +403,6 @@ public class LinkService extends Service implements Wire.Listener {
     if (!peers.containsKey(request.id)) throw new IOException("设备已断开");
     String saved = consent.decide(request.id, request.requestId, accepted, permissions);
     SharedPreferences.Editor decision = prefs.edit().putString("device_grants", saved);
-    if(accepted){pausedPeers.remove(request.id);decision.putStringSet("paused_peers",new HashSet<>(pausedPeers));}
     if (accepted && !rootEnabled())
       for (String k : new String[] {"input", "screen", "clipboard"})
         if (permissions.optBoolean(k)) decision.putBoolean("allow_" + k, true);
@@ -445,13 +447,14 @@ public class LinkService extends Service implements Wire.Listener {
 
   public void onCreate() {
     super.onCreate();
+    runtimeLogs.add("正在启动设备服务");
     Language.initialize(this);
     captureThread.start();
     captureHandler = new Handler(captureThread.getLooper());
     instance = this;
     prefs = getSharedPreferences("identity", MODE_PRIVATE);
     backgroundRecovery = new BackgroundRecovery(this);
-    pausedPeers.addAll(prefs.getStringSet("paused_peers", new HashSet<>()));
+    if (prefs.contains("paused_peers")) prefs.edit().remove("paused_peers").apply();
     consent = new DeviceConsent(prefs.getString("device_grants", "{}"));
     deviceId = prefs.getString("id", UUID.randomUUID().toString());
     token = prefs.getString("token", Wire.token());
@@ -720,8 +723,6 @@ public class LinkService extends Service implements Wire.Listener {
     for (Wire p : sockets) p.close();
     token = value;
     if (group != null) group.adopt(meta, value);
-    pausedPeers.clear();
-    prefs.edit().remove("paused_peers").apply();
     if (pairing != null) pairing.hide();
     consent.reset();
     prefs.edit().putString("token", value).remove("known_devices").remove("device_grants").apply();
@@ -763,6 +764,7 @@ public class LinkService extends Service implements Wire.Listener {
         pairing.start(true);
       } catch (Exception e) {
         status = "配对发现受限：" + e.getMessage();
+        runtimeLogs.add(status);
       }
       new Thread(
               () -> {
@@ -786,6 +788,7 @@ public class LinkService extends Service implements Wire.Listener {
       clock.scheduleAtFixedRate(this::announce, 0, 1, TimeUnit.SECONDS);
       clock.schedule(this::announce, 300, TimeUnit.MILLISECONDS);
       status = "已启动，可在设置中开启所需功能";
+      runtimeLogs.add(status);
       byte[] buffer = new byte[2048];
       while (running) {
         DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
@@ -826,7 +829,10 @@ public class LinkService extends Service implements Wire.Listener {
         }
       }
     } catch (Exception e) {
-      if (running) status = "自动发现受限，可手动连接：" + e.getMessage();
+      if (running) {
+        status = "自动发现受限，可手动连接：" + e.getMessage();
+        runtimeLogs.add(status);
+      }
     }
   }
 
@@ -861,6 +867,7 @@ public class LinkService extends Service implements Wire.Listener {
             attach(s, true);
           } catch (Exception e) {
             status = "连接失败：" + e.getMessage();
+            runtimeLogs.add(status);
           } finally {
             connecting.remove(key);
           }
@@ -904,12 +911,13 @@ public class LinkService extends Service implements Wire.Listener {
     } else peers.put(p.id, p);
     backgroundRecovery.connected(true);
     status = "已连接同组设备";
+    runtimeLogs.add("已建立加密连接 (" + p.id + ")");
     try{groupClipboard.inventory(p);JSONObject current=groupClipboard.latest();if(current!=null && canShareClipboard(p.id) && deviceId.equals(current.optString("source")))p.send(obj("type","clipboard","offer",current));}catch(Exception ignored){}
 
   }
 
   void offerInitialConsent(Wire peer) {
-    if (peers.get(peer.id) != peer || consent.hasGrant(peer.id) || pausedPeers.contains(peer.id))
+    if (peers.get(peer.id) != peer || consent.hasGrant(peer.id))
       return;
     try {
       consent.require(peer.id, peer.info.optString("name", "同组设备"), "input");
@@ -941,6 +949,7 @@ public class LinkService extends Service implements Wire.Listener {
       }
     }
     if (removed) {
+      runtimeLogs.add("同组设备连接已断开 (" + p.id + ")");
       if (staging != null) staging.disconnected(p.id);
       permissionNotice.removePeer(p.id);
       consent.disconnect(p.id);
@@ -1007,10 +1016,9 @@ public class LinkService extends Service implements Wire.Listener {
         return;
       }
       if (type.equals("control-ended")) {
-        // Android only initiates manual viewing/touchpad sessions. A tagged
-        // desktop edge-session end cannot belong to those sessions.
-        if (m.has("session")) return;
         synchronized (this) {
+          if (m.has("session") && (!m.optString("session").equals(outgoingSession)
+              || !p.id.equals(active) && !p.id.equals(outgoingPending))) return;
           endedPeer = p.id;
           endedAt = System.currentTimeMillis();
           // A remote end may arrive before acquire resolves; cancel the pending lease too.
@@ -1114,6 +1122,7 @@ public class LinkService extends Service implements Wire.Listener {
   JSONObject handle(Wire p, String method, JSONObject a) throws Exception {
     if (p.id == null || peers.get(p.id) != p || !p.matchesGroupToken(token)) throw new IOException("设备连接已结束");
     if (group != null && group.excluded(p.id)) throw new IOException("设备已移出组");
+    if (method.equals("runtime-logs")) return obj("logs", runtimeLogs.snapshot());
     if (method.equals("permission-guide-open") || method.equals("permission-toggle")) {
       String key = a.optString("permission");
       if (!Arrays.asList(DeviceConsent.KEYS).contains(key)) throw new IOException("此设备不支持该功能");
@@ -1290,21 +1299,23 @@ public class LinkService extends Service implements Wire.Listener {
         boolean ready = shell.healthy() && shell.lastInputError == null;
         return obj("ready", ready, "inputMode", capabilities().optString("inputMode"));
       case "prepare":
-      case "acquire":
+      case "acquire": {
+        String session = a.optString("edgeSession", null);
+        if (session != null && session.length() != 36) session = null;
+        final long generation;
         synchronized (this) {
+          generation = inboundGeneration;
+          checkInbound(generation,p,session);
           requireIncomingDirection();
           groupLayout.requireMaster(p.id, a.optBoolean("pointer", !a.optBoolean("screen")));
           if (owner != null && !owner.equals(p.id) && ownerUntil > System.currentTimeMillis())
             throw new IOException("CONTROL_CONFLICT: 本设备正在被另一台设备控制");
-        }
-        if (a.optBoolean("newSession") && pausedPeers.remove(p.id)) {
-          // Ending a session blocks retries, but does not revoke the saved grant.
-          prefs.edit().putStringSet("paused_peers", new HashSet<>(pausedPeers)).apply();
+          if (session != null) preparedInbound.put(p, session);
         }
         prepareControl(p, a.optBoolean("screen"), a.optBoolean("pointer", !a.optBoolean("screen")));
-        if (method.equals("prepare")) return obj("ready", true);
         synchronized (this) {
-          if (peers.get(p.id) != p) throw new IOException("设备连接已结束");
+          checkInbound(generation,p,session);
+          if (method.equals("prepare")) return obj("ready", true);
           requireIncomingDirection();
           groupLayout.requireMaster(p.id, a.optBoolean("pointer", !a.optBoolean("screen")));
           if (owner != null && !owner.equals(p.id) && ownerUntil > System.currentTimeMillis())
@@ -1315,23 +1326,19 @@ public class LinkService extends Service implements Wire.Listener {
           owner = p.id;
           ownerFallbackAccepted = a.optBoolean("fallbackAccepted");
           ownerPointer = pointerMode;
-          ownerEdgeSession=a.optString("edgeSession",null);if(ownerEdgeSession!=null && ownerEdgeSession.length()!=36)ownerEdgeSession=null;ownerGlowSeq=0;
+          ownerEdgeSession = session;
+          preparedInbound.remove(p);
+          ownerGlowSeq = 0;
           ownerNativePointer = false;
           ownerUntil = System.currentTimeMillis() + 4000;
-        }
-        if (ownerPointer) {
-          try {
-            ownerNativePointer =
-                shell.request(obj("method", "activatePointer")).optBoolean("nativePointer");
-          } catch (Exception ignored) {
-            ownerNativePointer = false;
-          }
-          if (!ownerNativePointer) {
-            synchronized (this) {
-              if (p.id.equals(owner)) owner = null;
+          if (ownerPointer) {
+            try { ownerNativePointer = shell.request(obj("method", "activatePointer")).optBoolean("nativePointer"); }
+            catch (Exception ignored) {}
+            if (!ownerNativePointer) {
+              owner = null;
+              releaseInput();
+              throw new IOException("系统虚拟键鼠暂不可用，请恢复 ADB / Root 助手后重试");
             }
-            releaseInput();
-            throw new IOException("系统虚拟键鼠暂不可用，请恢复 ADB / Root 助手后重试");
           }
         }
         main.post(
@@ -1342,10 +1349,12 @@ public class LinkService extends Service implements Wire.Listener {
             });
         clearEdgeGlow();
         return capabilities();
+      }
       case "release":
         synchronized (this) {
           if (peers.get(p.id) != p) throw new IOException("设备连接已结束");
-          if (p.id.equals(owner)) {
+          String session = a.optString("edgeSession", "");
+          if (p.id.equals(owner) && (session.isEmpty() || session.equals(ownerEdgeSession))) {
             boolean departing=a.has("edgeExit") && inboundEdge(p,a.optJSONObject("edgeExit"),true);
             owner = null;
             releaseInput(departing);
@@ -1389,14 +1398,17 @@ public class LinkService extends Service implements Wire.Listener {
         if (peers.get(p.id) != p) throw new IOException("设备连接已结束");
         screenViewers.remove(p.id);
         return obj();
-      case "screen":
+      case "screen": {
+        final long generation;
         if (privilegedScreenReady()) throw new IOException("ADB / Root 投屏使用 H.264 串流，请升级控制端并打开远程窗口");
         synchronized (this) {
           requireScreen(p);
+          generation = inboundGeneration;
           if (videoEncoder != null) throw new IOException("VIDEO_H264_REQUIRED: 当前屏幕正在使用 H.264 串流，请更新控制端并打开远程窗口");
           screenViewers.put(p.id, System.currentTimeMillis() + 4000);
         }
         VideoWire.Frame frame = latestVideoFrame();
+        synchronized (this) { checkInbound(generation,p,null); }
         if (frame == null) throw new IOException("手机正在准备屏幕画面，请稍后重试");
         return obj(
             "mime",
@@ -1407,6 +1419,7 @@ public class LinkService extends Service implements Wire.Listener {
             frame.width,
             "height",
             frame.height);
+      }
       case "clipboard-sync":
         if(!allowed("clipboard") || !canShareClipboard(p.id))throw new IOException("剪贴板共享未授权");groupClipboard.mergeInventory(p,a.optJSONArray("ids"));return obj("latest",groupClipboard.latest());
       case "clipboardGet":
@@ -1544,6 +1557,7 @@ public class LinkService extends Service implements Wire.Listener {
   private void control(String id, boolean newSession, boolean fallbackAccepted, boolean screen) throws Exception {
     Wire target = peer(id);
     String[] permissions = screen ? new String[]{"input", "screen"} : new String[]{"input"};
+    final String session = UUID.randomUUID().toString();
     synchronized (this) {
       requireOutgoingDirection();
       if (outgoingPending != null || outgoingReleasing)
@@ -1553,6 +1567,7 @@ public class LinkService extends Service implements Wire.Listener {
         throw new IOException("CONTROL_CONFLICT: 请先结束当前控制");
       }
       outgoingPending = id;
+      outgoingSession = session;
       outgoingCancelled = false;
     }
     boolean acquired = false;
@@ -1566,11 +1581,11 @@ public class LinkService extends Service implements Wire.Listener {
       }
       JSONObject capability = target.info.optJSONObject("capabilities");
       if (capability != null && capability.optBoolean("controlPrepare"))
-        target.request("prepare", obj("newSession", newSession, "screen", screen));
+        target.request("prepare", obj("newSession", newSession, "screen", screen, "edgeSession", session));
       JSONObject caps =
           target.request(
               "acquire",
-              obj("newSession", newSession, "fallbackAccepted", fallbackAccepted, "screen", screen));
+              obj("newSession", newSession, "fallbackAccepted", fallbackAccepted, "screen", screen, "edgeSession", session));
       acquired = true;
       synchronized (this) {
         if (outgoingCancelled || peers.get(id) != target)
@@ -1585,30 +1600,34 @@ public class LinkService extends Service implements Wire.Listener {
       }
       if (cancel)
         try {
-          target.request("release", obj());
+          target.request("release", obj("edgeSession", session));
         } catch (Exception ignored) {
         }
       synchronized (this) {
         outgoingPending = null;
         outgoingCancelled = false;
+        if (active == null) outgoingSession = null;
       }
     }
   }
 
   public void releaseControl() {
     final Wire target;
+    final String session;
     synchronized (this) {
       String id = active;
       target = id == null ? null : peers.get(id);
       active = null;
+      session = outgoingSession;
       if (outgoingPending != null) outgoingCancelled = true;
+      else outgoingSession = null;
       if (target != null) outgoingReleasing = true;
     }
     if (target != null)
       jobs.execute(
           () -> {
             try {
-              target.request("release", obj());
+              target.request("release", session == null ? obj() : obj("edgeSession", session));
             } catch (Exception ignored) {
             } finally {
               synchronized (LinkService.this) {
@@ -2033,6 +2052,7 @@ public class LinkService extends Service implements Wire.Listener {
             full.recycle();
           } catch (Exception e) {
             status = "捕获失败：" + e.getMessage();
+            runtimeLogs.add(status);
           }
         },
         captureHandler);
@@ -2127,25 +2147,51 @@ public class LinkService extends Service implements Wire.Listener {
     }); } catch (RejectedExecutionException ignored) {}
   }
 
-  public void stopInbound() {
-    Set<String> ids = new HashSet<>();
-    if (owner != null) ids.add(owner);
-    ids.addAll(openingVideoHosts.keySet());
-    for (VideoHost stream : videoHosts.values()) if (!stream.closed) ids.add(stream.peer.id);
-    ids.addAll(screenViewers.keySet());
-    screenViewers.clear();
-    for (String id : ids) {
-      pausedPeers.add(id);
-      Wire p = peers.get(id);
-      try {
-        if (p != null) p.send(obj("type", "control-ended"));
-      } catch (Exception ignored) {
-      }
+  private void checkInbound(long generation, Wire peer, String session) throws IOException {
+    if (peers.get(peer.id) != peer || !peer.matchesGroupToken(token))
+      throw new IOException("设备连接已结束");
+    Set<String> ended = stoppedInbound.get(peer);
+    if (generation != inboundGeneration || session != null && ended != null && ended.contains(session)) {
+      if (owner == null) releaseInput();
+      throw new IOException("CONTROL_ENDED: 被控设备已结束本次控制");
     }
-    prefs.edit().putStringSet("paused_peers", new HashSet<>(pausedPeers)).apply();
-    closeVideoHosts();
-    owner = null;
-    releaseInput();
+  }
+
+  public void stopInbound() {
+    final List<VideoHost> streams;
+    final Map<Wire,JSONObject> notices = new HashMap<>();
+    synchronized (this) {
+      inboundGeneration++;
+      Set<String> viewers = new HashSet<>(openingVideoHosts.keySet());
+      for (VideoHost stream : videoHosts.values()) if (!stream.closed) viewers.add(stream.peer.id);
+      viewers.addAll(screenViewers.keySet());
+      streams = new ArrayList<>(videoHosts.values());
+      openingVideoHosts.clear();
+      videoHosts.clear();
+      screenViewers.clear();
+      for (Wire peer : peers.values()) {
+        String current = peer.id.equals(owner) ? ownerEdgeSession : null;
+        String prepared = preparedInbound.remove(peer);
+        if (current != null || prepared != null) {
+          LinkedHashSet<String> ended = stoppedInbound.computeIfAbsent(peer, ignored -> new LinkedHashSet<>());
+          if (current != null) ended.add(current);
+          if (prepared != null) ended.add(prepared);
+          while (ended.size() > 16) { Iterator<String> it = ended.iterator(); it.next(); it.remove(); }
+        }
+        if (peer.id.equals(owner) || viewers.contains(peer.id) || prepared != null) {
+          String session = current != null ? current : prepared;
+          notices.put(peer, session != null && !viewers.contains(peer.id)
+              ? obj("type", "control-ended", "session", session) : obj("type", "control-ended"));
+        }
+      }
+      owner = null;
+      ownerEdgeSession = null;
+      releaseInput();
+    }
+    for (Map.Entry<Wire,JSONObject> notice : notices.entrySet()) {
+      try { notice.getKey().send(notice.getValue()); } catch (Exception ignored) {}
+    }
+    for (VideoHost stream : streams) stream.close();
     status = "已结束桌面控制";
   }
 

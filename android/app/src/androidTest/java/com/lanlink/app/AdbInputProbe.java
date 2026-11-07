@@ -354,6 +354,13 @@ final class AdbInputProbe {
                     return;
                   }
                   if ("request".equals(m.optString("type"))
+                      && "testStopInbound".equals(m.optString("method"))) {
+                    service.stopInbound();
+                    try { p.send(Wire.obj("type", "response", "id", m.optString("id"), "result", Wire.obj())); }
+                    catch (Exception error) { failure[0] = error.toString(); }
+                    return;
+                  }
+                  if ("request".equals(m.optString("type"))
                       && "testDone".equals(m.optString("method"))) {
                     try {
                       if (!service.shell.healthy())

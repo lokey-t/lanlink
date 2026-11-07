@@ -36,6 +36,28 @@ export function layoutEdges(service,id=service.config.id,positions=layoutSelecti
   for(const [target,point]of Object.entries(positions))if(target!==id&&!service.group.excluded(target))for(const [edge,delta]of Object.entries(layoutDirections))if(point.x===origin.x+delta.x&&point.y===origin.y+delta.y)edges[edge]=target;
   return edges;
 }
+// Runtime routes may pass through a contiguous run of offline devices, but an
+// empty cell still ends the route. The stored layout remains unchanged.
+export function reachableLayoutEdges(service,id=service.config.id) {
+  const online = target => {
+    if(target===service.config.id)return true;
+    const peer=service.peers.get(target);
+    return !!peer && service.currentPeer(peer);
+  };
+  const {positions}=layoutSelection(service),origin=positions[id];
+  if(!origin)return Object.fromEntries(Object.entries(layoutEdges(service,id)).filter(([,target])=>online(target)));
+  const cells=new Map(Object.entries(positions).filter(([target])=>!service.group.excluded(target))
+    .map(([target,{x,y}])=>[`${x},${y}`,target]));
+  const edges={};
+  for(const [edge,delta] of Object.entries(layoutDirections)) {
+    let x=origin.x+delta.x,y=origin.y+delta.y,target;
+    while((target=cells.get(`${x},${y}`))) {
+      if(online(target)) { edges[edge]=target; break; }
+      x+=delta.x;y+=delta.y;
+    }
+  }
+  return edges;
+}
 export function legacyPositions(service,edges,base=layoutSelection(service).positions,anchor=service.config.id){
   const positions=structuredClone(base),known=new Set(layoutDevices(service).map(device=>device.id));
   if(!known.has(anchor))anchor=service.config.id;

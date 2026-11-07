@@ -17,12 +17,16 @@ try{
   const videoEndpoint=service.links.videoEndpoint.bind(service.links);service.links.videoEndpoint=async(p,info)=>{if(p!==peer)return videoEndpoint(p,info);const port=Number((await run(['forward','tcp:0','tcp:'+info.port])).stdout.trim());return {host:'127.0.0.1',info:{...info,port},close:()=>run(['forward','--remove','tcp:'+port]).catch(()=>{})};};
   const step=(step,args={})=>(peer.tcpRequest||peer.lanRequest||peer.request.bind(peer))('testStaging',{step,...args},25000),rows=async()=>(await step('status')).files;
   await step('ui');
+  const stoppedSession=randomUUID();
+  await step('stop-control',{session:stoppedSession});
+  await assert.rejects(peer.request('prepare',{pointer:false,edgeSession:stoppedSession}),/CONTROL_ENDED/);
+  await assert.rejects(peer.request('prepare',{pointer:false,edgeSession:randomUUID()}),/CONSENT_DENIED/);
   const file=path.join(dir,'电脑发送.txt'),bytes=Buffer.alloc(510001,72);await writeFile(file,bytes);
   const folder=path.join(dir,'资料文件夹');await mkdir(path.join(folder,'空文件夹'),{recursive:true});await mkdir(path.join(folder,'子目录'));await writeFile(path.join(folder,'子目录','内容.txt'),'电脑 → 手机文件夹');
   await service.staging.share(peer.remote.id,[file,folder]);await until(async()=>{const r=await rows();return r.length===2&&r.every(f=>f.state==='ready');});let received=await rows();assert.equal(received.find(r=>r.name==='电脑发送.txt').files[0].sha256,hash(bytes));assert.equal(received.find(r=>r.type==='folder').files[0].sha256,hash(Buffer.from('电脑 → 手机文件夹')));
   const status=await step('status');assert.equal(status.owner,null);assert.equal(service.active,null);await step('ui');
   const single=received.find(r=>r.type==='file');await step('delete-protection',{id:single.id});await step('save-failure',{id:single.id});assert.equal((await rows()).length,2);const saved=await step('save',{id:single.id});assert.equal(saved.sha256,hash(bytes));assert.equal((await rows()).length,1);assert.deepEqual(await readFile(file),bytes);
-  console.log('PASS: desktop → Android file/folder reliable transfer, provider read, failed-save retention, successful-save cleanup without input control.');
+  console.log('PASS: desktop → Android file/folder reliable transfer, provider read, failed-save retention, successful-save cleanup after stopping remote control.');
   const pending=path.join(dir,'待传输.txt');await writeFile(pending,'metadata only');let reads=0;const original=service.fileBytes.bind(service);service.fileBytes=async(...a)=>{reads++;return original(...a);};let session=randomUUID();await service.staging.share(peer.remote.id,[pending],false,session);assert.equal(reads,0);assert.ok((await rows()).some(r=>r.state==='pending'));const reloaded=await step('reload');assert.equal(reloaded.files.filter(r=>r.state==='pending').length,0);await rm(pending);await step('poll');await until(async()=>!(await rows()).some(r=>r.state==='pending'));
   await writeFile(pending,'mouse session');session=randomUUID();await service.staging.share(peer.remote.id,[pending],false,session);service.staging.end(session);await until(async()=>!(await rows()).some(r=>r.state==='pending'));
   await service.staging.share(peer.remote.id,[pending],false,randomUUID());const entry=(await rows()).find(r=>r.state==='pending');await step('accept-notification',{id:entry.id});await until(async()=>(await rows()).find(r=>r.id===entry.id)?.state==='ready');

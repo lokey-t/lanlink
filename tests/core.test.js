@@ -66,7 +66,26 @@ test('offline identity persists and rejects malformed / noncanonical tokens', as
   for (const bad of ['', '123456', 'lanlink1:password', 'lanlink1:' + 'A'.repeat(42) + 'B']) assert.throws(() => parseToken(bad));
 });
 
-test('target termination blocks retries while retaining grants for a new explicit session', async t => {
+test('ending remote control leaves independently authorized file transfers available',async t=>{
+  const {a,b,folder}=await pair(t);
+  await a.switchTo(b.config.id,'right',false,true);
+  const endedSession=a.activeSession.edgeSession;
+  await b.stopInbound();
+  await until(()=>!a.active);
+  const peer=a.getPeer(b.config.id);
+  await assert.rejects(peer.request('prepare',{pointer:false,edgeSession:endedSession}),/CONTROL_ENDED/);
+  const file=path.join(folder,'after-control.txt');
+  await writeFile(file,'independent file sharing');
+  await a.staging.share(b.config.id,[file]);
+  await until(()=>b.staging.list()[0]?.state==='ready');
+  const received=await b.staging.ready(b.staging.list()[0].id);
+  assert.equal(await readFile(received.path,'utf8'),'independent file sharing');
+  await b.settings({permissions:{clipboard:false}});
+  await assert.rejects(a.staging.share(b.config.id,[file]),/未允许|未授权|PERMISSION_REQUIRED/);
+  assert.equal(b.config.pausedPeers,undefined);
+});
+
+test('target termination rejects only the ended session and permits the next automatic session', async t => {
   const {a,b}=await pair(t,{input:false,screen:false,clipboard:false,shutdown:false},false);
   const p=a.getPeer(b.config.id);
   await assert.rejects(p.request('acquire'),/PERMISSION_REQUIRED/);
@@ -77,12 +96,22 @@ test('target termination blocks retries while retaining grants for a new explici
   await p.request('permission-request', {permissions:['input','screen']});
   await b.decideConsent({...b.state().consentRequests[0],accepted:true,permissions:{input:true,screen:true,clipboard:false,shutdown:false}});
   assert.deepEqual(b.config.permissions,{input:true,screen:true,clipboard:false,shutdown:false});
-  await a.switchTo(b.config.id,'right',false,true); await p.request('input',{kind:'relative',dx:30,dy:-12});
+  await a.switchTo(b.config.id,'right',false,true); const oldSession=a.activeSession.edgeSession; await p.request('input',{kind:'relative',dx:30,dy:-12});
   await b.stopInbound(); await until(()=>a.controlEnded?.id===b.config.id&&!a.active);
   assert.equal(b.owner,null); assert.ok(b.native.calls.some(c=>c.method==='release'));
-  for(const method of ['acquire','screen','videoOpen']) await assert.rejects(p.request(method),/CONTROL_ENDED/);
+  for(const method of ['prepare','acquire']) await assert.rejects(p.request(method,{edgeSession:oldSession}),/CONTROL_ENDED/);
+  await assert.rejects(p.request('keepControl'),/控制权/);
+  assert.equal((await p.request('screen')).data,'fixture');
+  await p.request('screenStop');
   const report=await p.request('permission-status');assert.equal(report.permissions.input.peerAllowed,true);assert.equal(report.permissions.clipboard.peerAllowed,false);
-  await p.request('acquire',{newSession:true}); assert.equal(b.owner.id,a.config.id);
+  await until(()=>!a.returning);
+  await a.switchTo(b.config.id,'right',false);
+  assert.equal(b.owner.id,a.config.id);
+  assert.notEqual(b.owner.edgeSession,oldSession);
+  await p.request('release',{edgeSession:oldSession});
+  assert.equal(b.owner.edgeSession,a.activeSession.edgeSession);
+  await a.message(p,{type:'control-ended',session:oldSession});
+  assert.equal(a.active,b.config.id);
   assert.equal(b.state().consentRequests.length,0);
   assert.equal((await loadConfig(b.dir)).deviceGrants[a.config.id].input,true);
   await assert.rejects(p.request('clipboardGet'),/CONSENT_DENIED/);
@@ -260,6 +289,46 @@ test('local console rejects missing bearer and cross-origin requests', async t =
   assert.equal((await fetch(base + '/api/state', { headers: { 'X-LanLink-Token': ui.token, Origin: 'http://evil.invalid' } })).status, 403);
   const r = await fetch(base + '/api/state', { headers: { 'X-LanLink-Token': ui.token } }); assert.equal(r.status, 200); assert.equal((await r.json()).name, 'A');
   const page = await fetch(base); assert.match(await page.text(), /LanLink/); assert.match(page.headers.get('content-security-policy'), /frame-ancestors 'none'/);
+});
+
+test('group log export merges the latest 100 entries per device and reports offline members', async t => {
+  const { a, b } = await pair(t);
+  a.log('local-entry');
+  for (let i = 0; i < 101; i++) b.log('remote-entry-' + i + ';');
+
+  const ui = await startUI(a, 0);
+  t.after(() => new Promise(resolve => ui.server.close(resolve)));
+  const endpoint = ui.url.split('/#')[0] + '/api/logs-export';
+  assert.equal((await fetch(endpoint, { method: 'POST' })).status, 401);
+  const exportGroup = async () => {
+    const response = await fetch(endpoint, { method: 'POST', headers: { 'X-LanLink-Token': ui.token } });
+    assert.equal(response.status, 200);
+    return response.json();
+  };
+
+  const complete = await exportGroup();
+  assert.equal(complete.incomplete, false);
+  assert.match(complete.name, /^LanLink-logs-.*\.txt$/);
+  assert.match(complete.text, /local-entry/);
+  assert.match(complete.text, /remote-entry-100;/);
+  assert.doesNotMatch(complete.text, /remote-entry-0;/);
+  assert.equal(complete.text.match(/remote-entry-/g).length, 100);
+
+  const handle = b.handle.bind(b);
+  b.handle = (peer, method, args) => {
+    if (method === 'runtime-logs') throw Error('Unsupported operation');
+    return handle(peer, method, args);
+  };
+  const unsupported = await exportGroup();
+  assert.equal(unsupported.incomplete, true);
+  assert.match(unsupported.text, /=== B .* ===\nLogs unavailable/);
+  assert.match(unsupported.text, /local-entry/);
+
+  a.getPeer(b.config.id).close();
+  await until(() => !a.peers.has(b.config.id));
+  const partial = await exportGroup();
+  assert.equal(partial.incomplete, true);
+  assert.match(partial.text, /=== B .* ===\nOffline/);
 });
 
 test('zero dwell switches on the first eligible edge sample; leaving cancels progress', () => {

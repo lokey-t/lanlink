@@ -8,6 +8,15 @@
 This file preserves the original release notes in Chinese, with same-version addenda grouped together.
 Historical entries describe their version at the time. For current behavior, permission defaults, build instructions, and validation scope, use the READMEs and the latest validation reports.
 
+## 0.91.1 · 组内日志与连接质量 / Group logs and connection quality
+
+- 设置新增「导出日志」。并行收集本机和在线同组设备各自最近 100 条运行日志，合并后另存为文本文件，并标明未能收集的设备。
+- Export logs from Settings to save one text file with up to 100 recent activity entries per device. The report identifies devices whose logs could not be collected.
+- 新增连接质量分析，显示延迟、抖动及探测超时情况。安卓首页改用红色本机图标提示未就绪，点按图标可打开授权教程。
+- 修复远控会话结束后的消息串扰、离线设备切换路径和拖放暂存问题。
+- Added connection quality diagnostics and an Android home-screen setup guide accessible from the red local-device icon.
+- Fixed interference from ended control sessions, offline-device switching paths, and drag-and-drop staging issues.
+
 ## 0.91.0 · 三端更新与分发 / Updates and distribution
 
 - 三端自动检测版本更新，可在设置中关闭或手动检查；GitHub / Gitee Release 镜像。

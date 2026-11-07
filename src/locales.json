@@ -1066,6 +1066,30 @@
       "it": "Altro",
       "ru": "Прочее"
     },
+    "导出日志": {
+      "en": "Export logs",
+      "zh-Hant": "匯出日誌"
+    },
+    "文本文件": {
+      "en": "Text files",
+      "zh-Hant": "文字檔案"
+    },
+    "日志已保存": {
+      "en": "Logs saved",
+      "zh-Hant": "日誌已儲存"
+    },
+    "日志已保存，部分设备的日志未能收集": {
+      "en": "Logs saved. Some devices' logs could not be collected.",
+      "zh-Hant": "日誌已儲存，部分裝置的日誌未能收集"
+    },
+    "组已发生变化，请重新导出日志": {
+      "en": "The device group changed. Export the logs again.",
+      "zh-Hant": "裝置群組已變更，請重新匯出日誌"
+    },
+    "收集组内设备的运行日志并另存为文本文件": {
+      "en": "Collect activity logs from group devices and save them to a text file",
+      "zh-Hant": "收集群組內裝置的執行記錄並另存為文字檔案"
+    },
     "运行日志": {
       "en": "Activity log",
       "zh-Hant": "執行記錄",

@@ -231,9 +231,10 @@ struct StagedDragOut:NSViewRepresentable {
     init(_ model:Model) { self.model=model;visibility=Timer(timeInterval:0.04,repeats:true){[weak self] _ in Task{@MainActor in guard let self else{return};for panel in self.panels {panel.ignoresMouseEvents=NSEvent.pressedMouseButtons&1==0}}};RunLoop.main.add(visibility!,forMode:.common) }
     func stop() { signature = ""; for panel in panels { panel.close() }; panels = [] }
     func update() {
-        guard let model else { return };let next=model.serviceReady && model.isMaster && (model.state["active"] as? String ?? "").isEmpty ? model.edges.sorted { $0.key<$1.key }.map { $0.key+":"+$0.value }.joined(separator:"|"):""
+        guard let model else { return };let edges=model.state["reachableEdges"] as? [String:String] ?? model.edges
+        let next=model.serviceReady && model.isMaster && (model.state["active"] as? String ?? "").isEmpty ? edges.sorted { $0.key<$1.key }.map { $0.key+":"+$0.value }.joined(separator:"|"):""
         guard next != signature else { return };signature=next;for panel in panels { panel.close() };panels=[];guard !next.isEmpty else { return }
-        for screen in NSScreen.screens { for (edge,id) in model.edges where !id.isEmpty {
+        for screen in NSScreen.screens { for (edge,id) in edges where !id.isEmpty {
             var frame=screen.frame;switch edge {case "left":frame.size.width=4;case "right":frame.origin.x=frame.maxX-4;frame.size.width=4;case "top":frame.origin.y=frame.maxY-4;frame.size.height=4;case "bottom":frame.size.height=4;default:continue}
             let panel=NSPanel(contentRect:frame,styleMask:[.borderless,.nonactivatingPanel],backing:.buffered,defer:false);panel.level = .statusBar;panel.isOpaque=false;panel.backgroundColor=NSColor.black.withAlphaComponent(0.005);panel.hasShadow=false;panel.ignoresMouseEvents=true;panel.collectionBehavior=[.canJoinAllSpaces,.fullScreenAuxiliary];let view=FileEdgeTarget();view.model=model;view.edge=edge;view.id=id;panel.contentView=view;panel.orderFrontRegardless();panels.append(panel)
         } }

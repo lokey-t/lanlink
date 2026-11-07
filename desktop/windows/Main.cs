@@ -957,7 +957,24 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
         log.Visibility = log.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible; log.Children.Clear();
         foreach (var item in Json.Get(State, "logs") as IEnumerable ?? new object[0]) { var line = Text(Json.Text(item, "message"), 12, "#71819A"); line.TextWrapping = TextWrapping.Wrap; line.Margin = new Thickness(0, 5, 0, 5); log.Children.Add(line); }
         if (log.Children.Count == 0) log.Children.Add(LText("暂无运行记录", 12, "#8B97AB"));
-      }); logs.Margin = new Thickness(0, 0, 10, 0); actions.Children.Add(logs); actions.Children.Add(LButton("重启设备服务",()=>Run(RestartService))); actions.Children.Add(LButton("退出应用", () => Run(() => Quit(0)))); tools.Children.Add(actions); tools.Children.Add(log); sections.Children.Add(SettingsCard("其他", tools));
+      }); logs.Margin = new Thickness(0, 0, 10, 0); actions.Children.Add(logs); actions.Children.Add(LButton("重启设备服务",()=>Run(RestartService))); actions.Children.Add(LButton("退出应用", () => Run(() => Quit(0)))); tools.Children.Add(actions);
+      Button exportLogs = null;
+      exportLogs = LButton("导出日志", () => Run(async () => {
+        exportLogs.IsEnabled = false;
+        try {
+          var result = await Client.Call("logs-export");
+          var picker = new Microsoft.Win32.SaveFileDialog {
+            Title = Locale.T("导出日志"), FileName = Json.Text(result, "name"),
+            Filter = Locale.T("文本文件") + " (*.txt)|*.txt", DefaultExt = ".txt"
+          };
+          if (picker.ShowDialog(this) != true) return;
+          File.WriteAllText(picker.FileName, Json.Text(result, "text"), System.Text.Encoding.UTF8);
+          NotifyTransient(Locale.T(Json.Flag(result, "incomplete") ? "日志已保存，部分设备的日志未能收集" : "日志已保存"));
+        } finally { exportLogs.IsEnabled = true; }
+      }));
+      exportLogs.HorizontalAlignment = HorizontalAlignment.Left;
+      exportLogs.Margin = new Thickness(0, 10, 0, 0);
+      tools.Children.Add(exportLogs); tools.Children.Add(log); sections.Children.Add(SettingsCard("其他", tools));
       var scroll = new ScrollViewer { Content = sections, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled }; Grid.SetRow(scroll, 1); settingsPage.Children.Add(scroll);
       settingsStatus = Text("", 12, "#71819A"); settingsStatus.TextWrapping = TextWrapping.Wrap; settingsStatus.Margin = new Thickness(4, 14, 4, 8); Grid.SetRow(settingsStatus, 2); settingsPage.Children.Add(settingsStatus);
     }

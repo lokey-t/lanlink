@@ -234,6 +234,19 @@ try {
     await service.returnLocal();
     console.log('PASS: cable channel removal falls back to LAN without reconnecting the device.');
   }
+  await service.switchTo(id,'right',false);
+  const stoppedSession=service.activeSession.edgeSession;
+  await testRequest('testStopInbound');
+  for(let i=0;i<40&&(service.active||service.returning);i++)await new Promise(resolve=>setTimeout(resolve,50));
+  if(service.active||service.returning)throw Error('Android did not end the active control session');
+  let staleRejected=false;
+  try{await peer.request('acquire',{edgeSession:stoppedSession});}catch(error){staleRejected=error.message.startsWith('CONTROL_ENDED:');}
+  if(!staleRejected)throw Error('Android accepted an acquire for the stopped session');
+  await service.switchTo(id,'right',false);
+  await peer.request('release',{edgeSession:stoppedSession});
+  await peer.request('keepControl');
+  await service.returnLocal();
+  console.log('PASS: Android stops only the current lease; a new session starts normally and ignores an old release.');
   await testRequest('testDone');
   const report = await instrument;
   if (report.failed || !/PASS: encrypted ADB bootstrap/.test(report.output) || /FAIL|Exception|INSTRUMENTATION_FAILED/.test(report.output)) throw Error('Android ADB instrumentation did not pass');

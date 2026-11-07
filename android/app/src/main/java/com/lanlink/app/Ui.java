@@ -263,6 +263,12 @@ final class Ui {
           rect(c, 6, 2, 18, 22, 2.4f);
           line(c, 10, 19, 14, 19);
           break;
+        case "phone-not-ready":
+          rect(c, 4, 2, 16, 22, 2.4f);
+          line(c, 8, 19, 12, 19);
+          line(c, 18, 17, 23, 22);
+          line(c, 23, 17, 18, 22);
+          break;
         case "laptop":
           rect(c, 4, 4, 20, 17, 1.5f);
           line(c, 2, 20, 22, 20);

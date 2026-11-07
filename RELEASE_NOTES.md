@@ -1,27 +1,23 @@
-# LanLink v0.91.0
+# LanLink v0.91.1
 
 [简体中文 README](README.md) · [English README](README.en.md)
 
 ## 中文
 
-局域网内的 Windows、Mac 和 Android 共用键鼠、远程画面、剪贴板与文件暂存，无需账号。支持组内共享设备布局、手机触控板、逐设备权限与可选 USB 辅助通道。
+Windows、macOS 和 Android 的设置中新增「导出日志」。每台设备保留本次运行最近 100 条记录。导出时并行收集本机与在线同组设备的日志，按设备合并为一个 UTF-8 文本文件。文件会标明离线、未响应或版本不支持的设备。
 
-- 新增自动检测更新、设置开关与手动检查，使用 GitHub / Gitee Release。
-- 每个版本一个通用增量包；基础版本不匹配、补丁缺失、校验或合成失败时回退全量下载。
-- Windows 提供便携 ZIP 和当前用户安装 EXE；macOS 提供 Apple Silicon DMG；Android 提供 APK。
-- 桌面在退出后替换安装目录，保留旧目录；Android 更新由系统安装器确认。
-- 中英 README 包含功能、使用方式、同类工具比较、技术栈、目录结构和平台下载入口。
+- 新增连接质量分析，可检查组内设备的往返延迟、抖动和探测超时情况。
+- 安卓首页在本机未就绪时显示红色状态和带叉号的手机图标。点击图标即可在首页打开授权教程。
+- 修复结束远程控制后，迟到的旧会话消息可能影响新会话的问题，并修正离线设备的切换路径及拖放暂存行为。
 
-系统要求：Windows 10/11 x64、.NET Framework 4.8；macOS 14+ arm64；Android 10+。Mac 为 ad-hoc 签名，未公证。Android 沿用此前开发包签名以支持覆盖更新，尚未配置独立生产签名。首次从不带更新功能的旧版升级，请手动下载完整包。
+Android 发行包使用正式版证书签名。使用旧证书的 v0.91.0 无法覆盖安装，请先保留需要的应用数据，再卸载旧版并安装新版。macOS 安装包适用于 Apple Silicon，应用使用临时签名，未经过 Apple 公证。
 
 ## English
 
-Share keyboard/mouse input, remote screens, clipboard and staged files among Windows, Mac and Android devices on a LAN, without an account. Includes shared device layout, a phone touchpad, per-device permissions and an optional USB helper path.
+Export Logs is available in Settings on Windows, macOS, and Android. Each device retains up to 100 activity entries from the current run. Export collects available logs from the local device and online group members in parallel and groups them by device in one UTF-8 text file. The report identifies devices that were offline, did not respond, or did not support log export.
 
-- Automatic update checks, a local opt-out and manual checking through GitHub / Gitee Releases.
-- One combined delta per version; unsupported bases, missing patches and verification or reconstruction failures fall back to full downloads.
-- Windows portable ZIP and per-user setup EXE, Apple Silicon macOS DMG, and Android APK.
-- Desktop installation occurs after exit and retains the old directory; Android requires system installation confirmation.
-- Bilingual READMEs cover features, usage, comparisons, technology, source layout and platform downloads.
+- Connection quality analysis reports round-trip latency, jitter, and probe timeouts for group devices.
+- When the local Android device is unready, the home screen shows a red status and a phone icon with a red cross. Tap the icon to open the setup guide.
+- Fixed late messages from ended remote-control sessions affecting newer sessions, and corrected offline-device switching paths and drag-and-drop staging behavior.
 
-Requirements: Windows 10/11 x64 with .NET Framework 4.8; macOS 14+ arm64; Android 10+. Mac builds are ad-hoc signed and not notarized. The APK retains the previous development signing identity for in-place upgrades; a separate production signer is not configured. Clients without an updater require a manual first upgrade.
+The Android release APK uses the production signing certificate. Installations of v0.91.0 signed with the previous certificate require a fresh install. Preserve any app data you need before uninstalling. The macOS package supports Apple Silicon and uses an ad-hoc signature without Apple notarization.

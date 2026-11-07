@@ -57,7 +57,26 @@ test('broken encrypted transport can reacquire saved consent and create a fresh 
   assert.equal((await a.videoViewer.next(id)).height,10);
   assert.equal(b.consent.list().length,0);
   await b.stopInbound();
-  await assert.rejects(a.getPeer(id).request('prepare',{screen:true}),/CONTROL_ENDED/);
+  assert.equal((await a.getPeer(id).request('prepare',{screen:true})).ready,true);
+});
+
+test('stop cancels an in-flight acquire and its prepared session without blocking the next one',async t=>{
+  const {a,b}=await pair(t),peer=a.getPeer(b.config.id);
+  const session=randomUUID(),next=randomUUID();
+  await peer.request('prepare',{edgeSession:session});
+  let entered,resume;
+  const started=new Promise(resolve=>{entered=resolve;});
+  const gate=new Promise(resolve=>{resume=resolve;});
+  const refresh=b.refreshCapabilities.bind(b);
+  b.refreshCapabilities=async()=>{entered();await gate;return refresh();};
+  const pending=assert.rejects(peer.request('acquire',{edgeSession:session}),/CONTROL_ENDED/);
+  try { await started;await b.stopInbound(); }
+  finally { resume(); }
+  await pending;
+  assert.equal(b.owner,null);
+  await assert.rejects(peer.request('acquire',{edgeSession:session}),/CONTROL_ENDED/);
+  await peer.request('acquire',{edgeSession:next});
+  assert.equal(b.owner.edgeSession,next);
 });
 
 test('simultaneous encrypted acquisition never creates a reciprocal control loop and can retry', async t => {
@@ -260,6 +279,28 @@ test('switch mode and delay stay local; modifier-gated edges switch without dwel
   assert.equal(b.owner,null);
   await assert.rejects(a.settings({dwell:-1}));await assert.rejects(a.settings({switchMode:'invalid'}));
   await assert.rejects(a.settings({edgeHotkey:'invalid'}));
+});
+
+test('an edge crossing starts a fresh session on Android versions that persist a control pause', async t => {
+  const {a,b}=await pair(t);
+  const peer=a.getPeer(b.config.id);
+  peer.info.platform='android';
+  const request=peer.request.bind(peer);
+  const sessions=[];
+  peer.request=async(method,args,...rest)=>{
+    if(method==='prepare' || method==='acquire'){
+      if(!args.newSession)throw Error('CONTROL_ENDED: 被控设备已结束控制，请重新请求');
+      sessions.push(args.edgeSession);
+    }
+    return request(method,args,...rest);
+  };
+  a.config.master=true;
+  a.config.edges={right:b.config.id};
+  a.config.dwell=0;
+  a.edge.cooldown=0;
+  await a.nativeEvent({type:'cursor',x:1919,y:500,width:1920,height:1080});
+  assert.equal(a.active,b.config.id);
+  assert.deepEqual(sessions,[a.activeSession.edgeSession,a.activeSession.edgeSession]);
 });
 
 test('dwell feedback starts only at eligible online edges and cancels on leaving', async t => {

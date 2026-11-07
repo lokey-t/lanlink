@@ -96,6 +96,17 @@ async function dismissAndroidDisconnectNotice() {
 action('dismissAndroidDisconnect', dismissAndroidDisconnectNotice);
 $('androidDisconnect').addEventListener('cancel', e => { e.preventDefault(); dismissAndroidDisconnectNotice().catch(e => notice(e.message)); });
 action('saveLayout', async () => { await api('settings', { dwell: Number($('dwell').value) }); notice('本机切换设置已保存'); });
+action('exportLogs', async () => {
+  notice('正在收集组内日志…');
+  const report = await api('logs-export', {});
+  const url = URL.createObjectURL(new Blob([report.text], { type: 'text/plain;charset=utf-8' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = report.name;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  notice(report.incomplete ? '部分设备的日志未能收集，请查看导出文件' : '日志已生成');
+});
 action('saveSettings', async () => { const permissions = {}; for (const k of ['input', 'screen', 'clipboard', 'shutdown']) permissions[k] = $('perm-' + k).checked; await api('settings', { name: $('deviceName').value, permissions }); notice('本机设置已保存'); });
 action('showToken', async () => { if (!$('ownToken').hidden) { $('ownToken').hidden = true; $('ownToken').value = ''; $('qrPanel').hidden = true; $('pairQr').removeAttribute('src'); clearInterval(pairingTimer); await api('pairing-stop', {}); return; } const pairing = await api('pairing', { reveal: true }); $('ownToken').value = pairing.code; $('pairQr').src = pairing.qr; $('qrPanel').hidden = false; $('ownToken').hidden = false; clearInterval(pairingTimer); pairingTimer = setInterval(async () => { if ($('ownToken').hidden) { clearInterval(pairingTimer); return; } try { const p = await api('pairing', { reveal: true }); $('ownToken').value = p.code + ' · ' + Math.ceil(p.remainingMs / 1000) + ' 秒后刷新'; $('pairQr').src = p.qr; } catch { $('ownToken').value = ''; $('pairQr').removeAttribute('src'); } }, 1000); });
 action('join', async () => { const current = await api('state'); if (!confirm(current.groupEstablished ? '配对成功后，双方组内所有设备将合并为一组，保留已有授权；离线设备上线后自动同步。继续？' : '加入对方的组？')) return; await api('join', { code: $('joinToken').value.trim(), expectedGroup: current.groupId }); $('joinToken').value = ''; $('ownToken').value = ''; $('ownToken').hidden = true; $('qrPanel').hidden = true; $('pairQr').removeAttribute('src'); notice('配对完成，正在同步组内设备'); });

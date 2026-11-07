@@ -1585,6 +1585,25 @@ struct SettingsView: View {
     @State var name = ""; @State var masterId = ""; @State var permissions: [String: Bool] = [:]
     @State var dirty = false; @State var saving = false; @State var status = "修改后点击保存；切换页面会保留草稿"
     @State var logs = false;@State var switchMode="dwell";@State var edgeHotkey="ctrl-alt";@State var dwell=100.0
+    @State private var exportingLogs = false
+
+    @MainActor private func exportLogs() async {
+        exportingLogs = true
+        defer { exportingLogs = false }
+        do {
+            let result = try await model.call("logs-export")
+            guard let name = result["name"] as? String, let text = result["text"] as? String else {
+                throw model.failure(L("操作失败"))
+            }
+            let panel = NSSavePanel()
+            panel.title = L("导出日志")
+            panel.allowedContentTypes = [.plainText]
+            panel.nameFieldStringValue = name
+            guard panel.runModal() == .OK, let url = panel.url else { return }
+            try text.write(to: url, atomically: true, encoding: .utf8)
+            model.showSuccessToast(result["incomplete"] as? Bool == true ? "日志已保存，部分设备的日志未能收集" : "日志已保存")
+        } catch { model.notice = error.localizedDescription }
+    }
     func mark() { dirty = true; status = "有未保存的更改 · 切换页面会保留草稿" }
     func load() { name = model.state["name"] as? String ?? ""; masterId = model.state["masterId"] as? String ?? model.state["id"] as? String ?? ""; permissions = model.permissions;switchMode=model.state["switchMode"] as? String ?? "dwell";edgeHotkey=model.state["edgeHotkey"] as? String ?? "ctrl-alt";dwell=model.state["dwell"] as? Double ?? 100; dirty = false }
     func save() {
@@ -1657,6 +1676,7 @@ struct SettingsView: View {
                     Text(L("其他")).font(.headline)
 
                     HStack { Button(L("运行日志")) { logs.toggle() }; Button(L("重启设备服务")) { Task { await model.restartService() } }.disabled(model.serviceRestarting); Button(L("退出应用")) { NSApp.terminate(nil) } }
+                    Button(L("导出日志")) { Task { await exportLogs() } }.disabled(exportingLogs)
                     if logs { ForEach(Array((model.state["logs"] as? [[String: Any]] ?? []).enumerated()), id: \.offset) { item in Text(Model.displayMessage(item.element["message"] as? String ?? "")).font(.caption).foregroundStyle(.secondary) } }
                 }.padding(22).background(Palette.card, in: RoundedRectangle(cornerRadius: 18))
             }.frame(maxWidth: 820).frame(maxWidth: .infinity).disabled(saving)

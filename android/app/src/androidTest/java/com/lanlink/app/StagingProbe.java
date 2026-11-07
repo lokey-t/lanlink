@@ -31,6 +31,11 @@ final class StagingProbe {
         public void closed(Wire p){service.closed(p);}
         public void message(Wire p,JSONObject m){if("request".equals(m.optString("type"))&&"testStaging".equals(m.optString("method"))){service.jobs.execute(()->{try{JSONObject a=m.optJSONObject("args"),result=Wire.obj();String step=a.optString("step"),id=a.optString("id");
           if(step.equals("status")){JSONArray rows=service.staging.list();for(int i=0;i<rows.length();i++){JSONObject row=rows.getJSONObject(i);if(row.optString("state").equals("ready")){JSONArray files=row.getJSONArray("files");for(int j=0;j<files.length();j++){JSONObject f=files.getJSONObject(j);try(InputStream in=activity.getContentResolver().openInputStream(service.staging.uri(row.getString("id"),f.getString("relative")))){f.put("sha256",Wire.hex(Wire.sha(in.readAllBytes())));}}}}result.put("outgoing",service.staging.outgoingList());result.put("files",rows).put("owner",service.controlledBy()==null?JSONObject.NULL:service.controlledBy()).put("shell",service.shell.ready());}
+          if(step.equals("stop-control")){
+            Field owner=LinkService.class.getDeclaredField("owner");owner.setAccessible(true);owner.set(service,p.id);
+            Field session=LinkService.class.getDeclaredField("ownerEdgeSession");session.setAccessible(true);session.set(service,a.getString("session"));
+            service.stopInbound();
+          }
           if(step.equals("start"))service.staging.start(id);
           if(step.equals("accept-notification")){
             Notification notification=null;long until=System.currentTimeMillis()+4000;

@@ -5,9 +5,10 @@ import qrcode from '../vendor/qrcode.mjs';
 import { Group } from './group.js';
 import { AdbManager } from './adb.js';
 import { groupPermissions, openPermissionGuide, togglePermission, enablePermissionGuide } from './permissions.js';
-import {editLayoutPositions,initializeLayout} from './layout.js';
+import {editLayoutPositions,initializeLayout,reachableLayoutEdges} from './layout.js';
 import {applySettings} from './settings.js';
 import {initializeMaster} from './master.js';
+import {exportLogs} from './log-export.js';
 
 // Shared application operations. Desktop calls them directly through restricted IPC;
 // the optional developer HTTP harness delegates to the same implementation.
@@ -22,6 +23,7 @@ export function createActions(service) {
     'quality-start': qualityAction(a => quality.start(a.id)),
     'quality-stop': qualityAction(() => quality.stop()),
     'quality-export': qualityAction(() => quality.export()),
+    'logs-export': () => exportLogs(service),
     'update-check':()=>service.updater.check(),
     'update-install':()=>service.updater.install(),
     'stage-list':()=>({files:service.staging.list(),outgoing:service.staging.outgoingList()}),
@@ -35,7 +37,17 @@ export function createActions(service) {
     'stage-save':a=>service.staging.saveTo(a.id,a.destination),
     'stage-share':a=>service.staging.share(a.id,a.files,a.start!==false,a.session),
     'stage-drag-end':a=>{service.staging.end(a.session);return {};},
-    'stage-edge':async a=>{if(!service.config.master||service.config.edges?.[a.edge]!==a.id)throw Error('设备已不在此边缘');if(service.config.switchMode==='hotkey'&&!service.edgeHotkeyHeld())throw Error('请按住设置的切换快捷键');const deadline=Date.now()+8000;while(service.switching&&Date.now()<deadline)await new Promise(r=>setTimeout(r,30));if(service.active!==a.id)await service.switchTo(a.id,a.edge,true,false,false,false,true);await service.native.call('file-drag-cancel');return service.staging.share(a.id,a.files,false);},
+    'stage-edge':async a=>{
+      const check=()=>{if(!service.config.master||reachableLayoutEdges(service)[a.edge]!==a.id)throw Error('设备已不在此边缘');};
+      check();
+      if(service.config.switchMode==='hotkey'&&!service.edgeHotkeyHeld())throw Error('请按住设置的切换快捷键');
+      const deadline=Date.now()+8000;
+      while(service.switching&&Date.now()<deadline)await new Promise(r=>setTimeout(r,30));
+      check();
+      if(service.active!==a.id)await service.switchTo(a.id,a.edge,true,false,false,false,true);
+      await service.native.call('file-drag-cancel');
+      return service.staging.share(a.id,a.files,false);
+    },
     'stage-start':a=>{if(!service.staging.rows.has(a.id))throw Error('暂存文件不存在');service.staging.start(a.id).catch(e=>service.log(e.message));return {message:'正在接收文件…'};},
     'stage-ready':a=>service.staging.ready(a.id),
     'stage-remove':a=>service.staging.remove(a.id),
@@ -150,7 +162,7 @@ export async function applyPairingResult(service, result) {
   }
   await service.returnLocal(); service.stopDiscovery?.(); service.pairing.hide();
   for (const p of service.sockets) p.close();
-  service.config.knownDevices = {}; service.config.edges = {}; service.config.deviceGrants = {}; service.consent.reset(service.config.deviceGrants); service.permissionNotice = null; service.secret = secret; service.config.token = result.token.trim(); service.config.pausedPeers = {}; if (result.group) service.group.adopt(result.group, result.token); else { service.config.group = { id: (await import('./identity.js')).accountId(result.token), revision: 0, members: {}, removed: [], history: [], anchors: {} }; service.group.data = service.config.group; service.group.data.members[service.config.id] = service.group.own; service.group.refreshBoxes(); } service.offers.clear(); service.clipboard = null;service.clipboardSync.clear();
+  service.config.knownDevices = {}; service.config.edges = {}; service.config.deviceGrants = {}; service.consent.reset(service.config.deviceGrants); service.permissionNotice = null; service.secret = secret; service.config.token = result.token.trim(); if (result.group) service.group.adopt(result.group, result.token); else { service.config.group = { id: (await import('./identity.js')).accountId(result.token), revision: 0, members: {}, removed: [], history: [], anchors: {} }; service.group.data = service.config.group; service.group.data.members[service.config.id] = service.group.own; service.group.refreshBoxes(); } service.offers.clear(); service.clipboard = null;service.clipboardSync.clear();
   delete service.config.pendingGroupJoin;delete service.config.layout;delete service.config.masterSelection;service.config.master=false;await initializeMaster(service);await initializeLayout(service);await saveConfig(service.dir, service.config);
   if (!service.options.noDiscovery) service.stopDiscovery = startDiscovery(service.identity(), secret, service.port,
     (b, host) => { if (service.config.id < b.id && !service.peers.has(b.id)) service.connect(host, b.port); }, e => service.log(e.message));

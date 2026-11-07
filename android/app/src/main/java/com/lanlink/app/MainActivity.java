@@ -11,12 +11,20 @@ import android.os.*;
 import android.provider.Settings;
 import android.view.*;
 import android.widget.*;
+import java.io.File;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.*;
 import java.util.concurrent.*;
 import org.json.JSONObject;
 import org.json.JSONArray;
 
 public class MainActivity extends Activity {
+  private static final int SAVE_LOGS = 44;
+  private boolean exportingLogs, incompleteLogs;
+  private File pendingLogExport;
   private final Handler main = new Handler(Looper.getMainLooper());
   private final ThreadPoolExecutor actions =
       new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>());
@@ -435,6 +443,9 @@ public class MainActivity extends Activity {
       page = state.getString("page", "devices");
       selected = state.getString("selected", "local");
       savingStage=state.getString("savingStage");centerSelection=state.getString("centerSelection","");
+      String logFile = state.getString("pendingLogExport");
+      if (logFile != null) pendingLogExport = new File(getCacheDir(), logFile);
+      incompleteLogs = state.getBoolean("incompleteLogs");
     }
     startForegroundService(new Intent(this, LinkService.class));
     renderPage();
@@ -467,10 +478,7 @@ public class MainActivity extends Activity {
     }
   }
 
-  private TextView readiness;
-
   private void renderPage() {
-    readiness = null;
     groupLayoutPanel = null;
     permissionSwitches.clear();
     signature = "";
@@ -582,12 +590,6 @@ public class MainActivity extends Activity {
               renderPage();
             }));
     layout.addView(local);
-    ui.gap(layout, 12);
-    readiness = ui.text(Language.t("未就绪 · 查看授权教程"), 14, Ui.INK);
-    readiness.setPadding(ui.dp(16), ui.dp(14), ui.dp(16), ui.dp(14));
-    readiness.setBackground(ui.touch(Ui.LILAC, 14));
-    readiness.setOnClickListener(v -> startActivity(new Intent(this, ReadinessGuideActivity.class)));
-    layout.addView(readiness);
     ui.gap(layout, 16);
     status = ui.text(Language.t("正在启动…"), 12, Ui.MUTED);
     layout.addView(status);
@@ -748,7 +750,44 @@ public class MainActivity extends Activity {
     identity.addView(ui.item("settings", Language.t("更新通道"),
         Language.t(appUpdater.beta() ? "测试版" : "正式版"), null, appUpdater::chooseChannel));
     identity.addView(ui.item("settings",Language.t("检查更新"),Language.t("增量失败时自动使用全量更新"),null,()->appUpdater.check(true)));
+    identity.addView(ui.item("settings", Language.t("导出日志"),
+        Language.t("收集组内设备的运行日志并另存为文本文件"), null, this::exportLogs));
     settingsFooter();
+  }
+
+  private void exportLogs() {
+    if (exportingLogs || pendingLogExport != null) return;
+    exportingLogs = true;
+    actions.execute(() -> {
+      File file = null;
+      try {
+        JSONObject report = RuntimeLogs.collect(link());
+        file = File.createTempFile("LanLink-logs-", ".txt", getCacheDir());
+        Files.write(file.toPath(), report.getString("text").getBytes(StandardCharsets.UTF_8));
+        File prepared = file;
+        main.post(() -> {
+          exportingLogs = false;
+          if (!alive || isFinishing()) { prepared.delete(); return; }
+          pendingLogExport = prepared;
+          incompleteLogs = report.optBoolean("incomplete");
+          try {
+            startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE).setType("text/plain")
+                .putExtra(Intent.EXTRA_TITLE, report.optString("name")), SAVE_LOGS);
+          } catch (ActivityNotFoundException error) {
+            pendingLogExport = null;
+            prepared.delete();
+            toast(Language.t("操作失败"));
+          }
+        });
+      } catch (Exception error) {
+        if (file != null) file.delete();
+        main.post(() -> {
+          exportingLogs = false;
+          if (alive) toast(error.getMessage() == null ? Language.t("操作失败") : error.getMessage());
+        });
+      }
+    });
   }
 
   private AlertDialog showLanguagePicker() {
@@ -1088,14 +1127,39 @@ public class MainActivity extends Activity {
             : "win32".equals(platform) || "windows".equals(platform) ? "Windows" : platform;
   }
 
-  private void bubble(String id, String name, String icon, String state) {
+  private boolean localInputReady(LinkService service) {
+    return service != null && service.shell != null && service.shell.ready();
+  }
+
+  private void showReadinessGuide() {
+    LinkService service = LinkService.instance;
+    if (localInputReady(service)) {
+      update();
+      return;
+    }
+    LinearLayout box = sheet(Language.t("未就绪 · 查看授权教程"));
+    Dialog dialog = (Dialog) box.getTag();
+    android.webkit.WebView illustration = ReadinessGuide.populate(this, ui, box, service, dialog::dismiss);
+    dialog.setOnDismissListener(ignored -> {
+      sheets.remove(dialog);
+      box.removeView(illustration);
+      illustration.destroy();
+    });
+  }
+
+  private void bubble(String id, String name, String icon, String state, boolean showReadinessGuide) {
     LinearLayout b = ui.column();
     b.setGravity(Gravity.CENTER);
     b.setPadding(ui.dp(14), ui.dp(16), ui.dp(14), ui.dp(16));
     b.setBackground(ui.touch(selected.equals(id) ? Ui.LILAC : Ui.CARD, 22));
-    b.addView(
-        ui.icon(icon, selected.equals(id) ? Ui.PURPLE : Ui.INK),
-        new LinearLayout.LayoutParams(ui.dp(30), ui.dp(30)));
+    View glyph = ui.icon(showReadinessGuide ? "phone-not-ready" : icon,
+        showReadinessGuide ? Ui.RED : selected.equals(id) ? Ui.PURPLE : Ui.INK);
+    if (showReadinessGuide) {
+      glyph.setContentDescription(Language.t("未就绪 · 查看授权教程"));
+      glyph.setFocusable(true);
+      glyph.setOnClickListener(v -> showReadinessGuide());
+    }
+    b.addView(glyph, new LinearLayout.LayoutParams(ui.dp(48), ui.dp(30)));
     ui.gap(b, 12);
     TextView label = ui.title(name, 14);
     label.setGravity(Gravity.CENTER);
@@ -1104,7 +1168,7 @@ public class MainActivity extends Activity {
     b.addView(label);
     ui.gap(b, 6);
     int stateColor=state.equals(Language.t("● 在线"))?Ui.GREEN:state.equals(Language.t("● 未就绪"))?0xffb58a39:state.equals(Language.t("● 未授权"))?0xffbf6371:state.equals(Language.t("● 有限授权"))?0xff8270b9:Ui.MUTED;
-    TextView stateLabel = ui.text(state, 12, stateColor);
+    TextView stateLabel = ui.text(state, 12, showReadinessGuide ? Ui.RED : stateColor);
     stateLabel.setGravity(Gravity.CENTER);
     b.addView(stateLabel);
     b.setContentDescription(name + "，" + state);
@@ -1128,19 +1192,20 @@ public class MainActivity extends Activity {
     if (!selected.equals("local")
         && !known.has(selected)
         && (service == null || !service.peers.containsKey(selected))) selected = "local";
-    StringBuilder sig = new StringBuilder(selected).append(known.toString());
+    boolean notReady = !localInputReady(service);
+    StringBuilder sig = new StringBuilder(selected).append(notReady).append(known.toString());
     for (Wire p : peers) sig.append(p.id).append(p.info.toString()).append(p.fastPath != null && p.fastPath.connected).append(service.peerAccess.get(p.id));
     if (sig.toString().equals(signature)) return;
     signature = sig.toString();
     devices.removeAllViews();
     detail.removeAllViews();
-    bubble("local", Language.t("本机"), "phone", Language.t("此设备"));
+    bubble("local", Language.t("本机"), "phone", Language.t(notReady ? "未就绪" : "此设备"), notReady);
     for (Wire p : peers)
       bubble(
           p.id,
           p.info.optString("name", Language.t("已配对设备")),
           platformIcon(p.info.optString("platform")),
-          "● " + PeerAccess.status(service.peerAccess.get(p.id),p.info.optString("platform")));
+          "● " + PeerAccess.status(service.peerAccess.get(p.id),p.info.optString("platform")), false);
     ArrayList<String> offline = new ArrayList<>();
     Iterator<String> ids = known.keys();
     while (ids.hasNext()) {
@@ -1155,7 +1220,7 @@ public class MainActivity extends Activity {
             id,
             device.optString("name", Language.t("已配对设备")),
             platformIcon(device.optString("platform")),
-            Language.t("● 离线"));
+            Language.t("● 离线"), false);
     }
 
     LinearLayout card = ui.card();
@@ -1826,10 +1891,6 @@ public class MainActivity extends Activity {
         }
       }
       if(page.equals("clipboard") && !clipboardHistorySignature.equals(clipboardHistoryKey())){renderPage();return;}
-    if (readiness != null) {
-      boolean ready = s != null && s.shell != null && s.shell.ready();
-      readiness.setVisibility(ready ? View.GONE : View.VISIBLE);
-    }
     refreshConsent(s);
       return;
     }
@@ -2092,7 +2153,7 @@ public class MainActivity extends Activity {
     refreshPermissionRows();
     if(status!=null)status.setText(s == null ? Language.t("服务正在启动…") : Language.t(s.status));
     if(mode!=null)mode.setText(
-        s != null && s.shell != null && s.shell.ready()
+        localInputReady(s)
             ? Language.t("输入助手已连接 · ADB / Root")
             : Language.t("输入助手待连接 · 可在电脑端恢复"));
     if (s != null) {
@@ -2187,6 +2248,8 @@ public class MainActivity extends Activity {
     super.onSaveInstanceState(state);
     state.putString("page", page);if(pendingShareUris!=null)state.putParcelableArrayList("pendingShareUris",pendingShareUris);
     state.putString("selected", selected);state.putString("savingStage",savingStage);state.putString("centerSelection",centerSelection);
+    if (pendingLogExport != null) state.putString("pendingLogExport", pendingLogExport.getName());
+    state.putBoolean("incompleteLogs", incompleteLogs);
   }
 
   @Override
@@ -2672,6 +2735,21 @@ public class MainActivity extends Activity {
 
   protected void onActivityResult(int request, int result, Intent data) {
     super.onActivityResult(request, result, data);
+    if (request == SAVE_LOGS) {
+      File prepared = pendingLogExport;
+      pendingLogExport = null;
+      if (prepared == null) return;
+      if (result != RESULT_OK || data == null || data.getData() == null) { prepared.delete(); return; }
+      boolean incomplete = incompleteLogs;
+      run(() -> {
+        try (OutputStream output = getContentResolver().openOutputStream(data.getData(), "wt")) {
+          if (output == null) throw new IOException(Language.t("操作失败"));
+          Files.copy(prepared.toPath(), output);
+        } finally { prepared.delete(); }
+        main.post(() -> toast(Language.t(incomplete ? "日志已保存，部分设备的日志未能收集" : "日志已保存")));
+      });
+      return;
+    }
     if(request==42||request==43){String id=savingStage;savingStage=null;if(result==RESULT_OK&&data!=null&&data.getData()!=null&&id!=null)run(()->{if(request==42)link().staging.saveFile(id,data.getData());else link().staging.saveFolder(id,data.getData());main.post(()->{toast(Language.t("已保存，文件已移出暂存区"));if(page.equals("center"))refreshCenter();});});return;}
     if (request == 31 || request == 32) {
       if (result != RESULT_OK || data == null) {

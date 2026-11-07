@@ -114,6 +114,27 @@ test('explicitly confirming the current master supersedes a delayed legacy elect
   await until(()=>devices.every(service=>service.state().masterId===current));
 });
 
+test('mouse skips an offline device in a continuous row and returns along the same edge',async t=>{
+  const [a,b,c]=await mesh(t);
+  const ids=[a,b,c].map(s=>s.config.id);
+  const positions=Object.fromEntries(ids.map((id,x)=>[id,{x,y:0}]));
+  await a.settings({layoutPositions:positions,masterId:ids[0],dwell:0});
+  await until(()=>c.state().masterId===ids[0] && c.state().layout.positions[ids[2]]?.x===2);
+  assert.equal(a.state().reachableEdges.right,ids[1]);
+  a.getPeer(ids[1]).close();
+  await until(()=>!a.peers.has(ids[1]));
+  assert.equal(a.state().edges.right,ids[1]);
+  assert.equal(a.state().reachableEdges.right,ids[2]);
+  a.edge.cooldown=0;
+  await a.nativeEvent({type:'cursor',x:999,y:300,width:1000,height:600});
+  assert.equal(a.active,ids[2]);
+  a.edge.cooldown=0;a.position.x=0;
+  await a.checkReturnEdge();
+  assert.equal(a.active,null);
+  await a.settings({layoutPositions:{[ids[0]]:{x:0,y:0},[ids[2]]:{x:2,y:0}}});
+  assert.equal(a.state().reachableEdges.right,undefined,'an empty cell is not an offline device');
+});
+
 test('membership removal prunes old layout positions and unrelated edits preserve active capture',async t=>{
   const devices=await mesh(t),[a,b,c,d]=devices,actions=createActions(a);
   await actions('layout-place',{id:a.config.id,x:0,y:0});

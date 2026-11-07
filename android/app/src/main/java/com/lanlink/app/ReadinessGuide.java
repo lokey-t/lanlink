@@ -1,41 +1,14 @@
 package com.lanlink.app;
 
-import android.app.Activity;
-import android.os.Bundle;
+import android.content.Context;
 import android.webkit.WebView;
-import android.widget.FrameLayout;
 import android.widget.LinearLayout;
-import android.widget.ScrollView;
 
-public final class ReadinessGuideActivity extends Activity {
-  private WebView illustration;
+final class ReadinessGuide {
+  private ReadinessGuide() {}
 
-  @Override protected void onCreate(Bundle state) {
-    Ui.applyTheme(this);
-    super.onCreate(state);
-    Ui ui = new Ui(this);
-    LinearLayout card = ui.card();
-    ScrollView scroll = new ScrollView(this);
-    scroll.setBackgroundColor(Ui.BG);
-    scroll.setPadding(ui.dp(20), 0, ui.dp(20), 0);
-    scroll.setOnApplyWindowInsetsListener((view, insets) -> {
-      if (android.os.Build.VERSION.SDK_INT >= 30) {
-        android.graphics.Insets bars = insets.getInsets(android.view.WindowInsets.Type.systemBars());
-        view.setPadding(ui.dp(20) + bars.left, bars.top + ui.dp(16),
-            ui.dp(20) + bars.right, bars.bottom + ui.dp(16));
-      }
-      return insets;
-    });
-    scroll.setFillViewport(true);
-    FrameLayout panel = new FrameLayout(this);
-    panel.addView(card, new FrameLayout.LayoutParams(-1, -2, android.view.Gravity.CENTER));
-    scroll.addView(panel);
-    setContentView(scroll);
-
-    LinkService service = LinkService.instance;
-    card.addView(ui.title(Language.t("未就绪 · 查看授权教程"), 22));
-    ui.gap(card, 16);
-    illustration = new WebView(this);
+  static WebView populate(Context context, Ui ui, LinearLayout card, LinkService service, Runnable close) {
+    WebView illustration = new WebView(context);
     illustration.setFocusable(false);
     illustration.setBackgroundColor(android.graphics.Color.TRANSPARENT);
     illustration.setImportantForAccessibility(android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO);
@@ -59,18 +32,11 @@ public final class ReadinessGuideActivity extends Activity {
       ui.gap(card, 12);
       card.addView(ui.button(Language.t("允许电脑授权"), true, () -> {
         service.enableAdbAuthorization();
-        finish();
+        close.run();
       }));
     }
     ui.gap(card, 20);
-    card.addView(ui.button(Language.t("返回设备"), false, this::finish));
-  }
-
-  @Override protected void onDestroy() {
-    if (illustration != null) {
-      if (illustration.getParent() instanceof android.view.ViewGroup parent) parent.removeView(illustration);
-      illustration.destroy();
-    }
-    super.onDestroy();
+    card.addView(ui.button(Language.t("关闭"), false, close));
+    return illustration;
   }
 }
