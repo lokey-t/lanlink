@@ -36,6 +36,8 @@ public class MainActivity extends Activity {
   private final Map<String, Switch> permissionSwitches = new HashMap<>();
   private final Set<Dialog> sheets = new HashSet<>();
   private String page = "devices", selected = "local", noticeSignature = "";
+  private android.window.OnBackInvokedCallback pageBackCallback;
+  private View backPreview;
   private String centerSelection="",centerSignature="",savingStage;
   private LinearLayout centerContent;private ScrollView centerScroll;
   private boolean resumed;
@@ -432,7 +434,6 @@ public class MainActivity extends Activity {
   }
 
   private AppUpdater appUpdater;
-  void refreshUpdateChannel() { if (page.equals("settings")) renderPage(); }
 
   public void onCreate(Bundle state) {
     Ui.applyTheme(this);
@@ -479,6 +480,7 @@ public class MainActivity extends Activity {
   }
 
   private void renderPage() {
+    resetBackPreview();
     groupLayoutPanel = null;
     permissionSwitches.clear();
     signature = "";
@@ -538,7 +540,74 @@ public class MainActivity extends Activity {
     root.addView(navigation);
     setContentView(root);
     applyInsets(root, getWindow());
+    updatePageBackCallback();
     update();
+  }
+
+  private boolean returnToParentPage() {
+    if (page.equals("devices")) return false;
+    page = page.equals("permissions") ? "settings" : "devices";
+    renderPage();
+    return true;
+  }
+
+  @Override public void onBackPressed() {
+    if (!returnToParentPage()) super.onBackPressed();
+  }
+
+  private void updatePageBackCallback() {
+    if (Build.VERSION.SDK_INT < 33) return;
+    if (page.equals("devices")) {
+      unregisterPageBackCallback();
+    } else if (pageBackCallback == null) {
+      pageBackCallback = Build.VERSION.SDK_INT >= 34
+          ? createPageBackAnimation() : this::returnToParentPage;
+      getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+          android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT, pageBackCallback);
+    }
+  }
+
+  private void unregisterPageBackCallback() {
+    if (Build.VERSION.SDK_INT >= 33 && pageBackCallback != null) {
+      getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(pageBackCallback);
+      pageBackCallback = null;
+    }
+  }
+
+  @android.annotation.TargetApi(34)
+  private android.window.OnBackAnimationCallback createPageBackAnimation() {
+    return new android.window.OnBackAnimationCallback() {
+      @Override public void onBackStarted(android.window.BackEvent event) {
+        backPreview = root;
+      }
+
+      @Override public void onBackProgressed(android.window.BackEvent event) {
+        if (backPreview == null) return;
+        float progress = event.getProgress();
+        float scale = 1f - .06f * progress;
+        backPreview.setScaleX(scale);
+        backPreview.setScaleY(scale);
+        float direction = event.getSwipeEdge() == android.window.BackEvent.EDGE_RIGHT ? -1f : 1f;
+        backPreview.setTranslationX(direction * ui.dp(16) * progress);
+      }
+
+      @Override public void onBackCancelled() {
+        resetBackPreview();
+      }
+
+      @Override public void onBackInvoked() {
+        resetBackPreview();
+        returnToParentPage();
+      }
+    };
+  }
+
+  private void resetBackPreview() {
+    if (backPreview == null) return;
+    backPreview.setScaleX(1f);
+    backPreview.setScaleY(1f);
+    backPreview.setTranslationX(0f);
+    backPreview = null;
   }
 
   private void heading(String title, String subtitle) {
@@ -746,13 +815,99 @@ public class MainActivity extends Activity {
     options.addView(ui.item("settings", Language.t("后台运行与自启动"), Language.t("设置省电白名单，减少后台连接中断"), null, () -> showBackgroundGuide(null)));
     layout.addView(options);
     clipboardSettingsCard();
-    Switch updateAuto=new Switch(this);updateAuto.setText(Language.t("自动检测更新"));updateAuto.setChecked(getSharedPreferences("identity",0).getBoolean("auto_check_updates",true));updateAuto.setOnCheckedChangeListener((button,on)->getSharedPreferences("identity",0).edit().putBoolean("auto_check_updates",on).apply());identity.addView(updateAuto);
-    identity.addView(ui.item("settings", Language.t("更新通道"),
-        Language.t(appUpdater.beta() ? "测试版" : "正式版"), null, appUpdater::chooseChannel));
-    identity.addView(ui.item("settings",Language.t("检查更新"),Language.t("增量失败时自动使用全量更新"),null,()->appUpdater.check(true)));
-    identity.addView(ui.item("settings", Language.t("导出日志"),
-        Language.t("收集组内设备的运行日志并另存为文本文件"), null, this::exportLogs));
     settingsFooter();
+    ui.gap(layout, 16);
+    LinearLayout about = ui.card();
+    about.addView(ui.item("info", Language.t("关于"), null, null, this::showAbout));
+    layout.addView(about);
+  }
+
+  private void showAbout() {
+    Dialog dialog = new Dialog(this, Ui.dialogTheme());
+    sheets.add(dialog);
+    dialog.setOnDismissListener(ignored -> sheets.remove(dialog));
+    LinearLayout panel = ui.column();
+    panel.setBackgroundColor(Ui.BG);
+
+    LinearLayout header = ui.row();
+    header.setPadding(ui.dp(16), ui.dp(8), ui.dp(22), ui.dp(8));
+    View back = ui.iconButton("back", Language.t("关闭"), dialog::dismiss);
+    back.setBackground(ui.touch(Color.TRANSPARENT, 24));
+    header.addView(back, new LinearLayout.LayoutParams(ui.dp(48), ui.dp(48)));
+    header.addView(ui.title(Language.t("关于"), 24));
+    panel.addView(header);
+
+    ScrollView scroll = new ScrollView(this);
+    LinearLayout body = ui.column();
+    body.setPadding(ui.dp(22), ui.dp(16), ui.dp(22), ui.dp(24));
+    LinearLayout brand = ui.column();
+    brand.setGravity(Gravity.CENTER_HORIZONTAL);
+    ImageView icon = new ImageView(this);
+    icon.setImageResource(R.mipmap.ic_launcher);
+    brand.addView(icon, new LinearLayout.LayoutParams(ui.dp(76), ui.dp(76)));
+    ui.gap(brand, 12);
+    TextView appName = ui.title(getApplicationInfo().loadLabel(getPackageManager()).toString(), 26);
+    appName.setGravity(Gravity.CENTER);
+    brand.addView(appName);
+    try {
+      String version = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+      ui.gap(brand, 6);
+      TextView versionLabel = ui.text(Language.t("版本 ") + version, 14, Ui.MUTED);
+      versionLabel.setGravity(Gravity.CENTER);
+      brand.addView(versionLabel);
+    } catch (android.content.pm.PackageManager.NameNotFoundException ignored) {}
+    body.addView(brand);
+
+    ui.gap(body, 24);
+    body.addView(ui.title(Language.t("软件更新"), 16));
+    ui.gap(body, 10);
+    LinearLayout updates = ui.card();
+    updates.setPadding(ui.dp(16), ui.dp(6), ui.dp(16), ui.dp(6));
+    LinearLayout autoRow = ui.row();
+    autoRow.addView(ui.icon("refresh", Ui.INK), new LinearLayout.LayoutParams(ui.dp(24), ui.dp(24)));
+    Switch autoUpdate = new Switch(this);
+    autoUpdate.setText(Language.t("自动检测更新"));
+    autoUpdate.setTextColor(Ui.INK);
+    autoUpdate.setTextSize(15);
+    autoUpdate.setMinHeight(ui.dp(60));
+    SharedPreferences preferences = getSharedPreferences("identity", MODE_PRIVATE);
+    autoUpdate.setChecked(preferences.getBoolean("auto_check_updates", true));
+    autoUpdate.setOnCheckedChangeListener((button, enabled) ->
+        preferences.edit().putBoolean("auto_check_updates", enabled).apply());
+    LinearLayout.LayoutParams switchLayout = new LinearLayout.LayoutParams(0, -2, 1);
+    switchLayout.setMarginStart(ui.dp(14));
+    autoRow.addView(autoUpdate, switchLayout);
+    updates.addView(autoRow);
+    ui.line(updates, 0);
+    LinearLayout channel = ui.column();
+    renderUpdateChannel(channel);
+    updates.addView(channel);
+    ui.line(updates, 0);
+    updates.addView(ui.item("download", Language.t("检查更新"), null, null, () -> appUpdater.check(true)));
+    body.addView(updates);
+
+    ui.gap(body, 20);
+    body.addView(ui.title(Language.t("诊断"), 16));
+    ui.gap(body, 10);
+    LinearLayout diagnostics = ui.card();
+    diagnostics.setPadding(ui.dp(16), ui.dp(6), ui.dp(16), ui.dp(6));
+    diagnostics.addView(ui.item("upload", Language.t("导出日志"),
+        Language.t("收集组内设备的运行日志并另存为文本文件"), null, this::exportLogs));
+    body.addView(diagnostics);
+    scroll.addView(body);
+    panel.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+    dialog.setContentView(panel);
+    dialog.show();
+    Window window = dialog.getWindow();
+    window.setLayout(-1, -1);
+    applyInsets(panel, window);
+  }
+
+  private void renderUpdateChannel(LinearLayout slot) {
+    slot.removeAllViews();
+    slot.addView(ui.item("layers", Language.t("更新通道"), null,
+        Language.t(appUpdater.beta() ? "测试版" : "正式版"),
+        () -> appUpdater.chooseChannel(() -> renderUpdateChannel(slot))));
   }
 
   private void exportLogs() {
@@ -2800,6 +2955,7 @@ public class MainActivity extends Activity {
 
   protected void onPause() {
     super.onPause();
+    resetBackPreview();
     resumed = false;
     if (LinkService.instance != null && LinkService.instance.backgroundRecovery != null)
       LinkService.instance.backgroundRecovery.foreground(false);
@@ -2810,6 +2966,7 @@ public class MainActivity extends Activity {
   }
 
   protected void onDestroy() {
+    unregisterPageBackCallback();
     alive = false;
     closePermissionDialog();
     viewing = null;

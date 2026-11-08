@@ -1066,6 +1066,18 @@
       "it": "Altro",
       "ru": "Прочее"
     },
+    "关于": {
+      "en": "About",
+      "zh-Hant": "關於"
+    },
+    "软件更新": {
+      "en": "Software updates",
+      "zh-Hant": "軟體更新"
+    },
+    "诊断": {
+      "en": "Diagnostics",
+      "zh-Hant": "診斷"
+    },
     "导出日志": {
       "en": "Export logs",
       "zh-Hant": "匯出日誌"

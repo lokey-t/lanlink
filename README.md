@@ -7,7 +7,7 @@
 <p align="center"><strong>一套键鼠，连接你的电脑与手机。</strong></p>
 <p align="center">跨屏操作 · 远程画面 · 共享剪贴板 · 文件传输<br>Windows · macOS · Android</p>
 <p align="center"><strong>简体中文</strong> · <a href="README.en.md">English</a></p>
-<p align="center"><a href="#quick-start">开始使用</a> · <a href="#build">源码构建</a> · <a href="#architecture">架构设计</a> · <a href="#directory">源码导览</a> · <a href="CHANGELOG.md">更新记录</a></p>
+<p align="center"><a href="https://lanlink.sites.show/">官网</a> · <a href="#quick-start">开始使用</a> · <a href="#build">源码构建</a> · <a href="#architecture">架构设计</a> · <a href="#directory">源码导览</a> · <a href="CHANGELOG.md">更新记录</a></p>
 
 LanLink 让同一局域网里的电脑和 Android 手机一起工作：把鼠标移到屏幕边缘，继续操作另一台设备；在电脑上打开手机画面，或把手机变成电脑的触控板；复制文字、分享文件，减少设备之间的来回切换。
 
@@ -25,13 +25,15 @@ LanLink 让同一局域网里的电脑和 Android 手机一起工作：把鼠标
 | --- | --- | --- |
 | Windows 10/11 x64 · 便携版 | [ZIP，完整解压后运行](https://github.com/lokey-t/lanlink/releases/download/v0.91.1/LanLink-0.91.1-windows-x64.zip) | [Windows Release](https://gitee.com/lokey-t/lanlink/releases/tag/v0.91.1) |
 | Windows 10/11 x64 · 安装版 | [EXE，当前用户安装](https://github.com/lokey-t/lanlink/releases/download/v0.91.1/LanLink-0.91.1-windows-x64-setup.exe) | [Windows Release](https://gitee.com/lokey-t/lanlink/releases/tag/v0.91.1) |
-| macOS 14+ · Apple Silicon (arm64) | [DMG，Apple Silicon](https://github.com/lokey-t/lanlink/releases/tag/v0.91.1) | [Mac Release](https://gitee.com/lokey-t/lanlink/releases/tag/v0.91.1) |
+| macOS 14+ · Apple Silicon (arm64) | [DMG，Apple Silicon](https://github.com/lokey-t/lanlink/releases/download/v0.91.1/LanLink-0.91.1-macos-arm64.dmg) | [Mac Release](https://gitee.com/lokey-t/lanlink/releases/tag/v0.91.1) |
 | Android 10+ | [APK](https://github.com/lokey-t/lanlink/releases/download/v0.91.1/LanLink-0.91.1-android.apk) | [Android Release](https://gitee.com/lokey-t/lanlink/releases/tag/v0.91.1) |
 | 所有设备 · 单一增量包 | [通用增量包](https://github.com/lokey-t/lanlink/releases/download/v0.91.1/LanLink-0.91.1-delta.json.gz) | [更新附件](https://gitee.com/lokey-t/lanlink/releases/tag/v0.91.1) |
 
 Windows 安装版创建开始菜单和桌面快捷方式，可从系统“已安装的应用”卸载；便携版无需安装。macOS 将 DMG 中的应用拖到 Applications；当前构建使用 ad-hoc 签名，未公证。Android 安装需系统确认，并须与旧 APK 使用相同签名才能覆盖升级。
 
 软件默认检测正式版。设置中可切换正式版或测试版，也可关闭自动检测并手动检查。每个版本只发布一个包含各平台差异的增量包；跨版本、补丁不可用或校验失败时自动使用对应平台全量更新。桌面下载完成后退出软件安装；Android 通过系统安装器确认。首次从尚无更新功能的旧版升级，请手动下载。详见[更新与发布说明](docs/updates.md)。
+
+Android 的「设置 → 关于」集中提供版本信息、更新设置和日志导出。支持预测式返回的系统可在设置子页面预览上一级页面。
 
 ### 与同类工具相比，LanLink 适合什么场景
 

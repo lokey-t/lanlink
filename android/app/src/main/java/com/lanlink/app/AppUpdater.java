@@ -31,14 +31,14 @@ final class AppUpdater {
     if (p.getBoolean("auto_check_updates", true) &&
         System.currentTimeMillis() - p.getLong(checkTimeKey(beta()), 0) > 21600000) check(false);
   }
-  void chooseChannel() {
+  void chooseChannel(Runnable onChanged) {
     if (pending != null) {
       message(Language.t("当前更新正在安装或已准备好，请完成后再切换通道"));
       return;
     }
     new AlertDialog.Builder(activity).setTitle(Language.t("更新通道"))
         .setSingleChoiceItems(new String[] {Language.t("正式版"), Language.t("测试版")}, beta() ? 1 : 0,
-            (dialog, which) -> { setBeta(which == 1); dialog.dismiss(); activity.refreshUpdateChannel(); })
+            (dialog, which) -> { setBeta(which == 1); dialog.dismiss(); onChanged.run(); })
         .setNegativeButton(Language.t("取消"), null).show();
   }
   static byte[] read(InputStream in,int limit)throws Exception{try(InputStream stream=in;ByteArrayOutputStream out=new ByteArrayOutputStream()){byte[] b=new byte[65536];int n,total=0;while((n=stream.read(b))!=-1){total+=n;if(total>limit)throw new IOException("Update too large");out.write(b,0,n);}return out.toByteArray();}}

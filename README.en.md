@@ -7,7 +7,7 @@
 <p align="center"><strong>One keyboard and mouse. Your computers and phone, connected.</strong></p>
 <p align="center">Cross-screen input · Remote desktop · Shared clipboard · File transfers<br>Windows · macOS · Android</p>
 <p align="center"><a href="README.md">简体中文</a> · <strong>English</strong></p>
-<p align="center"><a href="#quick-start">Get started</a> · <a href="#build">Build from source</a> · <a href="#architecture">Architecture</a> · <a href="#directory">Code map</a> · <a href="CHANGELOG.md">Changelog</a></p>
+<p align="center"><a href="https://lanlink.sites.show/">Official website</a> · <a href="#quick-start">Get started</a> · <a href="#build">Build from source</a> · <a href="#architecture">Architecture</a> · <a href="#directory">Code map</a> · <a href="CHANGELOG.md">Changelog</a></p>
 
 LanLink brings the computers and Android phones on your local network into one workspace. Move your mouse to a screen edge to continue on another device, open your phone's screen on your computer, or use your phone as a computer trackpad. Copy text and share files without constantly switching devices.
 
@@ -25,13 +25,15 @@ The release version is **0.91.1**, tagged `v0.91.1`. Links below target this rel
 | --- | --- | --- |
 | Windows 10/11 x64 · portable | [ZIP: extract the complete folder](https://github.com/lokey-t/lanlink/releases/download/v0.91.1/LanLink-0.91.1-windows-x64.zip) | [Windows release](https://gitee.com/lokey-t/lanlink/releases/tag/v0.91.1) |
 | Windows 10/11 x64 · installer | [EXE: per-user installation](https://github.com/lokey-t/lanlink/releases/download/v0.91.1/LanLink-0.91.1-windows-x64-setup.exe) | [Windows release](https://gitee.com/lokey-t/lanlink/releases/tag/v0.91.1) |
-| macOS 14+ · Apple Silicon (arm64) | [DMG: Apple Silicon](https://github.com/lokey-t/lanlink/releases/tag/v0.91.1) | [Mac release](https://gitee.com/lokey-t/lanlink/releases/tag/v0.91.1) |
+| macOS 14+ · Apple Silicon (arm64) | [DMG: Apple Silicon](https://github.com/lokey-t/lanlink/releases/download/v0.91.1/LanLink-0.91.1-macos-arm64.dmg) | [Mac release](https://gitee.com/lokey-t/lanlink/releases/tag/v0.91.1) |
 | Android 10+ | [APK](https://github.com/lokey-t/lanlink/releases/download/v0.91.1/LanLink-0.91.1-android.apk) | [Android release](https://gitee.com/lokey-t/lanlink/releases/tag/v0.91.1) |
 | All devices · single delta asset | [Combined delta](https://github.com/lokey-t/lanlink/releases/download/v0.91.1/LanLink-0.91.1-delta.json.gz) | [Update assets](https://gitee.com/lokey-t/lanlink/releases/tag/v0.91.1) |
 
 The Windows installer creates Start menu and desktop shortcuts and registers an uninstall entry; the portable edition needs no installation. On macOS, drag the app from the DMG into Applications. Current Mac builds are ad-hoc signed and not notarized. Android requires system installation confirmation and the same APK signing key as the installed app.
 
 Updates default to the stable channel. In Settings, you can choose the stable or beta channel, disable automatic checks, or check manually. Each version has one combined delta for all included platforms. Unsupported base versions, missing patches and verification failures fall back to the platform's full update. Exit the desktop app after download to install; Android uses the system installer. Older clients without an updater require a manual first upgrade. See [update publishing instructions](docs/updates.md).
+
+On Android, Settings → About brings together version information, update controls, and log export. On systems that support predictive back, the back gesture previews the parent settings page.
 
 ### Where LanLink fits alongside other tools
 

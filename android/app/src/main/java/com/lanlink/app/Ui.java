@@ -114,10 +114,14 @@ final class Ui {
   }
 
   void line(LinearLayout parent) {
+    line(parent, 12);
+  }
+
+  void line(LinearLayout parent, int verticalMargin) {
     View v = new View(context);
     v.setBackgroundColor(LINE);
     LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-1, dp(1));
-    p.setMargins(0, dp(12), 0, dp(12));
+    p.setMargins(0, dp(verticalMargin), 0, dp(verticalMargin));
     parent.addView(v, p);
   }
 
@@ -309,6 +313,29 @@ final class Ui {
         case "close":
           line(c, 6, 6, 18, 18);
           line(c, 18, 6, 6, 18);
+          break;
+        case "info":
+          c.drawCircle(12, 12, 9, p);
+          line(c, 12, 11, 12, 16);
+          c.drawPoint(12, 8, p);
+          break;
+        case "refresh":
+          c.drawArc(4, 4, 20, 20, -150, 150, false, p);
+          line(c, 16, 8, 20, 12);
+          line(c, 20, 12, 23, 8);
+          c.drawArc(4, 4, 20, 20, 30, 150, false, p);
+          line(c, 1, 16, 4, 12);
+          line(c, 4, 12, 8, 16);
+          break;
+        case "layers":
+          line(c, 3, 8, 12, 3);
+          line(c, 12, 3, 21, 8);
+          line(c, 21, 8, 12, 13);
+          line(c, 12, 13, 3, 8);
+          line(c, 3, 12, 12, 17);
+          line(c, 12, 17, 21, 12);
+          line(c, 3, 16, 12, 21);
+          line(c, 12, 21, 21, 16);
           break;
         case "settings":
           for (int i = 0; i < 3; i++) {

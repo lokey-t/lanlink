@@ -16,6 +16,8 @@ Historical entries describe their version at the time. For current behavior, per
 - 修复远控会话结束后的消息串扰、离线设备切换路径和拖放暂存问题。
 - Added connection quality diagnostics and an Android home-screen setup guide accessible from the red local-device icon.
 - Fixed interference from ended control sessions, offline-device switching paths, and drag-and-drop staging issues.
+- Android 新增「关于」页，集中显示更新设置和日志导出，并为设置子页面添加预测式返回预览。
+- Android groups update controls and log export under About and supports predictive back previews on settings subpages.
 
 ## 0.91.0 · 三端更新与分发 / Updates and distribution
 
