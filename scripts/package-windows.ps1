@@ -24,7 +24,25 @@ if ($VideoRuntime) {
 }
 foreach ($name in @('src','vendor','docs','node_modules')) { Copy-Item -LiteralPath (Join-Path $root $name) -Destination $output -Recurse }
 New-Item -ItemType Directory -Force (Join-Path $output 'native/quic') | Out-Null
-foreach($name in @('windows','macos')){Copy-Item -LiteralPath (Join-Path $root "native/$name") -Destination (Join-Path $output 'native') -Recurse}
+$hidProject = Join-Path $root 'native/windows/Hid/LanLinkHid.csproj'
+$hidBuild = Join-Path $root '.tools/windows-hid-build'
+$hidPackages = Join-Path $hidBuild 'packages'
+$hidOutput = Join-Path $output 'runtime/hid'
+& dotnet publish $hidProject -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:DebugType=None --artifacts-path $hidBuild "-p:RestorePackagesPath=$hidPackages" -o $hidOutput
+if ($LASTEXITCODE -ne 0) { throw 'Windows Bluetooth HID build failed. Install the .NET 8 SDK.' }
+$hidAssets = Get-Content (Join-Path $hidBuild 'obj/LanLinkHid/project.assets.json') -Raw | ConvertFrom-Json
+$hidFramework = $hidAssets.project.frameworks.PSObject.Properties | Select-Object -First 1
+$hidRuntime = $hidFramework.Value.downloadDependencies | Where-Object { $_.name -eq 'Microsoft.NETCore.App.Runtime.win-x64' } | Select-Object -First 1
+if (!$hidRuntime -or $hidRuntime.version -notmatch '^\[([^,]+),') { throw 'Could not identify the Windows HID runtime license.' }
+$hidRuntimePath = Join-Path $hidPackages ('microsoft.netcore.app.runtime.win-x64/' + $Matches[1])
+foreach ($file in @('LICENSE.TXT','THIRD-PARTY-NOTICES.TXT')) {
+    Copy-Item -LiteralPath (Join-Path $hidRuntimePath $file) -Destination (Join-Path $hidOutput ".NET-$file")
+}
+Copy-Item -LiteralPath (Join-Path $root 'native/macos') -Destination (Join-Path $output 'native') -Recurse
+New-Item -ItemType Directory -Force (Join-Path $output 'native/windows') | Out-Null
+foreach($name in @('bridge.ps1','Bridge.cs','BridgeWork.cs')) {
+    Copy-Item -LiteralPath (Join-Path $root "native/windows/$name") -Destination (Join-Path $output 'native/windows')
+}
 foreach($name in @('src','Cargo.toml','Cargo.lock')){Copy-Item -LiteralPath (Join-Path $root "native/quic/$name") -Destination (Join-Path $output 'native/quic') -Recurse}
 $quicDll=Join-Path $root 'native/quic/target/release/lanlink_quic.dll'
 if(!(Test-Path -LiteralPath $quicDll)){throw 'Build the QUIC native library before packaging.'}

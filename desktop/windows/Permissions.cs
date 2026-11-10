@@ -29,12 +29,126 @@ namespace LanLink.Desktop {
       main=owner;RowDefinitions.Add(new RowDefinition{Height=GridLength.Auto});RowDefinitions.Add(new RowDefinition());
       var header=new StackPanel{Margin=new Thickness(0,0,0,18)};
       var title=new DockPanel();var refresh=MainWindow.LButton("刷新",()=>main.Run(Refresh));DockPanel.SetDock(refresh,Dock.Right);title.Children.Add(refresh);title.Children.Add(MainWindow.LText("本组设备权限",25));header.Children.Add(title);
+      header.Children.Add(MainWindow.LButton("键鼠通道",()=>main.Run(OpenInputTransport)));
       status.Margin=new Thickness(0,10,0,14);status.TextWrapping=TextWrapping.Wrap;header.Children.Add(status);
       var legend=new WrapPanel();foreach(string state in new[]{"ready","unready","disabled"}){var label=MainWindow.Text("● "+StateName(state),12,Color(state));label.Margin=new Thickness(0,0,18,0);legend.Children.Add(label);}header.Children.Add(legend);Children.Add(header);
       var body=new StackPanel{MinWidth=560};var columns=MatrixRow();columns.Margin=new Thickness(18,0,18,12);columns.Children.Add(MainWindow.LText("设备",13,"#7B879D"));for(int i=0;i<Keys.Length;i++){var label=MainWindow.LText(Names[i],12,"#7B879D");label.HorizontalAlignment=HorizontalAlignment.Center;SetColumn(label,i+1);columns.Children.Add(label);}body.Children.Add(columns);body.Children.Add(content);
       var hint=MainWindow.LText("悬停查看含义 · 左键或右键打开菜单\n本机行：功能总开关；其他设备行：本机使用该设备的权限。",12,"#7B879D");hint.Margin=new Thickness(18,14,18,0);body.Children.Add(hint);
       var scroll=new ScrollViewer{Content=body,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Auto};SetRow(scroll,1);Children.Add(scroll);
       timer.Tick+=async delegate{if(IsVisible)await Refresh();};IsVisibleChanged+=async delegate{if(IsVisible){timer.Start();await Refresh();}else{timer.Stop();foreach(var card in cards.Values)foreach(var cell in card.Cells.Values)if(cell.Button.ContextMenu!=null)cell.Button.ContextMenu.IsOpen=false;}};
+    }
+    async Task OpenInputTransport() {
+      var panel=MainWindow.Column();
+      var window=new Window {Title=Locale.T("键鼠通道"),Owner=main,Width=500,SizeToContent=SizeToContent.Height,
+        Resources=main.Resources,WindowStartupLocation=WindowStartupLocation.CenterOwner};
+      panel.Children.Add(MainWindow.LText("键鼠通道",22));
+      var instructions=MainWindow.LText("打开蓝牙配对后，在目标设备的系统设置中连接本机。一次只配对一台设备，再刷新列表。",13);
+      instructions.TextWrapping=TextWrapping.Wrap;panel.Children.Add(instructions);
+      var adapter=MainWindow.Text("",13);panel.Children.Add(adapter);
+      var actions=new WrapPanel();panel.Children.Add(actions);
+      var targets=new ComboBox();var hosts=new ComboBox();var modes=new ComboBox();
+      var name=new TextBox();
+      var confirm=new CheckBox {Content=UiLocale.Content("我已确认配对的设备就是所选目标")};
+      var runtime=MainWindow.Text("",13);
+      foreach(var pair in new[]{new[]{"auto_bt_first","自动（蓝牙优先）"},new[]{"bluetooth_only","仅蓝牙"},new[]{"network_only","仅网络"}})
+        modes.Items.Add(new ComboBoxItem {Tag=pair[0],Content=Locale.T(pair[1])});
+      panel.Children.Add(MainWindow.LText("设备",13));panel.Children.Add(targets);
+      panel.Children.Add(name);
+      panel.Children.Add(MainWindow.LText("偏好",13));panel.Children.Add(modes);
+      var hostLabel=MainWindow.LText("蓝牙目标",13);panel.Children.Add(hostLabel);panel.Children.Add(hosts);
+      var automaticInfo=MainWindow.LText("组内蓝牙跟随当前主设备。首次连接请在手机上允许附近设备权限，并按系统提示确认配对。",12);
+      automaticInfo.TextWrapping=TextWrapping.Wrap;panel.Children.Add(automaticInfo);
+      panel.Children.Add(confirm);panel.Children.Add(runtime);
+      var buttons=new WrapPanel();panel.Children.Add(buttons);
+      panel.Children.Add(MainWindow.LText("蓝牙控制时按 Ctrl + Alt + F12 返回本机。",12));
+      object selected=null;
+      object snapshot=null;
+      bool loading=false;
+      Func<ComboBox,string> value=box=>{
+        var item=box.SelectedItem as ComboBoxItem;
+        return item==null?"":(string)item.Tag;
+      };
+      Func<string,string> ready=state=>Locale.T(state=="ready"?"已就绪":state=="pairing_required"?"需配对":state=="connecting"?"等待连接":state=="degraded"?"尚未确认":"未就绪");
+      Button control=null,remove=null,save=null;
+      Action updateHost=()=>{
+        confirm.Visibility=!Json.Flag(selected,"automaticGroup")&&value(hosts)!=""&&value(hosts)!=Json.Text(selected,"host")?Visibility.Visible:Visibility.Collapsed;
+        confirm.IsChecked=false;
+      };
+      Action select=()=>{
+        if(loading)return;
+        string id=value(targets);
+        selected=(Json.Get(snapshot,"targets") as IEnumerable??new object[0]).Cast<object>().FirstOrDefault(row=>Json.Text(row,"id")==id);
+        bool external=Json.Flag(selected,"external");
+        bool automatic=Json.Flag(selected,"automaticGroup");
+        hosts.Visibility=hostLabel.Visibility=automatic?Visibility.Collapsed:Visibility.Visible;
+        automaticInfo.Visibility=automatic?Visibility.Visible:Visibility.Collapsed;
+        string binding=Json.Text(selected,"host");
+        string mode=Json.Text(selected,"preference");
+        if(mode=="")mode="auto_bt_first";
+        modes.SelectedItem=modes.Items.Cast<ComboBoxItem>().First(row=>(string)row.Tag==mode);
+        hosts.Items.Clear();
+        hosts.Items.Add(new ComboBoxItem {Content=Locale.T("未绑定"),Tag=""});
+        foreach(var item in Json.Get(snapshot,"hosts") as IEnumerable??new object[0]) {
+          string hostId=Json.Text(item,"id");
+          if(hostId.Length<8||!Json.Flag(item,"reportSubscribed"))continue;
+          hosts.Items.Add(new ComboBoxItem {Content=Locale.T("已订阅设备")+" · "+hostId.Substring(0,8),Tag=hostId});
+        }
+        if(!hosts.Items.Cast<ComboBoxItem>().Any(row=>(string)row.Tag==binding))
+          hosts.Items.Add(new ComboBoxItem {Content=Locale.T("已绑定 · 当前离线"),Tag=binding});
+        hosts.SelectedItem=hosts.Items.Cast<ComboBoxItem>().First(row=>(string)row.Tag==binding);
+        name.Visibility=external||id=="external"?Visibility.Visible:Visibility.Collapsed;
+        name.Text=external?Json.Text(selected,"name"):"";
+        var readiness=Json.Get(selected,"readiness");
+        string active=Json.Text(selected,"active");
+        bool standby=Json.Flag(Json.Get(selected,"bluetooth"),"standby");
+        runtime.Text=selected==null?"":Locale.T("蓝牙")+" · "+(standby?Locale.T("已连接 · 待命"):ready(Json.Text(readiness,"bluetooth")))+
+          "    "+Locale.T("网络")+" · "+ready(Json.Text(readiness,"network"))+"    "+Locale.T("当前通道")+" · "+
+          Locale.T(active=="bluetooth"?"蓝牙":active=="network"?"网络":"无");
+        if(Json.Text(selected,"authorization")=="denied")runtime.Text+="\n"+Locale.T("目标设备未允许键鼠控制");
+        control.Visibility=remove.Visibility=external?Visibility.Visible:Visibility.Collapsed;
+        save.IsEnabled=id!="";
+        updateHost();
+      };
+      Action<object> display=result=>{
+        snapshot=result;
+        string id=value(targets);
+        var info=Json.Get(result,"adapter");
+        adapter.Text=Locale.T(Json.Flag(info,"hidServiceReady")?"蓝牙服务已启动":"蓝牙服务未就绪");
+        string reason=Json.Text(info,"reason");
+        if(reason!="")adapter.Text+=" · "+reason;
+        loading=true;
+        targets.Items.Clear();
+        targets.Items.Add(new ComboBoxItem {Content=Locale.T("请选择设备"),Tag=""});
+        foreach(var row in Json.Get(result,"targets") as IEnumerable??new object[0])
+          targets.Items.Add(new ComboBoxItem {Content=Json.Text(row,"name"),Tag=Json.Text(row,"id")});
+        targets.Items.Add(new ComboBoxItem {Content=Locale.T("添加本机外部设备"),Tag="external"});
+        targets.SelectedItem=targets.Items.Cast<ComboBoxItem>().FirstOrDefault(row=>(string)row.Tag==id)??targets.Items[0];
+        loading=false;
+        select();
+      };
+      actions.Children.Add(MainWindow.LButton("开启蓝牙配对",()=>main.Run(async()=>display(await main.Client.Call("input-transport-start")))));
+      actions.Children.Add(MainWindow.LButton("刷新",()=>main.Run(async()=>display(await main.Client.Call("input-transport-status")))));
+      save=MainWindow.LButton("保存",()=>main.Run(async()=>{
+        string id=value(targets),host=value(hosts);
+        var args=new Dictionary<string,object>{{"preference",value(modes)},{"name",name.Text},{"confirmed",confirm.IsChecked==true}};
+        if(id=="external")args["external"]=true;else args["id"]=id;
+        if(!Json.Flag(selected,"automaticGroup")&&host!=Json.Text(selected,"host"))args["host"]=host;
+        display(await main.Client.Call("input-transport-save",args));
+      }));
+      control=MainWindow.LButton("开始控制",()=>main.Run(async()=>{
+        string id=value(targets);window.Close();
+        await main.Client.Call("control",new{id,capture=true,newSession=true});
+      }));
+      remove=MainWindow.LButton("解除绑定",()=>main.Run(async()=>{
+        string id=value(targets);
+        display(await main.Client.Call("input-transport-save",new{id,remove=true}));
+      }));
+      buttons.Children.Add(save);buttons.Children.Add(control);buttons.Children.Add(remove);
+      buttons.Children.Add(MainWindow.LButton("完成",()=>window.Close()));
+      targets.SelectionChanged+=delegate{select();};
+      hosts.SelectionChanged+=delegate{updateHost();};
+      display(await main.Client.Call("input-transport-status"));
+      WindowShell.Wrap(window,panel,false);window.Show();
     }
     static Grid MatrixRow(){var row=new Grid();row.ColumnDefinitions.Add(new ColumnDefinition{Width=new GridLength(1.8,GridUnitType.Star),MinWidth=180});for(int i=0;i<4;i++)row.ColumnDefinitions.Add(new ColumnDefinition{Width=new GridLength(1,GridUnitType.Star),MinWidth=82});return row;}
     public async Task Refresh(){if(busy)return;busy=true;int version=revision;try{var result=await main.Client.Call("group-permissions");if(version==revision)Display(result);}catch(Exception e){status.Text=MainWindow.DisplayError(e.Message)+Locale.T(" 点击刷新重试。");}finally{busy=false;}}

@@ -29,11 +29,51 @@ export class NativeBridge extends EventEmitter {
       if (method === 'screen') return Promise.reject(new Error('模拟模式不提供真实屏幕'));
       return Promise.resolve(method === 'clipboardGet' ? this.simulatedClip || { text: '', files: [] } : method === 'capabilities' ? { simulated: true } : {});
     }
+    if (process.platform === 'win32' && method.startsWith('hid-')) return this.callWindowsHid(method, args, timeout);
     if (!this.child || this.child.exitCode !== null) return Promise.reject(new Error('原生模块不可用'));
     return new Promise((resolve, reject) => { const id = String(++this.seq); const timer = setTimeout(() => { this.pending.delete(id); reject(new Error('原生操作超时')); }, timeout); this.pending.set(id, { resolve, reject, timer }); const moving=method==='input'&&['move','relative'].includes(args.kind)&&this.capabilities.compactMotion===1;
       const values=[args.x??0,args.y??0,args.dx??0,args.dy??0];
       if(moving&&values.every(Number.isFinite))this.child.stdin.write(`@M ${id} ${args.kind==='move'?'m':'r'} ${values.join(' ')}\n`);
       else this.child.stdin.write(JSON.stringify({id,method,args})+'\n'); });
   }
-  close() { this.child?.kill(); this.fail(new Error('服务停止')); }
+  callWindowsHid(method, args, timeout) {
+    if (!this.hidChild && method === 'hid-status') return Promise.resolve({});
+    if (!this.hidChild && method !== 'hid-start') return Promise.reject(new Error('Windows 蓝牙键鼠组件不可用'));
+    if (!this.hidChild) {
+      const executable = path.join(root, 'runtime', 'hid', 'LanLinkHid.exe');
+      const child = spawn(executable, [], { windowsHide:true, stdio:['pipe','pipe','ignore'] });
+      const pending = this.hidPending = new Map();
+      this.hidChild = child;
+      const fail = () => {
+        if (this.hidChild === child) this.hidChild = null;
+        for (const finish of pending.values()) finish(new Error('Windows 蓝牙键鼠组件不可用'));
+        pending.clear();
+      };
+      child.on('error', fail); child.on('exit', fail); child.stdin.on('error', fail);
+      createInterface({input:child.stdout}).on('line', line => {
+        try {
+          const {replyTo, result, error} = JSON.parse(line);
+          pending.get(replyTo)?.(error ? new Error(error) : null, result);
+        } catch {}
+      });
+    }
+    const pending = this.hidPending, child = this.hidChild, id = String(++this.seq);
+    return new Promise((resolve, reject) => {
+      const finish = (error, result) => {
+        clearTimeout(timer); pending.delete(id);
+        if (error) reject(error); else resolve(result);
+      };
+      const timer = setTimeout(() => {
+        finish(new Error('蓝牙键鼠操作超时'));
+        // A stalled provider cannot be allowed to send queued input after fallback.
+        if (method !== 'hid-status' && this.hidChild === child) {
+          this.hidChild = null;
+          child.kill();
+        }
+      }, timeout);
+      pending.set(id, finish);
+      child.stdin.write(JSON.stringify({id,method,args})+'\n');
+    });
+  }
+  close() { this.hidChild?.stdin.end(); this.child?.kill(); this.fail(new Error('服务停止')); }
 }

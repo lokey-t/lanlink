@@ -44,7 +44,7 @@ final class Ui {
     THUMB = dark ? 0xffa8b5ca : Color.WHITE;
     activity.setTheme(dark ? R.style.AppThemeDark : R.style.AppTheme);
   }
-  static int dialogTheme() { return dark ? android.R.style.Theme_Material_NoActionBar : android.R.style.Theme_Material_Light_NoActionBar; }
+  static int dialogTheme() { return dark ? R.style.AppThemeDark : R.style.AppTheme; }
   final Context context;
 
   Ui(Context context) {
@@ -66,6 +66,11 @@ final class Ui {
     GradientDrawable drawable = shape(color, radius);
     drawable.setStroke(dp(1), border);
     return drawable;
+  }
+
+  GradientDrawable sidebarSurface() {
+    return new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
+        new int[] {BG, dark ? 0xff25283f : 0xffefecfc});
   }
 
   android.graphics.drawable.Drawable touch(int color, int radius) {
@@ -195,21 +200,27 @@ final class Ui {
   }
 
   View controlTile(String glyph, String label, boolean selected, Runnable action) {
-    LinearLayout tile = column();
+    return controlTile(glyph, label, selected, false, action);
+  }
+
+  View controlTile(String glyph, String label, boolean selected, boolean compact, Runnable action) {
+    LinearLayout tile = compact ? row() : column();
     tile.setGravity(Gravity.CENTER);
-    tile.setPadding(dp(4), dp(12), dp(4), dp(12));
+    tile.setPadding(dp(compact ? 12 : 4), dp(compact ? 6 : 12), dp(compact ? 12 : 4), dp(compact ? 6 : 12));
     tile.setBackground(new RippleDrawable(ColorStateList.valueOf(0x227163c8),
         outlinedShape(selected ? LILAC : CARD, 22, selected ? PURPLE : LINE), shape(-1, 22)));
     FrameLayout badge = new FrameLayout(context);
     badge.setBackground(outlinedShape(selected ? CARD : BG, 15, selected ? PURPLE : LINE));
     badge.addView(icon(glyph, selected ? PURPLE : MUTED),
         new FrameLayout.LayoutParams(dp(27), dp(27), Gravity.CENTER));
-    tile.addView(badge, new LinearLayout.LayoutParams(dp(48), dp(48)));
-    gap(tile, 9);
+    tile.addView(badge, new LinearLayout.LayoutParams(dp(compact ? 36 : 48), dp(compact ? 36 : 48)));
+    if (compact) tile.addView(new View(context), new LinearLayout.LayoutParams(dp(10), 1));
+    else gap(tile, 9);
     TextView title = text(label, 13, selected ? PURPLE : INK);
     title.setGravity(Gravity.CENTER);
     title.setSingleLine(true);
-    tile.addView(title, new LinearLayout.LayoutParams(-1, -2));
+    title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+    tile.addView(title, new LinearLayout.LayoutParams(compact ? 0 : -1, -2, compact ? 1 : 0));
     tile.setTag("control-tile-" + glyph);
     tile.setSelected(selected);
     tile.setFocusable(true);

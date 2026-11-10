@@ -53,6 +53,32 @@ public final class PermissionFlowTest extends Instrumentation {
     return f.get(target);
   }
 
+  private void checkTimedToast(MainActivity activity) throws Exception {
+    runOnMainSync(() -> activity.toast("已复制到本机剪贴板"));
+    waitForIdleSync();
+    Object controller = field(activity, "timedToast");
+    PopupWindow first = (PopupWindow) field(controller, "active");
+    check(first != null && first.isShowing(), "first toast visible");
+    capture("timed-toast");
+    runOnMainSync(() -> activity.toast("布局已保存"));
+    waitForIdleSync();
+    PopupWindow second = (PopupWindow) field(controller, "active");
+    check(second != first && !first.isShowing() && second.isShowing(), "toast replacement");
+    Thread.sleep(500);
+    runOnMainSync(() -> {
+      LinearLayout card = (LinearLayout) second.getContentView();
+      View remaining = ((FrameLayout) card.getChildAt(1)).getChildAt(0);
+      check(remaining.getScaleX() > 0 && remaining.getScaleX() < 1, "countdown advances");
+      check(card.getWidth() <= new Ui(activity).dp(270), "toast stays compact");
+    });
+    long deadline = android.os.SystemClock.uptimeMillis() + 5000;
+    while (field(controller, "active") != null && android.os.SystemClock.uptimeMillis() < deadline) {
+      Thread.sleep(100);
+      waitForIdleSync();
+    }
+    check(field(controller, "active") == null && !second.isShowing(), "toast disappears at expiry");
+  }
+
   private void capture(String name) throws Exception {
     Thread.sleep(650);
     android.graphics.Bitmap bitmap = getUiAutomation().takeScreenshot();
@@ -156,6 +182,12 @@ public final class PermissionFlowTest extends Instrumentation {
           startActivitySync(
               new Intent(getTargetContext(), MainActivity.class)
                   .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_CLEAR_TASK));
+      if (options != null && options.containsKey("timedToastProbe")) {
+        checkTimedToast((MainActivity) activity);
+        result.putString("stream", "PASS: compact timed toast, countdown, replacement and dismissal\n");
+        finish(Activity.RESULT_OK, result);
+        return;
+      }
       if (options != null && options.containsKey("videoPort")) {
         result.putString("stream", VideoCodecProbe.run(this, activity, options) + "\n");
         finish(Activity.RESULT_OK, result);
@@ -167,6 +199,8 @@ public final class PermissionFlowTest extends Instrumentation {
       check(service != null, "service started");
       if (options != null) for (String key : new String[] {"multiComputerToken", "adbSmokeToken", "touchpadToken", "stagingSmokeToken", "clipboardSmokeToken"})
         if (options.containsKey(key)) { probeGroup = new ProbeGroup(service, options.getString(key)); break; }
+      if(options!=null&&options.containsKey("viewerStartupProbe")){result.putString("stream",ViewerStartupProbe.run(this,activity)+"\n");finish(Activity.RESULT_OK,result);return;}
+      if(options!=null&&options.containsKey("uiMotionProbe")){result.putString("stream",UiMotionProbe.run(this,activity)+"\n");finish(Activity.RESULT_OK,result);return;}
       if(options!=null&&options.containsKey("fullscreenGestureProbe")){result.putString("stream",FullscreenGestureProbe.run(this)+"\n");finish(Activity.RESULT_OK,result);return;}
       if(options!=null&&options.containsKey("fullscreenUiProbe")){result.putString("stream",FullscreenGestureProbe.runUi(this,activity)+"\n");finish(Activity.RESULT_OK,result);return;}
       if(options!=null&&options.containsKey("inputOnlyTouchpadProbe")){result.putString("stream",InputOnlyTouchpadProbe.run(this,service)+"\n");finish(Activity.RESULT_OK,result);return;}

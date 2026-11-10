@@ -26,13 +26,14 @@ class FakeNative extends EventEmitter {
 const dir = await mkdtemp(path.join(os.tmpdir(), 'lanlink-adb-smoke-'));
 const config = await loadConfig(dir);
 config.permissions = { input: false, clipboard: false, screen: false, shutdown: false };
+const bluetoothFallback = process.argv.includes('--bluetooth-fallback');
 const service = new Service(config, dir, new FakeNative(), { port: 0, host: '0.0.0.0', noDiscovery: true });
 let instrument, peer, realNative;
 // Fixture-only methods are registered on its TCP listener, not the production QUIC handler.
 const testRequest = (...args) => (peer.tcpRequest || peer.request.bind(peer))(...args);
 try {
   await service.start();
-  instrument = exec(adb, ['-s', serial, 'shell', 'am', 'instrument', '-w', '-e', 'adbSmokePort', String(service.port), '-e', 'adbSmokeToken', config.token, 'com.lanlink.app.test/com.lanlink.app.PermissionFlowTest'], { windowsHide: true, timeout: 100000, maxBuffer: 1024 * 1024 }).then(r => ({ output: r.stdout }), () => ({ failed: true }));
+  instrument = exec(adb, ['-s', serial, 'shell', 'am', 'instrument', '-w', '-e', 'adbSmokePort', String(service.port), '-e', 'adbSmokeToken', config.token, ...(bluetoothFallback ? ['-e', 'adbSmokeHidDisabled', '1'] : []), 'com.lanlink.app.test/com.lanlink.app.PermissionFlowTest'], { windowsHide: true, timeout: 100000, maxBuffer: 1024 * 1024 }).then(r => ({ output: r.stdout }), () => ({ failed: true }));
   const deadline = Date.now() + 20000;
   while (!(peer = [...service.peers.values()].find(p => p.info?.platform === 'android'))) {
     if (Date.now() > deadline) throw Error('Android fixture did not connect to desktop service');
@@ -103,13 +104,39 @@ try {
     service.native.capabilities.host = true; // FakeNative performs no computer input capture.
     await service.returnLocal();
     service.config.master = true; service.config.edges = { right: id }; service.config.dwell = 100;
+    await peer.request('prepare', {pointer:true,screen:false});
+    if ((await testRequest('testTarget')).externalMouse)
+      throw Error('Preparing control must not register the Android system mouse');
+    const ready = service.inputTransport.ready, host = service.inputTransport.host, request = peer.request;
+    let bluetoothDisabled = false, attemptedBluetoothAcquire = false;
+    if (bluetoothFallback) {
+      if (service.inputTransport.preference(id) !== 'auto_bt_first' || peer.info.capabilities.bluetoothControl !== 1)
+        throw Error('The emulator must advertise Bluetooth input and use the default input preference');
+      service.inputTransport.ready = target => target === id;
+      service.inputTransport.host = target => target === id ? {id:'stale-emulator-hid-link'} : null;
+      peer.request = async (method, args, timeout) => {
+        if (method === 'acquire' && args?.inputTransport === 'bluetooth') attemptedBluetoothAcquire = true;
+        const result = await request.call(peer, method, args, timeout);
+        if (method === 'permission-status' && result.inputTransport?.bluetoothEnabled === false)
+          bluetoothDisabled = true;
+        return result;
+      };
+    }
     const clock = service.edge.now; let now = clock()+1000; service.edge.now=()=>now;
     try {
       await service.nativeEvent({type:'cursor',x:1000,y:540,width:1920,height:1080});
       await service.nativeEvent({type:'cursor',x:1919,y:540,width:1920,height:1080});now+=150;
       await service.nativeEvent({type:'cursor',x:1919,y:540,width:1920,height:1080});
-    } finally { service.edge.now=clock; service.edge.cooldown=0; }
-    if(service.active!==id || !service.capture) throw Error('Edge dwell did not acquire phone control');
+    } finally {
+      service.edge.now=clock; service.edge.cooldown=0;
+      service.inputTransport.ready = ready; service.inputTransport.host = host; peer.request = request;
+    }
+    if(service.active!==id || !service.capture || service.activeSession.transport !== 'network')
+      throw Error('Edge dwell did not acquire phone control over the network');
+    if (!process.argv.includes('--dual-link') && peer.fastLink?.serial)
+      throw Error('The LAN mouse test must run without a USB input route');
+    if (bluetoothFallback && (!bluetoothDisabled || attemptedBluetoothAcquire))
+      throw Error('The desktop did not honor the Android Bluetooth preference before acquiring control');
     let pointerState;for(let i=0;i<10;i++){pointerState=await testRequest('testTarget');if(pointerState.externalMouse)break;await new Promise(r=>setTimeout(r,60));}
 
     if (!pointerState.externalMouse || !pointerState.externalKeyboard) throw Error('Native mouse and keyboard must both be registered: '+JSON.stringify(pointerState));
@@ -117,9 +144,11 @@ try {
     const speed = pointerState.externalMouse ? 1.8 : 1;
     await service.nativeEvent({type:'input',kind:'move',dx:(target.x-service.position.x)*caps.width/speed,dy:(target.y-service.position.y)*caps.height/speed});
     while(service.moving) await new Promise(resolve=>setTimeout(resolve,10));
+    const inputDump = async () => (await exec(adb,['-s',serial,'shell','dumpsys','input'],
+      {windowsHide:true,maxBuffer:4*1024*1024})).stdout;
     const driveNativeCursor=async (x,y) => {
       for (let attempt=0;attempt<12;attempt++) {
-        const dump=(await exec(adb,['-s',serial,'shell','dumpsys','input'],{windowsHide:true,maxBuffer:4*1024*1024})).stdout;
+        const dump=await inputDump();
         const moves=[...dump.matchAll(/source=MOUSE[\s\S]{0,400}?xCursorPosition=([\d.]+), yCursorPosition=([\d.]+)/g)];
         const last=moves.at(-1);
         if (!last && attempt<3) {
@@ -135,6 +164,13 @@ try {
       throw Error('Native cursor could not reach test target');
     };
     if (pointerState.externalMouse) await driveNativeCursor(target.x,target.y);
+    // The emulator can cover the test dialog with a system transition snapshot.
+    // Wait for it to clear before asserting that the click reached the button.
+    for (let i=0;i<20;i++) {
+      if (!(await inputDump()).includes('transition snapshot:')) break;
+      if (i === 19) throw Error('Android transition snapshot still covers the test dialog');
+      await new Promise(resolve=>setTimeout(resolve,100));
+    }
     await service.nativeEvent({type:'input',kind:'button',button:0,down:true});
     await service.nativeEvent({type:'input',kind:'button',button:0,down:false});
     let clicked;
@@ -145,6 +181,19 @@ try {
       throw Error('Phone did not receive the click after edge switching and relative movement: '+JSON.stringify(clicked));
     }
     console.log('PASS: edge dwell -> '+(pointerState.externalMouse?'native external mouse and keyboard':'fallback pointer')+' -> relative movement -> actual phone click.');
+    const lastScroll = async () =>
+      [...(await inputDump()).matchAll(/MotionEvent\([^\n]*?eventTime=(\d+), source=MOUSE, [^\n]*?action=SCROLL,/g)].at(-1)?.[1];
+    const previousScroll = await lastScroll();
+    await service.nativeEvent({type:'input',kind:'wheel',delta:120});
+    let scrolled = false;
+    for (let i=0;i<10;i++) {
+      const latest = await lastScroll();
+      if (latest && latest !== previousScroll) { scrolled = true; break; }
+      await new Promise(resolve=>setTimeout(resolve,100));
+    }
+    if (!scrolled) throw Error('Android did not receive the native mouse wheel event');
+    console.log('PASS: Android received a native mouse wheel event over LAN.');
+    if (bluetoothFallback) console.log('PASS: Android disabled Bluetooth input; the same edge gesture used LAN despite the simulated connected HID link.');
     if (pointerState.externalMouse) {
       await peer.request('input',{kind:'key',code:'KeyA',down:true});
       await peer.request('input',{kind:'key',code:'KeyA',down:false});

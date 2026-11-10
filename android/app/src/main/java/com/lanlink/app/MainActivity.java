@@ -4,6 +4,7 @@ import static com.lanlink.app.Wire.obj;
 
 import android.Manifest;
 import android.app.*;
+import android.bluetooth.BluetoothAdapter;
 import android.content.*;
 import android.graphics.*;
 import android.media.projection.MediaProjectionManager;
@@ -36,11 +37,123 @@ public class MainActivity extends Activity {
   private final Map<String, Switch> permissionSwitches = new HashMap<>();
   private final Set<Dialog> sheets = new HashSet<>();
   private String page = "devices", selected = "local", noticeSignature = "";
-  private android.window.OnBackInvokedCallback pageBackCallback;
-  private View backPreview;
   private String centerSelection="",centerSignature="",savingStage;
   private LinearLayout centerContent;private ScrollView centerScroll;
   private boolean resumed;
+  private boolean tabletLayout, landscapeLayout, twoColumnLayout, phoneLandscape;
+  private final Map<Dialog, Runnable> floatingLayouts = new HashMap<>();
+
+  private boolean deviceColumns() {
+    android.content.res.Configuration config = getResources().getConfiguration();
+    return landscapeLayout || phoneLandscape && (config.screenWidthDp - 112) / config.fontScale >= 640;
+  }
+
+  private void updateWindowLayout() {
+    android.content.res.Configuration config = getResources().getConfiguration();
+    tabletLayout = config.screenWidthDp >= 600 && config.screenHeightDp >= 480;
+    phoneLandscape = !tabletLayout && config.screenWidthDp > config.screenHeightDp;
+    landscapeLayout = tabletLayout && config.screenWidthDp >= 1000
+        && config.screenWidthDp > config.screenHeightDp;
+    int contentWidth = Math.min(landscapeLayout ? 1320 : 960,
+        config.screenWidthDp - (tabletLayout ? sidebarWidthDp() : phoneLandscape ? 112 : 0));
+    twoColumnLayout = (tabletLayout || phoneLandscape) && (contentWidth - 88) / config.fontScale >= 640;
+  }
+
+  private int sidebarWidthDp() {
+    int width = getResources().getConfiguration().screenWidthDp;
+    return width >= 1000 ? 224 : width >= 800 ? 200 : 176;
+  }
+
+  private int pageWidthLimit() { return landscapeLayout ? 1320 : 960; }
+
+  private String renderedPage;
+  private FrameLayout pageHost;
+  private Dialog popupDialog;
+  private String popupParent = "devices";
+  private ScrollView coreScroll;
+  private int popupScrollY;
+  private LinearLayout centerFunctions;
+
+  private static boolean isCorePage(String value) {
+    return "devices".equals(value) || "center".equals(value) || "settings".equals(value);
+  }
+
+  private boolean motionEnabled() {
+    return android.animation.ValueAnimator.areAnimatorsEnabled();
+  }
+
+  @Override public void onBackPressed() {
+    if (popupDialog != null && popupDialog.isShowing()) popupDialog.cancel();
+    else if (Build.VERSION.SDK_INT >= 31) super.onBackPressed();
+    else moveTaskToBack(true);
+  }
+
+  private void dismissPopupPage() {
+    if (popupDialog == null) return;
+    Dialog previous = popupDialog; popupDialog = null;
+    previous.setOnDismissListener(null); previous.dismiss();
+  }
+
+  private void showPopupPage() {
+    String target = page;
+    if (popupDialog == null) {
+      if (isCorePage(renderedPage)) popupParent = renderedPage;
+      if (root == null) {
+        page = popupParent; renderPage(); page = target;
+      }
+      popupScrollY = coreScroll == null ? 0 : coreScroll.getScrollY();
+    } else dismissPopupPage();
+    PredictiveDialog dialog = new PredictiveDialog(this, Ui.dialogTheme());
+    popupDialog = dialog;
+    groupLayoutPanel = null; permissionSwitches.clear();
+    LinearLayout outer = ui.column(); outer.setBackgroundColor(Ui.BG);
+    ScrollView scroll = new ScrollView(this); scroll.setFillViewport(true);
+    layout = ui.column();
+    int inset = tabletLayout ? 32 : phoneLandscape ? 12 : 22;
+    layout.setPadding(ui.dp(inset), ui.dp(inset), ui.dp(inset), ui.dp(24));
+    final LinearLayout content = layout;
+    scroll.addView(content);
+    scroll.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+      int width = Math.min(r - l, ui.dp(pageWidthLimit()));
+      FrameLayout.LayoutParams size = (FrameLayout.LayoutParams)content.getLayoutParams();
+      if (size.width != width) {
+        size.width = width; size.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
+        content.setLayoutParams(size);
+      }
+    });
+    outer.addView(scroll, new LinearLayout.LayoutParams(-1, -1));
+    if ("layout".equals(target)) groupLayoutPage();
+    else if ("premium".equals(target)) premiumFeaturesPage();
+    else if ("hid".equals(target)) bluetoothHidPage();
+    else devicePermissionsPage();
+    dialog.setContentView(outer);
+    dialog.setOnDismissListener(ignored -> {
+      if (popupDialog != dialog) return;
+      popupDialog = null;
+      if (!alive || isFinishing()) return;
+      page = popupParent; renderPage();
+      if (coreScroll != null) {
+        ScrollView restored = coreScroll;
+        restored.post(() -> restored.scrollTo(0, popupScrollY));
+      }
+    });
+    dialog.show();
+    Window window = dialog.getWindow();
+    if (window != null) {
+      window.setBackgroundDrawableResource(android.R.color.transparent);
+      window.setLayout(-1, -1); applyInsets(outer, window);
+    }
+    update();
+    animateEntrance(content, 0, ui.dp(20));
+  }
+
+  private void animateEntrance(View view, float x, float y) {
+    if (!motionEnabled()) return;
+    view.setAlpha(0); view.setTranslationX(x); view.setTranslationY(y);
+    view.animate().alpha(1).translationX(0).translationY(0).setDuration(260)
+        .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
+  }
+
   private Dialog viewer;
   private Dialog pairDialog;
   private Dialog shareDialog;
@@ -93,13 +206,40 @@ public class MainActivity extends Activity {
           try {
             job.run();
           } catch (Exception e) {
-            main.post(() -> toast(e.getMessage() == null ? Language.t("操作失败") : e.getMessage()));
+            main.post(() -> showOperationError(e.getMessage()));
           }
         });
   }
 
-  private void toast(String s) {
-    Toast.makeText(this, displayError(s), Toast.LENGTH_LONG).show();
+  private final TimedToast timedToast = new TimedToast();
+  private AlertDialog operationError;
+
+  void toast(String s) { toast(s, false); }
+
+  private void toast(String s, boolean warning) {
+    if (!resumed || !alive || isFinishing()) return;
+    View anchor = getWindow().getDecorView();
+    ArrayList<Dialog> windows = new ArrayList<>(sheets);
+    Collections.addAll(windows, popupDialog, pairDialog, viewer);
+    for (Dialog dialog : windows) {
+      if (dialog != null && dialog.isShowing() && dialog.getWindow() != null) {
+        View decor = dialog.getWindow().getDecorView();
+        if (decor.hasWindowFocus()) { anchor = decor; break; }
+      }
+    }
+    timedToast.show(anchor, ui, Language.t(displayError(s)), warning);
+  }
+
+  void showOperationError(String s) {
+    if (!resumed || !alive || isFinishing()) return;
+    timedToast.dismiss();
+    String message = Language.t(displayError(s));
+    if (operationError != null && operationError.isShowing()) {
+      operationError.setMessage(message);
+      return;
+    }
+    operationError = new AlertDialog.Builder(this).setMessage(message)
+        .setPositiveButton(Language.t("关闭"), null).show();
   }
 
   private String displayError(String s) {
@@ -120,7 +260,7 @@ public class MainActivity extends Activity {
     Set<String> connectedBefore = new HashSet<>();
     if (LinkService.instance != null) connectedBefore.addAll(LinkService.instance.peers.keySet());
     boolean[] awaitingConnection = {false};
-    Dialog dialog = new Dialog(this, Ui.dialogTheme());
+    Dialog dialog = new PredictiveDialog(this, Ui.dialogTheme());
     pairDialog = dialog;
     LinearLayout outer = ui.column();
     outer.setBackgroundColor(Ui.BG);
@@ -342,7 +482,8 @@ public class MainActivity extends Activity {
           boolean open = form.getVisibility() != View.VISIBLE;
           form.setVisibility(open ? View.VISIBLE : View.GONE);
           manualText.setText(open ? Language.t(" 收起输入") : Language.t(" 手动输入"));
-          if (open) form.post(() -> scroll.smoothScrollTo(0, joinCard.getTop() + form.getTop()));
+          if (open) form.post(() -> entry.requestRectangleOnScreen(
+              new android.graphics.Rect(0, 0, entry.getWidth(), entry.getHeight()), false));
         });
     Runnable beginJoin =
         () -> {
@@ -422,12 +563,47 @@ public class MainActivity extends Activity {
             LinkService.instance.pairing.hide();
           if (pairDialog == dialog) pairDialog = null;
         });
+    View pairingBack = box.getChildAt(0);
+    TextView pairingTitle = (TextView)box.getChildAt(2), pairingSubtitle = (TextView)box.getChildAt(4);
+    Runnable reflow = () -> {
+      android.content.res.Configuration config = getResources().getConfiguration();
+      boolean compact = config.screenWidthDp > config.screenHeightDp && config.screenHeightDp < 480
+          && config.screenWidthDp / config.fontScale >= 700;
+      String tag = "pairing-columns-" + compact;
+      if (tag.equals(box.getTag())) return;
+      box.setTag(tag);
+      for (View child : new View[]{pairingBack, pairingTitle, pairingSubtitle, joinCard, card})
+        if (child.getParent() instanceof ViewGroup) ((ViewGroup)child.getParent()).removeView(child);
+      box.removeAllViews();
+      box.setPadding(ui.dp(24), ui.dp(compact ? 12 : 18), ui.dp(24), ui.dp(compact ? 12 : 28));
+      if (compact) {
+        LinearLayout header = ui.row();
+        header.addView(pairingBack, new LinearLayout.LayoutParams(ui.dp(48), ui.dp(48)));
+        LinearLayout.LayoutParams label = new LinearLayout.LayoutParams(0, -2, 1);
+        label.setMargins(ui.dp(12), 0, 0, 0); header.addView(pairingTitle, label);
+        pairingTitle.setTextSize(24); box.addView(header); ui.gap(box, 6);
+      } else {
+        pairingTitle.setTextSize(30);
+        box.addView(pairingBack, new LinearLayout.LayoutParams(ui.dp(48), ui.dp(48)));
+        ui.gap(box, 12); box.addView(pairingTitle); ui.gap(box, 8);
+      }
+      box.addView(pairingSubtitle); ui.gap(box, compact ? 12 : 18);
+      if (compact) {
+        LinearLayout columns = ui.row(); columns.setGravity(Gravity.TOP); columns.setTag("pairing-columns");
+        columns.addView(joinCard, new LinearLayout.LayoutParams(0, -2, 1));
+        LinearLayout.LayoutParams right = new LinearLayout.LayoutParams(0, -2, 1);
+        right.setMargins(ui.dp(16), 0, 0, 0); columns.addView(card, right); box.addView(columns);
+      } else { box.addView(joinCard); ui.gap(box, 18); box.addView(card); }
+    };
+    outer.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob) -> reflow.run());
+    reflow.run();
     dialog.show();
     if (scannedCode != null) main.post(beginJoin);
     Window w = dialog.getWindow();
     if (w != null) {
       w.setLayout(-1, -1);
       w.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+      w.setBackgroundDrawableResource(android.R.color.transparent);
       applyInsets(outer, w);
     }
     refreshCode.run();
@@ -439,9 +615,10 @@ public class MainActivity extends Activity {
     Ui.applyTheme(this);
     super.onCreate(state);
     ui = new Ui(this);
-    appUpdater=new AppUpdater(this);
+    appUpdater=AppUpdater.get(this);
     if (state != null) {
       page = state.getString("page", "devices");
+      popupParent = state.getString("popupParent", "permissions".equals(page) ? "settings" : "devices");
       selected = state.getString("selected", "local");
       savingStage=state.getString("savingStage");centerSelection=state.getString("centerSelection","");
       String logFile = state.getString("pendingLogExport");
@@ -471,7 +648,7 @@ public class MainActivity extends Activity {
       view.setOnApplyWindowInsetsListener(
           (v, insets) -> {
             Insets bars =
-                insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.ime());
+                insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout() | WindowInsets.Type.ime());
             v.setPadding(bars.left, bars.top, bars.right, bars.bottom);
             return insets;
           });
@@ -480,7 +657,14 @@ public class MainActivity extends Activity {
   }
 
   private void renderPage() {
-    resetBackPreview();
+    if ("clipboard".equals(page)) page = "center";
+    updateWindowLayout();
+    if (!isCorePage(page)) { showPopupPage(); return; }
+    dismissPopupPage();
+    boolean pageChanged = renderedPage != null && !renderedPage.equals(page);
+    boolean enteringCenter = pageChanged && "center".equals(page);
+    renderedPage = page;
+    centerFunctions = null;
     groupLayoutPanel = null;
     permissionSwitches.clear();
     signature = "";
@@ -490,28 +674,42 @@ public class MainActivity extends Activity {
     noticeBox = ui.column();
 
     ScrollView scroll = new ScrollView(this);
+    coreScroll = scroll;
     scroll.setFillViewport(true);
     scroll.setClipToPadding(false);
     layout = ui.column();
-    layout.setPadding(ui.dp(22), ui.dp(22), ui.dp(22), ui.dp(24));
-    scroll.addView(layout);
+    int pageInset = tabletLayout ? 32 : 22;
+    layout.setPadding(ui.dp(pageInset), ui.dp(phoneLandscape ? 12 : tabletLayout ? 32 : 22),
+        ui.dp(pageInset), ui.dp(phoneLandscape ? 12 : 24));
+    final LinearLayout pageContent = layout;
+    scroll.addView(pageContent);
+    scroll.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+      int width = Math.min(r - l, ui.dp(pageWidthLimit()));
+      android.widget.FrameLayout.LayoutParams params = (android.widget.FrameLayout.LayoutParams) pageContent.getLayoutParams();
+      if (params.width != width) {
+        params.width = width; params.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
+        pageContent.setLayoutParams(params);
+      }
+    });
     root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, page.equals("center")?3:1));
-    if (page.equals("layout")) groupLayoutPage();
-    else if (page.equals("permissions")) devicePermissionsPage();
-    else if (page.equals("settings")) settingsPage();
+    if (page.equals("settings")) settingsPage();
     else if(page.equals("center")||page.equals("clipboard")){page="center";controlCenter(scroll);}
     else devicesPage();
     navigation = ui.row();
-    navigation.setPadding(ui.dp(20), ui.dp(10), ui.dp(20), ui.dp(10));
+    navigation.setPadding(ui.dp(20), ui.dp(phoneLandscape ? 4 : 10), ui.dp(20), ui.dp(phoneLandscape ? 4 : 10));
     // A translucent surface over the pale page provides a quiet glass-like footer.
     // Keep text and icons sharp, including on devices without window blur support.
     navigation.setBackground(ui.shape(Ui.CARD, 26));
     navigation.setElevation(ui.dp(4));
     for (String tab : new String[] {"devices", "center", "settings"}) {
       boolean on = tab.equals(page) || tab.equals("settings") && page.equals("permissions") || tab.equals("devices") && page.equals("layout");
-      LinearLayout nav = ui.column();
-      nav.setGravity(Gravity.CENTER);
-      nav.setPadding(0, ui.dp(6), 0, ui.dp(6));
+      LinearLayout nav = tabletLayout || phoneLandscape ? ui.row() : ui.column();
+      nav.setGravity(tabletLayout ? Gravity.CENTER_VERTICAL : Gravity.CENTER);
+      nav.setPadding(tabletLayout ? ui.dp(16) : 0, ui.dp(tabletLayout ? 12 : 6),
+          tabletLayout ? ui.dp(12) : 0, ui.dp(tabletLayout ? 12 : 6));
+      nav.setTag("navigation-item");
+      nav.setSelected(on);
+      nav.setMinimumHeight(ui.dp(tabletLayout ? 64 : phoneLandscape ? 48 : 0));
       nav.setBackground(ui.touch(on ? Ui.LILAC : Color.TRANSPARENT, 18));
       nav.addView(
           ui.icon(
@@ -520,11 +718,14 @@ public class MainActivity extends Activity {
                   : tab.equals("settings") ? "settings" : tab.equals("center")?"center":"monitor",
               on ? Ui.PURPLE : Ui.MUTED),
           new LinearLayout.LayoutParams(ui.dp(24), ui.dp(24)));
-      ui.gap(nav, 5);
+      if (tabletLayout || phoneLandscape) {
+        nav.addView(new View(this), new LinearLayout.LayoutParams(ui.dp(tabletLayout ? 16 : 10), 1));
+      } else ui.gap(nav, 5);
       TextView navLabel =
-          ui.text(tab.equals("devices") ? Language.t("设备") : tab.equals("center")?Language.t("控制中心"):Language.t("设置"), 12, on ? Ui.PURPLE : Ui.MUTED);
-      navLabel.setGravity(Gravity.CENTER);
-      nav.addView(navLabel);
+          ui.text(tab.equals("devices") ? Language.t("设备") : tab.equals("center")?Language.t("控制中心"):Language.t("设置"), tabletLayout ? 16 : 12, on ? Ui.PURPLE : Ui.MUTED);
+      navLabel.setGravity(tabletLayout ? Gravity.START | Gravity.CENTER_VERTICAL : Gravity.CENTER);
+      if (tabletLayout) nav.addView(navLabel, new LinearLayout.LayoutParams(0, -2, 1));
+      else nav.addView(navLabel);
       nav.setContentDescription(tab.equals("devices") ? Language.t("设备页面") : tab.equals("center")?Language.t("控制中心页面"):Language.t("设置页面"));
       nav.setOnClickListener(
           v -> {
@@ -537,84 +738,176 @@ public class MainActivity extends Activity {
       navigation.addView(nav, new LinearLayout.LayoutParams(0, -2, 1));
     }
     root.addView(noticeBox);
-    root.addView(navigation);
-    setContentView(root);
+    LinearLayout.LayoutParams dockSize = new LinearLayout.LayoutParams(-1, -2);
+    dockSize.gravity = Gravity.CENTER_HORIZONTAL;
+    if (tabletLayout) dockSize.setMargins(ui.dp(16), 0, ui.dp(16), ui.dp(12));
+    root.addView(navigation, dockSize);
+    final LinearLayout dock = navigation;
+    root.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+      if (tabletLayout || phoneLandscape) return;
+      int width = Math.min(ui.dp(720), r - l - root.getPaddingLeft() - root.getPaddingRight()
+          - (tabletLayout ? ui.dp(32) : 0));
+      LinearLayout.LayoutParams params = (LinearLayout.LayoutParams) dock.getLayoutParams();
+      if (width > 0 && params.width != width) { params.width = width; dock.setLayoutParams(params); }
+    });
+    if (tabletLayout) arrangeNavigationRail();
+    else if (phoneLandscape) arrangePhoneDock();
+    pageHost = new FrameLayout(this);
+    pageHost.setBackgroundColor(Ui.BG);
+    pageHost.addView(root, new FrameLayout.LayoutParams(-1, -1));
+    setContentView(pageHost);
     applyInsets(root, getWindow());
-    updatePageBackCallback();
     update();
-  }
-
-  private boolean returnToParentPage() {
-    if (page.equals("devices")) return false;
-    page = page.equals("permissions") ? "settings" : "devices";
-    renderPage();
-    return true;
-  }
-
-  @Override public void onBackPressed() {
-    if (!returnToParentPage()) super.onBackPressed();
-  }
-
-  private void updatePageBackCallback() {
-    if (Build.VERSION.SDK_INT < 33) return;
-    if (page.equals("devices")) {
-      unregisterPageBackCallback();
-    } else if (pageBackCallback == null) {
-      pageBackCallback = Build.VERSION.SDK_INT >= 34
-          ? createPageBackAnimation() : this::returnToParentPage;
-      getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
-          android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT, pageBackCallback);
+    // Core tabs are peers. Leave Back to the framework so it can preview the
+    // launcher (or previous task); each popup window owns its own callback.
+    if (pageChanged) animateEntrance(layout, 0, ui.dp(20));
+    if (enteringCenter && centerFunctions != null && motionEnabled()) {
+      LinearLayout functions = centerFunctions;
+      // Clip at the strip boundary: every tile starts fully below the dock edge.
+      for (int i = 0; i < functions.getChildCount(); i++) {
+        View tile = functions.getChildAt(i);
+        tile.setTranslationY(ui.dp(160));
+        final int delay = i * 40;
+        tile.post(() -> tile.animate().translationY(0).setStartDelay(delay).setDuration(380)
+            .setInterpolator(new android.view.animation.DecelerateInterpolator()).start());
+      }
     }
   }
 
-  private void unregisterPageBackCallback() {
-    if (Build.VERSION.SDK_INT >= 33 && pageBackCallback != null) {
-      getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(pageBackCallback);
-      pageBackCallback = null;
+  private void arrangePhoneDock() {
+    LinearLayout body = ui.column();
+    while (root.getChildCount() > 0) {
+      View child = root.getChildAt(0); root.removeViewAt(0);
+      if (child != navigation) body.addView(child);
     }
+    root.setOrientation(LinearLayout.HORIZONTAL);
+    navigation.setOrientation(LinearLayout.VERTICAL);
+    navigation.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+    navigation.setPadding(ui.dp(8), ui.dp(8), ui.dp(8), ui.dp(8));
+    navigation.setTag("phone-landscape-dock");
+    for (int i = 0; i < navigation.getChildCount(); i++) {
+      LinearLayout item = (LinearLayout)navigation.getChildAt(i);
+      item.setOrientation(LinearLayout.VERTICAL); item.setGravity(Gravity.CENTER);
+      item.setPadding(ui.dp(2), ui.dp(8), ui.dp(2), ui.dp(8));
+      item.setMinimumHeight(ui.dp(64));
+      item.getChildAt(1).setLayoutParams(new LinearLayout.LayoutParams(1, ui.dp(5)));
+      LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(-1, 0, 1);
+      size.topMargin = i == 0 ? 0 : ui.dp(4); item.setLayoutParams(size);
+    }
+    LinearLayout.LayoutParams dockSize = new LinearLayout.LayoutParams(ui.dp(88), -2);
+    dockSize.gravity = Gravity.CENTER_VERTICAL;
+    dockSize.setMargins(ui.dp(12), ui.dp(8), ui.dp(12), ui.dp(8));
+    root.addView(navigation, dockSize);
+    root.addView(body, new LinearLayout.LayoutParams(0, -1, 1));
+    final LinearLayout viewport = root, dock = navigation;
+    root.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob) -> {
+      int height = Math.round((b - t - viewport.getPaddingTop() - viewport.getPaddingBottom()) * .9f);
+      LinearLayout.LayoutParams size = (LinearLayout.LayoutParams)dock.getLayoutParams();
+      if (height > 0 && size.height != height) { size.height = height; dock.setLayoutParams(size); }
+    });
   }
 
-  @android.annotation.TargetApi(34)
-  private android.window.OnBackAnimationCallback createPageBackAnimation() {
-    return new android.window.OnBackAnimationCallback() {
-      @Override public void onBackStarted(android.window.BackEvent event) {
-        backPreview = root;
-      }
-
-      @Override public void onBackProgressed(android.window.BackEvent event) {
-        if (backPreview == null) return;
-        float progress = event.getProgress();
-        float scale = 1f - .06f * progress;
-        backPreview.setScaleX(scale);
-        backPreview.setScaleY(scale);
-        float direction = event.getSwipeEdge() == android.window.BackEvent.EDGE_RIGHT ? -1f : 1f;
-        backPreview.setTranslationX(direction * ui.dp(16) * progress);
-      }
-
-      @Override public void onBackCancelled() {
-        resetBackPreview();
-      }
-
-      @Override public void onBackInvoked() {
-        resetBackPreview();
-        returnToParentPage();
-      }
-    };
+  private void arrangeNavigationRail() {
+    LinearLayout body = ui.column();
+    while (root.getChildCount() > 0) {
+      View child = root.getChildAt(0);
+      root.removeViewAt(0);
+      if (child != navigation) body.addView(child);
+    }
+    root.setOrientation(LinearLayout.HORIZONTAL);
+    root.setGravity(Gravity.TOP);
+    navigation.setOrientation(LinearLayout.VERTICAL);
+    navigation.setGravity(Gravity.TOP | Gravity.START);
+    navigation.setPadding(ui.dp(16), ui.dp(32), ui.dp(16), ui.dp(24));
+    navigation.setElevation(0);
+    navigation.setBackground(ui.sidebarSurface());
+    navigation.setTag("navigation-rail");
+    for (int i = 0; i < navigation.getChildCount(); i++) {
+      LinearLayout.LayoutParams item = new LinearLayout.LayoutParams(-1, -2);
+      item.setMargins(0, i == 0 ? 0 : ui.dp(12), 0, 0);
+      navigation.getChildAt(i).setLayoutParams(item);
+    }
+    LinearLayout brand = ui.row(); brand.setGravity(Gravity.CENTER_VERTICAL);
+    brand.setPadding(ui.dp(12), 0, 0, 0);
+    brand.addView(ui.icon("link", Ui.PURPLE), new LinearLayout.LayoutParams(ui.dp(28), ui.dp(28)));
+    TextView wordmark = ui.title("LanLink", 20);
+    LinearLayout.LayoutParams wordmarkSize = new LinearLayout.LayoutParams(-2, -2);
+    wordmarkSize.setMargins(ui.dp(10), 0, 0, 0); brand.addView(wordmark, wordmarkSize);
+    LinearLayout.LayoutParams brandSize = new LinearLayout.LayoutParams(-1, ui.dp(44));
+    brandSize.bottomMargin = ui.dp(32); navigation.addView(brand, 0, brandSize);
+    root.addView(navigation, new LinearLayout.LayoutParams(ui.dp(sidebarWidthDp()), -1));
+    root.addView(body, new LinearLayout.LayoutParams(0, -1, 1));
   }
 
-  private void resetBackPreview() {
-    if (backPreview == null) return;
-    backPreview.setScaleX(1f);
-    backPreview.setScaleY(1f);
-    backPreview.setTranslationX(0f);
-    backPreview = null;
+  private void addCardColumn(LinearLayout column, View card) {
+    if (column.getChildCount() > 0) ui.gap(column, 20);
+    column.addView(card, new LinearLayout.LayoutParams(-1, -2));
+  }
+
+  private void arrangeDeviceOverview(View strip, View arrangement, View local) {
+    if (!tabletLayout && !phoneLandscape) return;
+    // Reparent existing controls so actions and live device updates keep their listeners.
+    layout.removeView(arrangement); layout.removeView(local);
+    boolean narrow = phoneLandscape || getResources().getConfiguration().screenWidthDp - sidebarWidthDp() < 700;
+    LinearLayout shortcuts = narrow ? ui.column() : ui.row(); shortcuts.setGravity(Gravity.TOP);
+    LinearLayout.LayoutParams first = new LinearLayout.LayoutParams(narrow ? -1 : 0, -2, narrow ? 0 : 1);
+    LinearLayout.LayoutParams second = new LinearLayout.LayoutParams(narrow ? -1 : 0, -2, narrow ? 0 : 1);
+    second.setMargins(narrow ? 0 : ui.dp(16), narrow ? ui.dp(16) : 0, 0, 0);
+    shortcuts.addView(arrangement, first); shortcuts.addView(local, second);
+    // Remove the old spacers between detail and the two shortcut cards.
+    int detailIndex = layout.indexOfChild(detail);
+    for (int i = layout.getChildCount() - 1; i > detailIndex; i--) {
+      View child = layout.getChildAt(i);
+      if (child != status && child != mode) layout.removeViewAt(i);
+    }
+    if (deviceColumns()) {
+      layout.removeView(strip); layout.removeView(detail);
+      LinearLayout body = ui.row(); body.setGravity(Gravity.TOP); body.setTag("device-workspace");
+      LinearLayout sidebar = ui.column();
+      sidebar.addView(ui.title(Language.t("设备"), 15)); ui.gap(sidebar, 14);
+      ((ViewGroup)devices.getParent()).removeView(devices);
+      devices.setOrientation(LinearLayout.VERTICAL); sidebar.addView(devices);
+      LinearLayout content = ui.column();
+      content.addView(detail); ui.gap(content, 20); content.addView(shortcuts);
+      body.addView(sidebar, new LinearLayout.LayoutParams(ui.dp(phoneLandscape ? 168 : 208), -2));
+      LinearLayout.LayoutParams contentSize = new LinearLayout.LayoutParams(0, -2, 1);
+      contentSize.setMargins(ui.dp(24), 0, 0, 0); body.addView(content, contentSize);
+      layout.addView(body, Math.min(detailIndex - 1, layout.getChildCount()), new LinearLayout.LayoutParams(-1, -2));
+    } else {
+      layout.addView(shortcuts, layout.indexOfChild(detail) + 1,
+          new LinearLayout.LayoutParams(-1, -2));
+      ((LinearLayout.LayoutParams)shortcuts.getLayoutParams()).topMargin = ui.dp(20);
+    }
+    LinearLayout connection = narrow ? ui.column() : ui.row(); connection.setGravity(Gravity.TOP);
+    layout.removeView(status); layout.removeView(mode);
+    status.setMaxWidth(ui.dp(480));
+    connection.addView(status, new LinearLayout.LayoutParams(narrow ? -1 : 0, -2, narrow ? 0 : 1));
+    LinearLayout.LayoutParams connectionState = new LinearLayout.LayoutParams(narrow ? -1 : 0, -2, narrow ? 0 : 1);
+    connectionState.setMargins(narrow ? 0 : ui.dp(20), narrow ? ui.dp(8) : 0, 0, 0); connection.addView(mode, connectionState);
+    ui.gap(layout, 20); layout.addView(connection);
+  }
+
+  private void arrangeSettingsColumns(View identity, View permissions, View glow, View options) {
+    if (!twoColumnLayout) return;
+    View clipboard = layout.getChildAt(layout.getChildCount() - 1);
+    for (View card : new View[]{identity, permissions, glow, options, clipboard}) layout.removeView(card);
+    // The heading stays full width; distribute related cards into two balanced groups.
+    while (layout.getChildCount() > 4) layout.removeViewAt(layout.getChildCount() - 1);
+    LinearLayout columns = ui.row(); columns.setGravity(Gravity.TOP); columns.setTag("settings-columns");
+    LinearLayout personal = ui.column(), access = ui.column();
+    addCardColumn(personal, identity); addCardColumn(personal, clipboard);
+    addCardColumn(access, permissions); addCardColumn(access, options); addCardColumn(access, glow);
+    columns.addView(personal, new LinearLayout.LayoutParams(0, -2, 1));
+    LinearLayout.LayoutParams right = new LinearLayout.LayoutParams(0, -2, 1);
+    right.setMargins(ui.dp(24), 0, 0, 0); columns.addView(access, right);
+    layout.addView(columns);
   }
 
   private void heading(String title, String subtitle) {
-    layout.addView(ui.title(title, 30));
-    ui.gap(layout, 8);
+    layout.addView(ui.title(title, phoneLandscape ? 24 : 30));
+    ui.gap(layout, phoneLandscape ? 5 : 8);
     layout.addView(ui.text(subtitle, 14, Ui.MUTED));
-    ui.gap(layout, 24);
+    ui.gap(layout, phoneLandscape ? 12 : 24);
   }
 
   private void devicesPage() {
@@ -622,17 +915,19 @@ public class MainActivity extends Activity {
     brand.addView(ui.icon("link", Ui.PURPLE), new LinearLayout.LayoutParams(ui.dp(28), ui.dp(28)));
     TextView wordmark = ui.title("  LanLink", 18);
     brand.addView(wordmark);
-    layout.addView(brand);
-    ui.gap(layout, 20);
+    if (!tabletLayout && !phoneLandscape) {
+      layout.addView(brand);
+      ui.gap(layout, 20);
+    }
     LinearLayout title = ui.row();
-    title.addView(ui.title(Language.t("设备"), 30), new LinearLayout.LayoutParams(0, -2, 1));
+    title.addView(ui.title(Language.t("设备"), phoneLandscape ? 24 : 30), new LinearLayout.LayoutParams(0, -2, 1));
     if(getSharedPreferences("identity",0).getBoolean("clipboard_shortcuts",false) && (!getSharedPreferences("identity",0).getBoolean("clipboard_upload",true) || !getSharedPreferences("identity",0).getBoolean("clipboard_download",true))){LinearLayout.LayoutParams syncSpace=new LinearLayout.LayoutParams(-2,ui.dp(48));syncSpace.setMargins(0,0,ui.dp(12),0);title.addView(ui.clipboardShortcuts(()->manualClipboard(true),()->manualClipboard(false)),syncSpace);}
     title.addView(
         ui.iconButton("plus", Language.t("添加设备"), () -> showPairingDialog(null, null)),
         new LinearLayout.LayoutParams(ui.dp(48), ui.dp(48)));
     layout.addView(title);
     layout.addView(ui.text(Language.t("让设备，自在协作"), 14, Ui.MUTED));
-    ui.gap(layout, 24);
+    ui.gap(layout, phoneLandscape ? 12 : 24);
     HorizontalScrollView strip = new HorizontalScrollView(this);
     strip.setHorizontalScrollBarEnabled(false);
     devices = ui.row();
@@ -665,6 +960,7 @@ public class MainActivity extends Activity {
     mode = ui.text("", 12, Ui.MUTED);
     ui.gap(layout, 6);
     layout.addView(mode);
+    arrangeDeviceOverview(strip, arrangement, local);
   }
 
   private void section(String label) {
@@ -673,10 +969,24 @@ public class MainActivity extends Activity {
     ui.gap(layout, 12);
   }
 
+  private void compactPopupHeading(String title, String subtitle, String backLabel) {
+    LinearLayout header = ui.row();
+    header.addView(ui.iconButton("back", backLabel, this::onBackPressed),
+        new LinearLayout.LayoutParams(ui.dp(48), ui.dp(48)));
+    TextView label = ui.title(title, 22);
+    LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(0, -2, 1);
+    size.setMargins(ui.dp(12), 0, 0, 0); header.addView(label, size); layout.addView(header);
+    ui.gap(layout, 8); layout.addView(ui.text(subtitle, 13, Ui.MUTED)); ui.gap(layout, 12);
+  }
+
   private void groupLayoutPage() {
-    layout.addView(ui.button(Language.t("返回设备"), false, () -> { page = "devices"; renderPage(); }));
-    ui.gap(layout, 16);
-    heading(Language.t("组内布局与主控"), Language.t("同一组的设备共享这份布局与主控选择"));
+    if (phoneLandscape) compactPopupHeading(Language.t("组内布局与主控"),
+        Language.t("同一组的设备共享这份布局与主控选择"), Language.t("返回设备"));
+    else {
+      layout.addView(ui.button(Language.t("返回设备"), false, this::onBackPressed));
+      ui.gap(layout, 16);
+      heading(Language.t("组内布局与主控"), Language.t("同一组的设备共享这份布局与主控选择"));
+    }
     LinkService service = LinkService.instance;
     if (service == null || service.group == null) { layout.addView(ui.text(Language.t("服务正在启动…"), 14, Ui.MUTED)); return; }
     groupLayoutPanel = new GroupLayoutPanel(this, ui, service); layout.addView(groupLayoutPanel);
@@ -734,10 +1044,10 @@ public class MainActivity extends Activity {
     identity.addView(ui.item("settings", Language.t("外观"), Language.t("仅对本设备生效"), "dark".equals(appearance) ? Language.t("深色") : "light".equals(appearance) ? Language.t("浅色") : Language.t("跟随系统"), () -> {
       String[] modes = {"system", "dark", "light"};
       int selectedTheme = java.util.Arrays.asList(modes).indexOf(Ui.themeMode(this));
-      new AlertDialog.Builder(this).setTitle(Language.t("外观")).setSingleChoiceItems(new String[]{Language.t("跟随系统"), Language.t("深色"), Language.t("浅色")}, selectedTheme, (dialog, which) -> {
+      showChoicePicker(Language.t("外观"), new String[]{Language.t("跟随系统"), Language.t("深色"), Language.t("浅色")}, selectedTheme, which -> {
         getSharedPreferences("identity", 0).edit().putString("theme", modes[which]).apply();
-        dialog.dismiss(); recreate();
-      }).setNegativeButton(Language.t("取消"), null).show();
+        recreate();
+      });
     }));
     ui.line(identity);
     identity.addView(ui.item("settings", Language.t("语言"), Language.t("语言更改立即生效"), Language.label(this), this::showLanguagePicker));
@@ -810,11 +1120,17 @@ public class MainActivity extends Activity {
               renderPage();
             }));
     ui.line(options);
+    options.addView(ui.item("keyboard", Language.t("高价功能"), null, null, () -> {
+      page = "premium";
+      renderPage();
+    }));
+    ui.line(options);
     options.addView(ui.item("link", Language.t("使用说明"), Language.t("配对、授权与常见问题"), null, this::showUsage));
     ui.line(options);
     options.addView(ui.item("settings", Language.t("后台运行与自启动"), Language.t("设置省电白名单，减少后台连接中断"), null, () -> showBackgroundGuide(null)));
     layout.addView(options);
     clipboardSettingsCard();
+    arrangeSettingsColumns(identity, permissions, glowCard, options);
     settingsFooter();
     ui.gap(layout, 16);
     LinearLayout about = ui.card();
@@ -822,10 +1138,168 @@ public class MainActivity extends Activity {
     layout.addView(about);
   }
 
-  private void showAbout() {
+  private static final int HID_PERMISSION = 71;
+  private String pendingHidPairing;
+
+  private void premiumFeaturesPage() {
+    heading(Language.t("高价功能"), Language.t("蓝牙 HID 键鼠"));
+    LinearLayout card = ui.card();
+    card.addView(ui.item("keyboard", Language.t("蓝牙 HID 键鼠"), null, null, () -> {
+      page = "hid";
+      renderPage();
+    }));
+    layout.addView(card);
+  }
+
+  private void bluetoothHidPage() {
+    layout.addView(ui.button(Language.t("返回"), false, () -> { page = "premium"; renderPage(); }));
+    ui.gap(layout, 12);
+    heading(Language.t("蓝牙 HID 键鼠"),
+        Language.t("点设备名称查看配对引导。点左侧图标切换蓝牙键鼠，停用后保留蓝牙连接并使用网络。"));
+    LinearLayout list = ui.column();
+    layout.addView(list);
+    list.post(new Runnable() {
+      private String signature = "";
+
+      @Override public void run() {
+        if (!list.isAttachedToWindow() || !"hid".equals(page)) return;
+        LinkService service = LinkService.instance;
+        if (service == null) { list.postDelayed(this, 2000); return; }
+        JSONObject devices = service.authorizationDevices();
+        Map<String, Boolean> incoming = new HashMap<>();
+        Runnable poll = this;
+        service.jobs.execute(() -> {
+          Iterator<String> ids = devices.keys();
+          while (ids.hasNext()) {
+            String id = ids.next();
+            Wire peer = service.peers.get(id);
+            JSONObject caps = peer == null ? null : peer.info.optJSONObject("capabilities");
+            if (caps == null || caps.optInt("hidSettings") != 1) continue;
+            try {
+              JSONObject status = peer.requestDirect("hid-link-status", obj(), 1200);
+              incoming.put(id, service.peers.get(id) == peer && status.optBoolean("connected"));
+            } catch (Exception ignored) {}
+          }
+          main.post(() -> {
+            if (!list.isAttachedToWindow() || !"hid".equals(page)) return;
+            List<String> ordered = new ArrayList<>();
+            devices.keys().forEachRemaining(ordered::add);
+            ordered.sort(Comparator.comparing(id -> devices.optJSONObject(id).optString("name")));
+            StringBuilder key = new StringBuilder(devices.toString()).append(incoming);
+            for (String id : ordered) key.append(service.hidEnabled(id)).append(service.phoneHid.connected(id));
+            if (!key.toString().equals(signature)) {
+              signature = key.toString();
+              list.removeAllViews();
+              if (ordered.isEmpty()) list.addView(ui.text(Language.t("暂无组内设备"), 14, Ui.MUTED));
+              for (String id : ordered) {
+                JSONObject device = devices.optJSONObject(id);
+                LinearLayout card = ui.card();
+                LinearLayout row = ui.row();
+                boolean enabled = service.hidEnabled(id);
+                boolean connected = Boolean.TRUE.equals(incoming.get(id)) || service.phoneHid.connected(id);
+                String glyph = platformIcon(device.optString("platform"));
+                FrameLayout toggle = new FrameLayout(MainActivity.this);
+                toggle.setFocusable(true);
+                setHidToggle(toggle, glyph, enabled);
+                toggle.setOnClickListener(v -> {
+                  service.setHidEnabled(id, !service.hidEnabled(id));
+                  setHidToggle(toggle, glyph, service.hidEnabled(id));
+                });
+                row.addView(toggle, new LinearLayout.LayoutParams(ui.dp(44), ui.dp(44)));
+                String name = device.optString("name", Language.t("设备"));
+                LinearLayout entry = ui.row();
+                entry.setPadding(ui.dp(10), 0, 0, 0);
+                entry.setBackground(ui.touch(Color.TRANSPARENT, 12));
+                entry.setFocusable(true);
+                entry.setOnClickListener(v -> showHidPairingGuide(id, name));
+                TextView title = ui.text(name, 14, Ui.INK);
+                title.setMaxLines(1);
+                title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                entry.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+                entry.addView(ui.text(Language.t(connected ? "已连接" : incoming.containsKey(id) ? "未连接" : "状态未知"), 12, connected ? Ui.PURPLE : Ui.MUTED));
+                row.addView(entry, new LinearLayout.LayoutParams(0, ui.dp(44), 1));
+                card.addView(row);
+                list.addView(card);
+                ui.gap(list, 10);
+              }
+            }
+            list.postDelayed(poll, 2000);
+          });
+        });
+      }
+    });
+  }
+
+  private void setHidToggle(FrameLayout toggle, String glyph, boolean enabled) {
+    toggle.setContentDescription(Language.t(enabled ? "停用蓝牙键鼠" : "启用蓝牙键鼠"));
+    toggle.setBackground(ui.touch(enabled ? Ui.LILAC : Ui.BG, 24));
+    toggle.removeAllViews();
+    toggle.addView(ui.icon(glyph, enabled ? Ui.PURPLE : Ui.MUTED),
+        new FrameLayout.LayoutParams(ui.dp(24), ui.dp(24), Gravity.CENTER));
+  }
+
+  private void showHidPairingGuide(String id, String name) {
+    LinearLayout content = ui.column();
+    content.setPadding(ui.dp(22), ui.dp(10), ui.dp(22), ui.dp(16));
+    TextView hint = ui.text(Language.t("请先让对方设备准备蓝牙配对，再打开本机的系统蓝牙设置，找到下方名称并连接。"), 14, Ui.MUTED);
+    content.addView(hint);
+    ui.gap(content, 12);
+    AlertDialog guide = new AlertDialog.Builder(this).setTitle(name).setView(content)
+        .setNegativeButton(Language.t("取消"), null).create();
+    Button confirm = ui.button(Language.t("已连接，确认"), true, () -> run(() -> {
+      JSONObject result = link().peer(id).request("hid-pair-confirm", obj());
+      if (!result.optBoolean("connected")) throw new IOException("蓝牙键鼠尚未就绪");
+      main.post(guide::dismiss);
+    }));
+    Button settings = ui.button(Language.t("打开蓝牙设置"), false,
+        () -> startActivity(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS)));
+    Button start = ui.button(Language.t("开启蓝牙配对"), true, () -> {});
+    start.setOnClickListener(v -> run(() -> {
+      Wire peer = link().peer(id);
+      JSONObject caps = peer.info.optJSONObject("capabilities");
+      if (caps == null || caps.optInt("hidSettings") != 1) throw new IOException("请升级目标设备后重试");
+      JSONObject result = peer.request("hid-pair-start", obj());
+      main.post(() -> {
+        if (!guide.isShowing()) return;
+        hint.setText(Language.t("请在本机的系统蓝牙设置中连接 {0}。").replace("{0}", result.optString("name", name)));
+        start.setVisibility(View.GONE);
+        settings.setVisibility(View.VISIBLE);
+        confirm.setVisibility(View.VISIBLE);
+      });
+    }));
+    settings.setVisibility(View.GONE);
+    confirm.setVisibility(View.GONE);
+    content.addView(start);
+    content.addView(settings);
+    content.addView(confirm);
+    content.addView(ui.button(Language.t("让本机可被连接"), false, () -> preparePhoneHid(id)));
+    guide.show();
+  }
+
+  private void preparePhoneHid(String id) {
+    LinkService service = LinkService.instance;
+    Wire peer = service == null ? null : service.peers.get(id);
+    if (peer == null) { showOperationError("设备不在线"); return; }
+    if (Build.VERSION.SDK_INT < 28 || "android".equals(peer.info.optString("platform"))) {
+      showOperationError("本机不支持蓝牙 HID 配对");
+      return;
+    }
+    if (!service.phoneHid.permitted()) {
+      pendingHidPairing = id;
+      requestPermissions(PhoneHid.permissions(), HID_PERMISSION);
+      return;
+    }
+    service.phoneHid.preparePairing(peer);
+    Intent discoverable = new Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE)
+        .putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 120);
+    startActivity(discoverable);
+    toast(Language.t("请在对方设备打开蓝牙 HID 键鼠配对引导"));
+  }
+
+  void showAbout() {
+    SharedPreferences preferences = getSharedPreferences("identity", MODE_PRIVATE);
     Dialog dialog = new Dialog(this, Ui.dialogTheme());
     sheets.add(dialog);
-    dialog.setOnDismissListener(ignored -> sheets.remove(dialog));
     LinearLayout panel = ui.column();
     panel.setBackgroundColor(Ui.BG);
 
@@ -844,6 +1318,8 @@ public class MainActivity extends Activity {
     brand.setGravity(Gravity.CENTER_HORIZONTAL);
     ImageView icon = new ImageView(this);
     icon.setImageResource(R.mipmap.ic_launcher);
+    icon.setContentDescription(getApplicationInfo().loadLabel(getPackageManager()));
+    icon.setFocusable(true);
     brand.addView(icon, new LinearLayout.LayoutParams(ui.dp(76), ui.dp(76)));
     ui.gap(brand, 12);
     TextView appName = ui.title(getApplicationInfo().loadLabel(getPackageManager()).toString(), 26);
@@ -858,6 +1334,24 @@ public class MainActivity extends Activity {
     } catch (android.content.pm.PackageManager.NameNotFoundException ignored) {}
     body.addView(brand);
 
+    LinearLayout developerSection = ui.column();
+    ui.gap(developerSection, 20);
+    LinearLayout developerCard = ui.card();
+    developerCard.addView(ui.item("settings", Language.t("开发者选项"), null, null,
+        () -> showDeveloperOptions(preferences, developerSection)));
+    developerSection.addView(developerCard);
+    developerSection.setVisibility(preferences.getBoolean("developer_options", false) ? View.VISIBLE : View.GONE);
+    body.addView(developerSection);
+
+    int[] iconTaps = {0};
+    icon.setOnClickListener(view -> {
+      if (preferences.getBoolean("developer_options", false) || ++iconTaps[0] < 10) return;
+      iconTaps[0] = 0;
+      preferences.edit().putBoolean("developer_options", true).apply();
+      developerSection.setVisibility(View.VISIBLE);
+      toast(Language.t("开发者选项已开启"));
+    });
+
     ui.gap(body, 24);
     body.addView(ui.title(Language.t("软件更新"), 16));
     ui.gap(body, 10);
@@ -870,7 +1364,6 @@ public class MainActivity extends Activity {
     autoUpdate.setTextColor(Ui.INK);
     autoUpdate.setTextSize(15);
     autoUpdate.setMinHeight(ui.dp(60));
-    SharedPreferences preferences = getSharedPreferences("identity", MODE_PRIVATE);
     autoUpdate.setChecked(preferences.getBoolean("auto_check_updates", true));
     autoUpdate.setOnCheckedChangeListener((button, enabled) ->
         preferences.edit().putBoolean("auto_check_updates", enabled).apply());
@@ -883,7 +1376,11 @@ public class MainActivity extends Activity {
     renderUpdateChannel(channel);
     updates.addView(channel);
     ui.line(updates, 0);
-    updates.addView(ui.item("download", Language.t("检查更新"), null, null, () -> appUpdater.check(true)));
+    Runnable updateStatus = bindUpdateStatus(updates);
+    dialog.setOnDismissListener(ignored -> {
+      appUpdater.unobserve(updateStatus);
+      sheets.remove(dialog);
+    });
     body.addView(updates);
 
     ui.gap(body, 20);
@@ -894,6 +1391,42 @@ public class MainActivity extends Activity {
     diagnostics.addView(ui.item("upload", Language.t("导出日志"),
         Language.t("收集组内设备的运行日志并另存为文本文件"), null, this::exportLogs));
     body.addView(diagnostics);
+
+    scroll.addView(body);
+    panel.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+    dialog.setContentView(panel);
+    dialog.show();
+    Window window = dialog.getWindow();
+    window.setLayout(-1, -1);
+    applyInsets(panel, window);
+  }
+
+  private void showDeveloperOptions(SharedPreferences preferences, View entry) {
+    if (!preferences.getBoolean("developer_options", false)) return;
+    Dialog dialog = new Dialog(this, Ui.dialogTheme());
+    sheets.add(dialog);
+    dialog.setOnDismissListener(ignored -> sheets.remove(dialog));
+
+    LinearLayout panel = ui.column();
+    panel.setBackgroundColor(Ui.BG);
+    LinearLayout header = ui.row();
+    header.setPadding(ui.dp(16), ui.dp(8), ui.dp(22), ui.dp(8));
+    View back = ui.iconButton("back", Language.t("返回"), dialog::dismiss);
+    back.setBackground(ui.touch(Color.TRANSPARENT, 24));
+    header.addView(back, new LinearLayout.LayoutParams(ui.dp(48), ui.dp(48)));
+    header.addView(ui.title(Language.t("开发者选项"), 24));
+    panel.addView(header);
+
+    ScrollView scroll = new ScrollView(this);
+    LinearLayout body = ui.column();
+    body.setPadding(ui.dp(22), ui.dp(16), ui.dp(22), ui.dp(24));
+    LinearLayout card = ui.card();
+    card.addView(ui.button(Language.t("关闭开发者选项"), false, () -> {
+      preferences.edit().putBoolean("developer_options", false).apply();
+      entry.setVisibility(View.GONE);
+      dialog.dismiss();
+    }));
+    body.addView(card);
     scroll.addView(body);
     panel.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
     dialog.setContentView(panel);
@@ -908,6 +1441,44 @@ public class MainActivity extends Activity {
     slot.addView(ui.item("layers", Language.t("更新通道"), null,
         Language.t(appUpdater.beta() ? "测试版" : "正式版"),
         () -> appUpdater.chooseChannel(() -> renderUpdateChannel(slot))));
+  }
+
+  private Runnable bindUpdateStatus(LinearLayout updates) {
+    TextView status = ui.text("", 13, Ui.MUTED);
+    status.setPadding(0, ui.dp(6), 0, ui.dp(6));
+    ProgressBar progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+    progress.setMax(1000);
+    View check = ui.item("refresh", Language.t("检查更新"), null, null, () -> appUpdater.check(true));
+    View download = ui.item("download", Language.t("下载全量更新"), null, null, appUpdater::download);
+    View install = ui.item("download", Language.t("立即安装"), null, null, appUpdater::install);
+    View website = ui.item("download", Language.t("打开官网下载区"), null, null, appUpdater::openWebsite);
+    View release = ui.item("download", Language.t("查看此版本发布页"), null, null, appUpdater::openWebsite);
+    View migration = ui.item("info", Language.t("查看签名迁移说明"), null, null, appUpdater::showMigration);
+    View retry = ui.item("refresh", Language.t("重试"), null, null, appUpdater::download);
+    View discard = ui.item("close", Language.t("放弃本次更新"), null, null, appUpdater::discardDownload);
+    for (View view : new View[]{status, progress, check, download, install, retry, website, release, migration, discard}) updates.addView(view);
+    Runnable render = () -> {
+      String text = appUpdater.status();
+      status.setText(text);
+      status.setVisibility(text.isEmpty() ? View.GONE : View.VISIBLE);
+      AppUpdater.Phase phase = appUpdater.phase();
+      boolean showProgress = phase == AppUpdater.Phase.DOWNLOADING || phase == AppUpdater.Phase.VERIFYING;
+      progress.setVisibility(showProgress ? View.VISIBLE : View.GONE);
+      long total = appUpdater.total();
+      progress.setIndeterminate(total == 0);
+      if (total > 0) progress.setProgress((int) (1000 * appUpdater.received() / total));
+      check.setVisibility(appUpdater.canCheck() ? View.VISIBLE : View.GONE);
+      download.setVisibility(appUpdater.hasOffer() ? View.VISIBLE : View.GONE);
+      install.setVisibility(appUpdater.canInstall() ? View.VISIBLE : View.GONE);
+      retry.setVisibility(appUpdater.canRetryDownload() ? View.VISIBLE : View.GONE);
+      boolean fallback = appUpdater.websiteFallback() && !appUpdater.migrationRequired();
+      website.setVisibility(fallback && !appUpdater.hasReleasePage() ? View.VISIBLE : View.GONE);
+      release.setVisibility(fallback && appUpdater.hasReleasePage() ? View.VISIBLE : View.GONE);
+      migration.setVisibility(appUpdater.migrationRequired() ? View.VISIBLE : View.GONE);
+      discard.setVisibility(phase == AppUpdater.Phase.READY ? View.VISIBLE : View.GONE);
+    };
+    appUpdater.observe(render);
+    return render;
   }
 
   private void exportLogs() {
@@ -945,16 +1516,81 @@ public class MainActivity extends Activity {
     });
   }
 
-  private AlertDialog showLanguagePicker() {
+  private void fitFloatingDialog(Dialog dialog, View content, int preferredWidth, int preferredHeight) {
+    Runnable fit = () -> {
+      if (!dialog.isShowing() || dialog.getWindow() == null) return;
+      android.graphics.Rect bounds = new android.graphics.Rect();
+      getWindow().getDecorView().getWindowVisibleDisplayFrame(bounds);
+      WindowInsets insets = dialog.getWindow().getDecorView().getRootWindowInsets();
+      if (Build.VERSION.SDK_INT >= 30 && insets != null) {
+        bounds = getWindowManager().getCurrentWindowMetrics().getBounds();
+        Insets safe = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout()
+            | WindowInsets.Type.ime());
+        bounds.inset(safe.left, safe.top, safe.right, safe.bottom);
+      }
+      int width = Math.max(1, Math.min(ui.dp(preferredWidth), bounds.width() - ui.dp(24)));
+      int availableHeight = Math.max(1, bounds.height() - ui.dp(24));
+      int wantedHeight = preferredHeight > 0 ? ui.dp(preferredHeight) : content.getMeasuredHeight();
+      int height = wantedHeight > 0 ? Math.min(wantedHeight, availableHeight) : -2;
+      Window window = dialog.getWindow();
+      if (window.getAttributes().width != width || window.getAttributes().height != height)
+        window.setLayout(width, height);
+    };
+    floatingLayouts.put(dialog, fit);
+    View decor = dialog.getWindow().getDecorView();
+    decor.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob) -> fit.run());
+    content.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob) -> fit.run());
+    decor.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+      public void onViewAttachedToWindow(View view) {}
+      public void onViewDetachedFromWindow(View view) { floatingLayouts.remove(dialog); }
+    });
+    fit.run();
+  }
+
+  private Dialog showChoicePicker(String title, String[] labels, int selectedIndex,
+      java.util.function.IntConsumer select) {
+    Dialog dialog = new PredictiveDialog(this, Ui.dialogTheme());
+    LinearLayout box = ui.column();
+    box.setPadding(ui.dp(20), ui.dp(20), ui.dp(20), ui.dp(12));
+    box.setBackground(ui.shape(Ui.CARD, 24));
+    box.addView(ui.title(title, 22)); ui.gap(box, 16);
+    ScrollView choices = new ScrollView(this);
+    LinearLayout rows = ui.column();
+    for (int i = 0; i < labels.length; i++) {
+      final int index = i;
+      RadioButton row = new RadioButton(this);
+      row.setTag("choice-" + i);
+      row.setText(labels[i]); row.setTextSize(16); row.setTextColor(Ui.INK);
+      row.setButtonTintList(android.content.res.ColorStateList.valueOf(Ui.PURPLE));
+      row.setChecked(i == selectedIndex); row.setMinHeight(ui.dp(56));
+      row.setPadding(ui.dp(12), ui.dp(8), ui.dp(12), ui.dp(8));
+      row.setBackground(ui.touch(i == selectedIndex ? Ui.LILAC : Color.TRANSPARENT, 14));
+      row.setOnClickListener(v -> { dialog.dismiss(); select.accept(index); });
+      rows.addView(row, new LinearLayout.LayoutParams(-1, -2));
+    }
+    choices.addView(rows); box.addView(choices, new LinearLayout.LayoutParams(-1, 0, 1));
+    ui.gap(box, 8);
+    box.addView(ui.button(Language.t("取消"), false, dialog::dismiss));
+    dialog.setContentView(box); dialog.show();
+    Window window = dialog.getWindow();
+    if (window != null) {
+      window.setBackgroundDrawableResource(android.R.color.transparent);
+      window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+      window.setDimAmount(.35f);
+      fitFloatingDialog(dialog, box, 440, 56 * labels.length + 150);
+    }
+    animateEntrance(box, 0, ui.dp(16));
+    return dialog;
+  }
+
+  private Dialog showLanguagePicker() {
     String[] languages = LanguageSelection.IDS;
     int selectedLanguage = java.util.Arrays.asList(languages).indexOf(Language.mode(this));
-    return new AlertDialog.Builder(this).setTitle(Language.t("语言"))
-        .setSingleChoiceItems(Language.labels(), selectedLanguage, (dialog, which) -> {
-          Language.setMode(this, languages[which]);
-          if (LinkService.instance != null) LinkService.instance.refreshLanguage();
-          dialog.dismiss();
-          recreate();
-        }).setNegativeButton(Language.t("取消"), null).show();
+    return showChoicePicker(Language.t("语言"), Language.labels(), selectedLanguage, which -> {
+      Language.setMode(this, languages[which]);
+      if (LinkService.instance != null) LinkService.instance.refreshLanguage();
+      recreate();
+    });
   }
 
   private boolean awaitingEdgeGlowPermission;
@@ -1123,13 +1759,13 @@ public class MainActivity extends Activity {
         ui.button(
             Language.t("‹ 返回设置"),
             false,
-            () -> {
-              page = "settings";
-              renderPage();
-            });
-    layout.addView(back);
-    ui.gap(layout, 20);
-    heading(Language.t("组设备授权管理"), Language.t("设置每台组设备可以在本机使用的功能"));
+            this::onBackPressed);
+    if (phoneLandscape) compactPopupHeading(Language.t("组设备授权管理"),
+        Language.t("设置每台组设备可以在本机使用的功能"), Language.t("‹ 返回设置"));
+    else {
+      layout.addView(back); ui.gap(layout, 20);
+      heading(Language.t("组设备授权管理"), Language.t("设置每台组设备可以在本机使用的功能"));
+    }
     LinkService service = LinkService.instance;
     if (service == null || service.group == null) {
       layout.addView(ui.text(Language.t("服务正在启动…"), 14, Ui.MUTED));
@@ -1314,27 +1950,43 @@ public class MainActivity extends Activity {
       glyph.setFocusable(true);
       glyph.setOnClickListener(v -> showReadinessGuide());
     }
-    b.addView(glyph, new LinearLayout.LayoutParams(ui.dp(48), ui.dp(30)));
-    ui.gap(b, 12);
     TextView label = ui.title(name, 14);
-    label.setGravity(Gravity.CENTER);
     label.setMaxLines(1);
     label.setEllipsize(android.text.TextUtils.TruncateAt.END);
-    b.addView(label);
-    ui.gap(b, 6);
     int stateColor=state.equals(Language.t("● 在线"))?Ui.GREEN:state.equals(Language.t("● 未就绪"))?0xffb58a39:state.equals(Language.t("● 未授权"))?0xffbf6371:state.equals(Language.t("● 有限授权"))?0xff8270b9:Ui.MUTED;
     TextView stateLabel = ui.text(state, 12, showReadinessGuide ? Ui.RED : stateColor);
-    stateLabel.setGravity(Gravity.CENTER);
-    b.addView(stateLabel);
+    int glyphWidth = ui.dp(showReadinessGuide ? 48 : 30);
+    if (deviceColumns()) {
+      b.setOrientation(LinearLayout.HORIZONTAL); b.setGravity(Gravity.CENTER_VERTICAL);
+      b.setMinimumHeight(ui.dp(96));
+      b.addView(glyph, new LinearLayout.LayoutParams(glyphWidth, ui.dp(30)));
+      LinearLayout labels = ui.column(); labels.addView(label); ui.gap(labels, 8); labels.addView(stateLabel);
+      LinearLayout.LayoutParams labelsSize = new LinearLayout.LayoutParams(0, -2, 1);
+      labelsSize.setMargins(ui.dp(14), 0, 0, 0); b.addView(labels, labelsSize);
+    } else {
+      b.addView(glyph, new LinearLayout.LayoutParams(glyphWidth, ui.dp(30)));
+      ui.gap(b, 12); label.setGravity(Gravity.CENTER); b.addView(label);
+      ui.gap(b, 6); stateLabel.setGravity(Gravity.CENTER); b.addView(stateLabel);
+    }
+    b.setTag(id);
     b.setContentDescription(name + "，" + state);
     b.setOnClickListener(
         v -> {
+          if (selected.equals(id)) return;
+          int previous = 0;
+          for (int i = 0; i < devices.getChildCount(); i++)
+            if (selected.equals(devices.getChildAt(i).getTag())) previous = i;
+          int direction = devices.indexOfChild(b) >= previous ? 1 : -1;
           selected = id;
           signature = "";
+          detail.animate().cancel();
           update();
+          if (getResources().getConfiguration().orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE)
+            animateEntrance(detail, 0, direction * ui.dp(48));
+          else animateEntrance(detail, direction * ui.dp(48), 0);
         });
-    LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(ui.dp(118), -2);
-    p.setMargins(0, 0, ui.dp(10), 0);
+    LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(deviceColumns() ? -1 : ui.dp(118), -2);
+    p.setMargins(0, 0, deviceColumns() ? 0 : ui.dp(10), deviceColumns() ? ui.dp(12) : 0);
     devices.addView(b, p);
   }
 
@@ -1418,7 +2070,7 @@ public class MainActivity extends Activity {
     View glyph =
         ui.icon(peer == null ? "phone" : platformIcon(peer.info.optString("platform")), Ui.PURPLE);
     picture.addView(glyph, new FrameLayout.LayoutParams(ui.dp(92), ui.dp(92), Gravity.CENTER));
-    card.addView(picture, new LinearLayout.LayoutParams(-1, ui.dp(134)));
+    if (!phoneLandscape) card.addView(picture, new LinearLayout.LayoutParams(-1, ui.dp(134)));
     card.addView(
         ui.button(
             peer == null ? Language.t("添加设备") : Language.t("桌面控制"),
@@ -1468,7 +2120,7 @@ public class MainActivity extends Activity {
   }
 
   private LinearLayout sheet(String title) {
-    Dialog d = new Dialog(this);
+    Dialog d = new PredictiveDialog(this);
     sheets.add(d);
     d.setOnDismissListener(ignored -> sheets.remove(d));
     LinearLayout box = ui.column();
@@ -1500,6 +2152,7 @@ public class MainActivity extends Activity {
         w.setAttributes(attrs);
       }
     }
+    fitFloatingDialog(d, box, 720, 0);
     return box;
   }
 
@@ -1624,24 +2277,35 @@ public class MainActivity extends Activity {
     contentSize.weight = 1;
     scroll.setLayoutParams(contentSize);
     LinearLayout functions = ui.row();
+    centerFunctions = functions;
+    functions.setClipChildren(true);
+    functions.setClipToPadding(true);
     functions.setGravity(Gravity.CENTER);
     String[] keys = {"files", "clipboard", "touchpad"};
     String[] titles = {Language.t("文件暂存区"), Language.t("剪贴板"), Language.t("触控板")};
     for (int i = 0; i < keys.length; i++) {
       final String key = keys[i];
-      View tile = ui.controlTile(key, titles[i], key.equals(centerSelection), () -> {
+      View tile = ui.controlTile(key, titles[i], key.equals(centerSelection), phoneLandscape, () -> {
         if (!key.equals(centerSelection)) {
           centerSelection = key;
           renderPage();
         }
       });
-      LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(0, ui.dp(112), 1);
+      LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(0, ui.dp(phoneLandscape ? 56 : 112), 1);
       if (i > 0) size.setMargins(ui.dp(10), 0, 0, 0);
       functions.addView(tile, size);
     }
     LinearLayout.LayoutParams stripSize = new LinearLayout.LayoutParams(-1, -2);
-    stripSize.setMargins(ui.dp(22), ui.dp(8), ui.dp(22), ui.dp(14));
+    stripSize.setMargins(ui.dp(22), ui.dp(phoneLandscape ? 4 : 8), ui.dp(22), ui.dp(phoneLandscape ? 6 : 14));
+    stripSize.gravity = Gravity.CENTER_HORIZONTAL;
     root.addView(functions, stripSize);
+    functions.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+      View parent = (View) functions.getParent();
+      int width = Math.min(ui.dp(720), parent.getWidth() - parent.getPaddingLeft()
+          - parent.getPaddingRight() - ui.dp(44));
+      LinearLayout.LayoutParams params = (LinearLayout.LayoutParams) functions.getLayoutParams();
+      if (width > 0 && params.width != width) { params.width = width; functions.setLayoutParams(params); }
+    });
   }
   private void refreshCenter(){
     if(centerContent==null)return;centerContent.removeAllViews();layout=centerContent;centerSignature=centerKey();
@@ -1654,7 +2318,7 @@ public class MainActivity extends Activity {
       card.addView(ui.item("files",r.optString("name"),r.optString("sourceName")+" · "+fileSize(r.optLong("size"))+" · "+new java.text.SimpleDateFormat("MM-dd HH:mm",java.util.Locale.ROOT).format(new java.util.Date(r.optLong("created"))),label,null));
       if(!r.optString("error").isEmpty()){ui.gap(card,8);card.addView(ui.text(displayError(r.optString("error")),12,Ui.RED));}LinearLayout actions=ui.row();
       if(state.equals("ready")){actions.addView(ui.button(Language.t("查看"),false,()->openStage(r)),new LinearLayout.LayoutParams(0,-2,1));View save=ui.button(Language.t("保存到…"),true,()->saveStage(r));LinearLayout.LayoutParams next=new LinearLayout.LayoutParams(0,-2,1);next.setMargins(ui.dp(10),0,0,0);actions.addView(save,next);}
-      else if(!state.equals("receiving")&&!state.equals("queued")&&!state.equals("stopping"))actions.addView(ui.button(state.equals("pending")?Language.t("开始传输"):Language.t("重新传输"),true,()->run(()->{link().staging.start(id);main.post(()->toast(Language.t("正在接收文件…")));})),new LinearLayout.LayoutParams(0,-2,1));
+      else if(!state.equals("receiving")&&!state.equals("queued")&&!state.equals("stopping"))actions.addView(ui.button(state.equals("pending")?Language.t("开始传输"):Language.t("重新传输"),true,()->run(()->{link().staging.start(id);main.post(()->toast(Language.t("接收请求已提交")));})),new LinearLayout.LayoutParams(0,-2,1));
       if(state.equals("receiving")||state.equals("queued")){actions.addView(ui.button(Language.t("取消传输"),false,()->run(()->{link().staging.cancel(id);main.post(this::refreshCenter);})),new LinearLayout.LayoutParams(0,-2,1));}
       else if(!state.equals("stopping")){View remove=ui.button(Language.t("删除"),false,()->deleteStage(r));remove.setContentDescription(Language.t("删除暂存文件 ")+r.optString("name"));LinearLayout.LayoutParams space=new LinearLayout.LayoutParams(-2,-2);space.setMargins(ui.dp(10),0,0,0);actions.addView(remove,space);}ui.gap(card,12);card.addView(actions);layout.addView(card);
     }
@@ -1744,7 +2408,7 @@ public class MainActivity extends Activity {
   private void openTouchpad(Wire peer) {
     LinkService service = LinkService.instance;
     if (service == null || !peer.connected || service.peers.get(peer.id) != peer) {
-      toast(Language.t("设备已离线，请等待设备重新连接"));
+      showOperationError("设备已离线，请等待设备重新连接");
       refreshCenter();
       return;
     }
@@ -1759,7 +2423,20 @@ public class MainActivity extends Activity {
   }
 
   private void openStage(org.json.JSONObject row){org.json.JSONArray files=row.optJSONArray("files");if(files==null)return;if(row.optString("type").equals("folder")){LinearLayout box=sheet(row.optString("name"));for(int i=0;i<files.length();i++){org.json.JSONObject f=files.optJSONObject(i);box.addView(ui.item("files",f.optString("relative"),fileSize(f.optLong("size")),null,()->viewStageFile(row.optString("id"),f.optString("relative"))));}if(files.length()==0)box.addView(ui.text(Language.t("这是一个空文件夹"),14,Ui.MUTED));}else if(files.length()>0)viewStageFile(row.optString("id"),files.optJSONObject(0).optString("relative"));}
-  private void viewStageFile(String id,String relative){try{android.net.Uri uri=link().staging.uri(id,relative);String mime=getContentResolver().getType(uri);startActivity(new Intent(Intent.ACTION_VIEW).setDataAndType(uri,mime==null?"application/octet-stream":mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION));}catch(Exception e){toast(Language.t("没有可打开此文件的应用，可以先保存到手机"));}}
+  private void viewStageFile(String id,String relative) {
+    try {
+      StagingFiles staging = link().staging;
+      if (!staging.file(id, relative).isFile()) throw new java.io.IOException(Language.t("暂存文件不存在"));
+      android.net.Uri uri = staging.uri(id, relative);
+      String mime = getContentResolver().getType(uri);
+      startActivity(new Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime == null ? "application/octet-stream" : mime)
+          .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION));
+    } catch (ActivityNotFoundException e) {
+      showOperationError("没有可打开此文件的应用，可以先保存到手机");
+    } catch (Exception e) {
+      showOperationError(e.getMessage());
+    }
+  }
   private void saveStage(org.json.JSONObject row){savingStage=row.optString("id");if(row.optString("type").equals("folder"))startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE),43);else{String name=row.optString("name");String ext=android.webkit.MimeTypeMap.getFileExtensionFromUrl(name),mime=android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext.toLowerCase(java.util.Locale.ROOT));startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType(mime==null?"application/octet-stream":mime).putExtra(Intent.EXTRA_TITLE,name),42);}}
   private void chooseShareDevices(java.util.List<android.net.Uri> uris){
     if(!alive||isFinishing())return;pendingShareUris=new java.util.ArrayList<>(uris);LinkService service=LinkService.instance;
@@ -1784,7 +2461,7 @@ public class MainActivity extends Activity {
                     .setNegativeButton(Language.t("取消"),null).setPositiveButton(Language.t("发起授权"),(d,w)->run(()->{peer.request("permission-request",obj("permissions",new JSONArray().put("clipboard")));main.post(()->toast(Language.t("已发起授权，请在对方设备确认后再次选择")));})).show();return;
               }
               pendingShareUris=null;dialog.dismiss();Intent keep=new Intent(this,LinkService.class);ClipData clips=ClipData.newRawUri(Language.t("LanLink 文件分享"),uris.get(0));for(int n=1;n<uris.size();n++)clips.addItem(new ClipData.Item(uris.get(n)));keep.setClipData(clips);keep.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);startForegroundService(keep);
-              service.jobs.execute(()->{try{service.staging.share(peer,uris,requestId);main.post(()->{if(alive){toast(Language.t("已开始发送，可在文件暂存区查看结果"));if(page.equals("center"))refreshCenter();}});}catch(Exception failure){main.post(()->{if(alive){toast(failure.getMessage());if(page.equals("center"))refreshCenter();}});}});
+              service.jobs.execute(()->{try{service.staging.share(peer,uris,requestId);main.post(()->{if(alive){toast(Language.t("已开始发送，可在文件暂存区查看结果"));if(page.equals("center"))refreshCenter();}});}catch(Exception failure){main.post(()->{if(alive){showOperationError(failure.getMessage());if(page.equals("center"))refreshCenter();}});}});
               toast(Language.t("正在准备发送文件"));page="center";centerSelection="files";renderPage();
             });
           }catch(Exception failure){main.post(()->{if(dialog.isShowing()){progress.setText(Language.t("无法发送：")+displayError(failure.getMessage()));reset.run();}});}
@@ -1810,7 +2487,16 @@ public class MainActivity extends Activity {
   private String clipboardHistoryKey(){LinkService service=LinkService.instance;if(service==null)return "starting";org.json.JSONArray list=service.groupClipboard.history();StringBuilder key=new StringBuilder();for(int i=0;i<list.length();i++)key.append(list.optJSONObject(i).optString("id")).append(';');return key.toString();}
   private void clipboardPage(){
     heading(Language.t("剪贴板"),Language.t("最近 10 分钟 · 最多 30 条文字记录"));LinkService service=LinkService.instance;org.json.JSONArray list=service==null?new org.json.JSONArray():service.groupClipboard.history();clipboardHistorySignature=clipboardHistoryKey();
-    if(list.length()==0)layout.addView(ui.text(Language.t("暂无同步记录，复制文字后将在这里出现。"),14,Ui.MUTED));
+    if(list.length()==0) {
+      if (tabletLayout) {
+        LinearLayout empty = ui.card(); empty.setGravity(Gravity.CENTER);
+        empty.setMinimumHeight(ui.dp(260));
+        empty.addView(ui.icon("clipboard", Ui.PURPLE), new LinearLayout.LayoutParams(ui.dp(52), ui.dp(52)));
+        ui.gap(empty, 20);
+        TextView message = ui.text(Language.t("暂无同步记录，复制文字后将在这里出现。"), 14, Ui.MUTED);
+        message.setGravity(Gravity.CENTER); empty.addView(message); layout.addView(empty);
+      } else layout.addView(ui.text(Language.t("暂无同步记录，复制文字后将在这里出现。"),14,Ui.MUTED));
+    }
     for(int i=0;i<list.length();i++){
       JSONObject record=list.optJSONObject(i);if(record==null)continue;String id=record.optString("id");LinearLayout card=ui.card();LinearLayout meta=ui.row();TextView source=ui.text(record.optString("name",Language.t("设备"))+" · "+new java.text.SimpleDateFormat("HH:mm:ss",Locale.getDefault()).format(new Date(record.optLong("at"))),12,Ui.MUTED);meta.addView(source,new LinearLayout.LayoutParams(0,-2,1));meta.addView(ui.button(Language.t("复制"),false,()->run(()->{link().groupClipboard.copy(id);main.post(()->toast(Language.t("已复制到本机剪贴板")));})));card.addView(meta);ui.gap(card,12);String value=record.optString("text");TextView text=ui.text(value.length()>2000?value.substring(0,2000):value,14,Ui.INK);text.setMaxLines(6);text.setEllipsize(android.text.TextUtils.TruncateAt.END);text.setTextIsSelectable(true);card.addView(text);if(value.length()>2000)card.addView(ui.text(Language.t("长文本预览 · 复制可获取完整内容"),12,Ui.MUTED));layout.addView(card);ui.gap(layout,12);
     }
@@ -1980,7 +2666,8 @@ public class MainActivity extends Activity {
     String sig =
         request == null ? "none" : request.peer + request.needs.toString() + request.created;
     String controlled = s == null ? null : s.controlledBy();
-    sig += "|" + controlled;
+    String channel = s == null ? "" : s.incomingInputTransport();
+    sig += "|" + controlled + "|" + channel;
     if (sig.equals(noticeSignature)) return;
     noticeSignature = sig;
     noticeBox.removeAllViews();
@@ -1995,7 +2682,8 @@ public class MainActivity extends Activity {
       LinearLayout labels = ui.column();
       TextView controlledText=ui.title(Language.t("● 正在被控制 / 共享屏幕"),14);controlledText.setTextColor(Ui.PURPLE);labels.addView(controlledText);
       ui.gap(labels, 5);
-      TextView deviceName=ui.text(controlled,12,Ui.MUTED);
+      String channelName = channel.equals("bluetooth") ? Language.t("蓝牙") : Language.t("网络");
+      TextView deviceName=ui.text(channel.isEmpty() ? controlled : controlled + " · " + channelName,12,Ui.MUTED);
       deviceName.setSingleLine(true);
       deviceName.setEllipsize(android.text.TextUtils.TruncateAt.END);
       labels.addView(deviceName);
@@ -2033,7 +2721,7 @@ public class MainActivity extends Activity {
     PermissionNotice.Request request =
         s == null ? null : s.permissionNotice.peek(System.currentTimeMillis());
     if (request == null) {
-      toast(Language.t("请求已结束，请让对方重新发起"));
+      showOperationError("请求已结束，请让对方重新发起");
       return;
     }
     if (s.consent.peek() != null) {
@@ -2307,10 +2995,11 @@ public class MainActivity extends Activity {
     refreshConsent(s);
     refreshPermissionRows();
     if(status!=null)status.setText(s == null ? Language.t("服务正在启动…") : Language.t(s.status));
-    if(mode!=null)mode.setText(
-        localInputReady(s)
-            ? Language.t("输入助手已连接 · ADB / Root")
-            : Language.t("输入助手待连接 · 可在电脑端恢复"));
+    if (mode != null) {
+      String inputStatus = localInputReady(s)
+          ? Language.t("输入助手已连接 · ADB / Root") : Language.t("输入助手待连接 · 可在电脑端恢复");
+      mode.setText(inputStatus);
+    }
     if (s != null) {
       if (s.backgroundRecovery != null) s.backgroundRecovery.foreground(resumed);
       s.uiVisible = resumed && pairDialog == null && viewer == null;
@@ -2401,7 +3090,7 @@ public class MainActivity extends Activity {
 
   protected void onSaveInstanceState(Bundle state) {
     super.onSaveInstanceState(state);
-    state.putString("page", page);if(pendingShareUris!=null)state.putParcelableArrayList("pendingShareUris",pendingShareUris);
+    state.putString("page", page); state.putString("popupParent", popupParent);if(pendingShareUris!=null)state.putParcelableArrayList("pendingShareUris",pendingShareUris);
     state.putString("selected", selected);state.putString("savingStage",savingStage);state.putString("centerSelection",centerSelection);
     if (pendingLogExport != null) state.putString("pendingLogExport", pendingLogExport.getName());
     state.putBoolean("incompleteLogs", incompleteLogs);
@@ -2411,20 +3100,42 @@ public class MainActivity extends Activity {
   public void onConfigurationChanged(android.content.res.Configuration configuration) {
     super.onConfigurationChanged(configuration);
     Language.refresh(this);
-    if (viewer == null) renderPage();
+    updateWindowLayout();
+    for (Runnable fit : new ArrayList<>(floatingLayouts.values())) main.post(fit);
+    if (viewer == null) {
+      if (popupDialog != null) {
+        String target = page; dismissPopupPage();
+        page = popupParent; renderPage(); page = target;
+      }
+      renderPage();
+    }
     else if (viewer.getWindow() != null) {
       viewer.getWindow().setLayout(-1, -1);
       viewer.getWindow().getDecorView().requestApplyInsets();
     }
   }
 
+  @Override public void onRequestPermissionsResult(int request, String[] permissions, int[] grants) {
+    super.onRequestPermissionsResult(request, permissions, grants);
+    if (request == HID_PERMISSION) {
+      String id = pendingHidPairing;
+      pendingHidPairing = null;
+      if (id != null && LinkService.instance != null && LinkService.instance.phoneHid.permitted())
+        preparePhoneHid(id);
+    }
+  }
+
   protected void onResume() {
     super.onResume();
-    if(appUpdater!=null){appUpdater.openInstaller();appUpdater.automatic();}
     resumed = true;
+    if(appUpdater!=null){appUpdater.attach(this);appUpdater.automatic();}
     if (Language.refresh(this)) renderPage();
     if(awaitingEdgeGlowPermission){awaitingEdgeGlowPermission=false;if(Settings.canDrawOverlays(this))getSharedPreferences("identity",0).edit().putBoolean("edge_glow",true).apply();if("settings".equals(page))renderPage();}
-    if (LinkService.instance != null){LinkService.instance.uiVisible=true;LinkService.instance.groupClipboard.poll();}
+    if (LinkService.instance != null){
+      LinkService.instance.uiVisible=true;
+      LinkService.instance.groupClipboard.poll();
+      LinkService.instance.phoneHid.resume();
+    }
     if (LinkService.instance != null && LinkService.instance.backgroundRecovery != null)
       LinkService.instance.backgroundRecovery.sample(true);
     update();
@@ -2752,6 +3463,7 @@ public class MainActivity extends Activity {
       public void onTextChanged(CharSequence s,int start,int before,int count) { fullscreen[0].connectionStatus(s); }
       public void afterTextChanged(android.text.Editable text) {}
     });
+    fullscreen[0].setExitAction(session::dismiss);
     fullscreen[0].connectionStatus(frameStatus.getText());
     viewer.setContentView(outer);
     viewer.setOnDismissListener(
@@ -2771,6 +3483,8 @@ public class MainActivity extends Activity {
     viewer.getWindow().setLayout(-1, -1);
     viewer.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
     applyInsets(outer, viewer.getWindow());
+    if (getResources().getConfiguration().orientation
+        == android.content.res.Configuration.ORIENTATION_LANDSCAPE) fullscreen[0].enter();
     player.requireControl = true;
     player.start();
     if (!phone)
@@ -2901,7 +3615,7 @@ public class MainActivity extends Activity {
           if (output == null) throw new IOException(Language.t("操作失败"));
           Files.copy(prepared.toPath(), output);
         } finally { prepared.delete(); }
-        main.post(() -> toast(Language.t(incomplete ? "日志已保存，部分设备的日志未能收集" : "日志已保存")));
+        main.post(() -> toast(Language.t(incomplete ? "日志已保存，部分设备的日志未能收集" : "日志已保存"), incomplete));
       });
       return;
     }
@@ -2954,8 +3668,9 @@ public class MainActivity extends Activity {
   }
 
   protected void onPause() {
+    timedToast.dismiss();
+    if (appUpdater != null) appUpdater.detach(this);
     super.onPause();
-    resetBackPreview();
     resumed = false;
     if (LinkService.instance != null && LinkService.instance.backgroundRecovery != null)
       LinkService.instance.backgroundRecovery.foreground(false);
@@ -2966,13 +3681,16 @@ public class MainActivity extends Activity {
   }
 
   protected void onDestroy() {
-    unregisterPageBackCallback();
+    if (operationError != null) operationError.dismiss();
     alive = false;
     closePermissionDialog();
     viewing = null;
     main.removeCallbacks(refresh);
     if (viewer != null) viewer.dismiss();
     if (pairDialog != null) pairDialog.dismiss();
+    dismissPopupPage();
+    for (Dialog dialog : new ArrayList<>(floatingLayouts.keySet())) dialog.dismiss();
+    floatingLayouts.clear();
     for (Dialog dialog : new ArrayList<>(sheets)) dialog.dismiss();
     actions.shutdownNow();
     frames.shutdownNow();

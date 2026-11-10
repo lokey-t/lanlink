@@ -60,6 +60,7 @@ export class InputQueue {
   constructor(send, options = {}) {
     this.send = send; this.queue = []; this.running = false; this.now = options.now || (() => performance.now());
     this.options = options; this.pacing = options.adaptive ? new AdaptiveMotion(this.now) : null; this.lastMotionAt = -Infinity;
+    this.motionInterval = Number(options.motionInterval) || 0;
   }
   feedback(report) { const before = this.pacing?.interval; this.pacing?.feedback(report); if (this.pacing?.interval < before) this.wake?.(); }
   request(method, args, timeout) {
@@ -87,8 +88,9 @@ export class InputQueue {
     try {
       while (this.queue.length) {
         let job = this.queue[0];
-        while (this.pacing && motion(job.method, job.args) && this.queue.length === 1) {
-          const wait = this.pacing.interval - (this.now() - this.lastMotionAt);
+        while ((this.pacing || this.motionInterval) && motion(job.method, job.args) && this.queue.length === 1) {
+          const interval = this.motionInterval || this.pacing.interval;
+          const wait = interval - (this.now() - this.lastMotionAt);
           if (wait <= 0) break;
           await new Promise(resolve => { const timer = setTimeout(done, wait); const self = this; function done() { clearTimeout(timer); self.wake = null; resolve(); } this.wake = done; });
         }

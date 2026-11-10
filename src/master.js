@@ -21,6 +21,7 @@ export function publishMaster(service){const choice=masterSelection(service);if(
 export async function masterChanged(service){
   const choice=masterSelection(service);
   if(!service.config.master){service.cancelPendingEdge();if(service.capture)await service.returnLocal();}
+  service.inputTransport?.masterChanged();
   if(choice&&service.owner?.pointer&&service.owner.id!==choice.id){const owner=service.owner;service.clearInboundEdge();service.owner=null;await service.native.call('release');try{service.peers.get(owner.id)?.send({type:'control-ended',...(owner.edgeSession?{session:owner.edgeSession}:{})});}catch{}}
   service.emit('change');
 }

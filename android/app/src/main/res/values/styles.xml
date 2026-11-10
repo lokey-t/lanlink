@@ -1,5 +1,6 @@
 <resources>
     <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowAnimationStyle">@style/PageMotion</item>
         <item name="android:fontFamily">sans</item>
         <item name="android:colorAccent">#7163C8</item>
         <item name="android:windowLightStatusBar">true</item>
@@ -11,6 +12,7 @@
         <item name="android:windowSoftInputMode">adjustResize</item>
     </style>
     <style name="AppThemeDark" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:windowAnimationStyle">@style/PageMotion</item>
         <item name="android:fontFamily">sans</item>
         <item name="android:colorAccent">#AA9CF2</item>
         <item name="android:windowLightStatusBar">false</item>
@@ -20,5 +22,23 @@
         <item name="android:windowBackground">#141B27</item>
         <item name="android:forceDarkAllowed">false</item>
         <item name="android:windowSoftInputMode">adjustResize</item>
+    </style>
+    <style name="PageMotion">
+        <item name="android:windowEnterAnimation">@anim/page_enter</item>
+        <item name="android:windowExitAnimation">@anim/page_exit</item>
+    </style>
+    <style name="PopupTheme" parent="AppTheme">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowIsFloating">false</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowBackgroundFallback">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">true</item>
+    </style>
+    <style name="PopupThemeDark" parent="AppThemeDark">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowIsFloating">false</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowBackgroundFallback">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">true</item>
     </style>
 </resources>

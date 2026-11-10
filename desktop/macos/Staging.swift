@@ -10,7 +10,10 @@ import UniformTypeIdentifiers
         guard !rows.isEmpty else { return }
         let panel=NSPanel(contentRect:NSRect(x:0,y:0,width:370,height:190),styleMask:[.borderless,.nonactivatingPanel],backing:.buffered,defer:false)
         panel.level = .floating;panel.isFloatingPanel=true;panel.hidesOnDeactivate=false;panel.collectionBehavior=[.canJoinAllSpaces,.fullScreenAuxiliary];panel.isReleasedWhenClosed=false
-        panel.contentView=NSHostingView(rootView:StageReceiveNotice(model:self,rows:rows))
+        panel.isOpaque=false;panel.backgroundColor = .clear;panel.hasShadow=true
+        let host=NSHostingView(rootView:StageReceiveNotice(model:self,rows:rows))
+        host.wantsLayer=true;host.layer?.cornerRadius=20;host.layer?.masksToBounds=true
+        panel.contentView=host
         if let frame=NSScreen.main?.visibleFrame { panel.setFrameOrigin(NSPoint(x:frame.maxX-388,y:frame.maxY-208)) }
         stageReceivePanel=panel;panel.orderFrontRegardless()
     }
@@ -31,7 +34,8 @@ import UniformTypeIdentifiers
             let result = try await call(method, ["id": id])
             guard stageActionVersions[id] == version else { return }
             let defaults = ["stage-cancel": "传输已取消，可重新传输", "stage-remove": "已删除暂存文件", "stage-start": "已开始接收文件", "stage-outgoing-cancel": "发送已取消", "stage-outgoing-retry": "已重新开始发送", "stage-outgoing-remove": "已清除发送记录"]
-            showSuccessToast(result["message"] as? String ?? defaults[method] ?? "操作已完成")
+            showSuccessToast(result["message"] as? String ?? defaults[method] ?? "操作已完成",
+                             symbol: method == "stage-start" ? "info.circle" : "checkmark.circle.fill")
             await refreshStaging()
         } catch { if stageActionVersions[id] == version { notice = error.localizedDescription } } }
     }
@@ -95,7 +99,11 @@ import UniformTypeIdentifiers
             Label(L("收到文件"),systemImage:"tray.and.arrow.down.fill").font(.system(size:19,weight:.semibold))
             Text((rows.first?["sourceName"] as? String ?? "")+" · "+rows.compactMap{$0["name"] as? String}.joined(separator:"、")).font(.system(size:13)).foregroundColor(.secondary).lineLimit(3)
             HStack { Button(L("接受")){model.decideStageReceive(rows,true)};Button(L("拒绝")){model.decideStageReceive(rows,false)} }.buttonStyle(FlatButtonStyle())
-        }.padding(22).frame(width:326,height:146,alignment:.topLeading).background(Color.white)
+        }.padding(22).frame(width:326,height:146,alignment:.topLeading)
+        .foregroundStyle(Palette.ink)
+        .background(Palette.surface,in:RoundedRectangle(cornerRadius:20,style:.continuous))
+        .overlay(RoundedRectangle(cornerRadius:20,style:.continuous).strokeBorder(Palette.line))
+        .clipShape(RoundedRectangle(cornerRadius:20,style:.continuous))
     }
 }
 
@@ -188,7 +196,11 @@ struct StagedDragOut:NSViewRepresentable {
     }
     func draggingSession(_ session:NSDraggingSession,sourceOperationMaskFor context:NSDraggingContext)->NSDragOperation { .copy }
     func ignoreModifierKeys(for session:NSDraggingSession)->Bool { true }
-    func draggingSession(_ session:NSDraggingSession,endedAt point:NSPoint,operation:NSDragOperation) { down=nil;preparing=false;if operation.contains(.copy) { model?.stageAction("stage-remove",id);model?.showSuccessToast("已保存到目标位置并移出暂存区") } }
+    func draggingSession(_ session:NSDraggingSession,endedAt point:NSPoint,operation:NSDragOperation) {
+        down = nil
+        preparing = false
+        if operation.contains(.copy) { model?.showSuccessToast("已交给目标应用复制", symbol: "info.circle") }
+    }
 }
 
 @MainActor struct DeviceFileDrop:DropDelegate {
@@ -225,31 +237,101 @@ struct StagedDragOut:NSViewRepresentable {
     }
 }
 
-// Only genuine file URL drags create metadata offers at configured screen edges.
+// A narrow destination shields configured device edges only during file drags.
 @MainActor final class FileDragEdges {
     weak var model:Model?;var panels:[NSPanel]=[];var signature="";var visibility:Timer?
-    init(_ model:Model) { self.model=model;visibility=Timer(timeInterval:0.04,repeats:true){[weak self] _ in Task{@MainActor in guard let self else{return};for panel in self.panels {panel.ignoresMouseEvents=NSEvent.pressedMouseButtons&1==0}}};RunLoop.main.add(visibility!,forMode:.common) }
-    func stop() { signature = ""; for panel in panels { panel.close() }; panels = [] }
+    static var fileDragActive:Bool {
+        NSEvent.pressedMouseButtons&1 != 0 && FileEdgeTarget.fileURLs(in:NSPasteboard(name:.drag)).isEmpty == false
+    }
+    init(_ model:Model) {
+        self.model=model
+        visibility=Timer(timeInterval:0.02,repeats:true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                let active=Self.fileDragActive
+                for panel in self.panels {
+                    panel.ignoresMouseEvents = !active
+                    if active { panel.orderFrontRegardless() }
+                }
+            }
+        }
+        RunLoop.main.add(visibility!,forMode:.common)
+    }
+    func stop() { signature="";for panel in panels { panel.close() };panels=[] }
     func update() {
-        guard let model else { return };let edges=model.state["reachableEdges"] as? [String:String] ?? model.edges
-        let next=model.serviceReady && model.isMaster && (model.state["active"] as? String ?? "").isEmpty ? edges.sorted { $0.key<$1.key }.map { $0.key+":"+$0.value }.joined(separator:"|"):""
-        guard next != signature else { return };signature=next;for panel in panels { panel.close() };panels=[];guard !next.isEmpty else { return }
-        for screen in NSScreen.screens { for (edge,id) in edges where !id.isEmpty {
-            var frame=screen.frame;switch edge {case "left":frame.size.width=4;case "right":frame.origin.x=frame.maxX-4;frame.size.width=4;case "top":frame.origin.y=frame.maxY-4;frame.size.height=4;case "bottom":frame.size.height=4;default:continue}
-            let panel=NSPanel(contentRect:frame,styleMask:[.borderless,.nonactivatingPanel],backing:.buffered,defer:false);panel.level = .statusBar;panel.isOpaque=false;panel.backgroundColor=NSColor.black.withAlphaComponent(0.005);panel.hasShadow=false;panel.ignoresMouseEvents=true;panel.collectionBehavior=[.canJoinAllSpaces,.fullScreenAuxiliary];let view=FileEdgeTarget();view.model=model;view.edge=edge;view.id=id;panel.contentView=view;panel.orderFrontRegardless();panels.append(panel)
+        guard let model else { return }
+        let screens=NSScreen.screens.map { NSStringFromRect($0.frame) }.joined(separator:"|")
+        let reachableEdges = model.state["reachableEdges"] as? [String:String] ?? model.edges
+        let edges = reachableEdges.filter { _, id in !id.isEmpty && model.devices.contains { $0.id == id && $0.online } }
+        let enabled=model.serviceReady && model.isMaster && (model.state["active"] as? String ?? "").isEmpty
+        let next=enabled && !edges.isEmpty ? screens+edges.sorted { $0.key<$1.key }.map { $0.key+":"+$0.value }.joined(separator:"|"):""
+        guard next != signature else { return }
+        stop();signature=next;guard !next.isEmpty else { return }
+        for screen in NSScreen.screens { for (edge,id) in edges {
+            var frame=screen.frame
+            let thickness:CGFloat=3
+            switch edge {
+            case "left":frame.size.width=thickness
+            case "right":frame.origin.x=frame.maxX-thickness;frame.size.width=thickness
+            case "top":frame.origin.y=frame.maxY-thickness;frame.size.height=thickness
+            case "bottom":frame.size.height=thickness
+            default:continue
+            }
+            let panel=NSPanel(contentRect:frame,styleMask:[.borderless,.nonactivatingPanel],backing:.buffered,defer:false)
+            panel.level = .statusBar;panel.isOpaque=false
+            panel.backgroundColor=NSColor.controlAccentColor.withAlphaComponent(0.02)
+            panel.hasShadow=false;panel.ignoresMouseEvents = !Self.fileDragActive
+            panel.collectionBehavior=[.canJoinAllSpaces,.fullScreenAuxiliary]
+            let view=FileEdgeTarget();view.model=model;view.edge=edge;view.id=id
+            panel.contentView=view;panel.orderFrontRegardless();panels.append(panel)
         } }
     }
 }
 @MainActor final class FileEdgeTarget:NSView {
     weak var model:Model?;var edge="",id="";var hover=false;var triggered=false;var waiting:Task<Void,Never>?
+    var sequence:Int?;var paths:[String]=[]
+    static func fileURLs(in pasteboard:NSPasteboard)->[URL] {
+        let urls=pasteboard.readObjects(forClasses:[NSURL.self],options:[.urlReadingFileURLsOnly:true]) as? [URL] ?? []
+        if !urls.isEmpty { return urls }
+        return (pasteboard.propertyList(forType:NSPasteboard.PasteboardType("NSFilenamesPboardType")) as? [String] ?? []).map { URL(fileURLWithPath:$0) }
+    }
     override init(frame:NSRect) { super.init(frame:frame);registerForDraggedTypes([.fileURL,NSPasteboard.PasteboardType("NSFilenamesPboardType")]) }
     required init?(coder:NSCoder) { fatalError("init(coder:) has not been implemented") }
+    var shortcutHeld:Bool {
+        guard let model else { return false }
+        guard model.state["switchMode"] as? String=="hotkey" else { return true }
+        let required:[String:NSEvent.ModifierFlags] = ["ctrl-alt":[.control,.option],"ctrl-shift":[.control,.shift],"alt-shift":[.option,.shift],"meta-shift":[.command,.shift]]
+        return NSEvent.modifierFlags.isSuperset(of:required[model.state["edgeHotkey"] as? String ?? "ctrl-alt"] ?? [.control,.option])
+    }
     override func draggingEntered(_ sender:NSDraggingInfo)->NSDragOperation {
-        guard let model,!triggered else { return [] };let urls=sender.draggingPasteboard.readObjects(forClasses:[NSURL.self],options:[.urlReadingFileURLsOnly:true]) as? [URL] ?? [];guard !urls.isEmpty else { return [] }
-        if model.state["switchMode"] as? String=="hotkey" { let required:[String:NSEvent.ModifierFlags] = ["ctrl-alt":[.control,.option],"ctrl-shift":[.control,.shift],"alt-shift":[.option,.shift],"meta-shift":[.command,.shift]];guard NSEvent.modifierFlags.isSuperset(of:required[model.state["edgeHotkey"] as? String ?? "ctrl-alt"] ?? [.control,.option]) else { return [] } }
-        hover=true;waiting?.cancel();waiting=Task { try? await Task.sleep(nanoseconds:UInt64(model.state["switchMode"] as? String=="hotkey" ? 0:model.dwell)*1_000_000);guard !Task.isCancelled,hover,!triggered else { return };triggered=true;model.perform("stage-edge",["id":id,"edge":edge,"files":urls.map(\.path)]) };return .copy
+        waiting?.cancel()
+        if sequence != sender.draggingSequenceNumber { sequence=sender.draggingSequenceNumber;triggered=false }
+        paths=Self.fileURLs(in:sender.draggingPasteboard).map(\.path)
+        hover = !paths.isEmpty && !triggered
+        guard hover,let model else { return [] }
+        // Complete the AppKit drop before capture starts; Escape would animate the file back.
+        waiting=Task { [weak self] in
+            try? await Task.sleep(nanoseconds:UInt64(max(0,model.dwell))*1_000_000)
+            guard let self,!Task.isCancelled,self.hover,!self.triggered,self.shortcutHeld,
+                  NSEvent.pressedMouseButtons&1 != 0 else { return }
+            let point=CGEvent(source:nil)?.location ?? .zero
+            CGEvent(mouseEventSource:nil,mouseType:.leftMouseUp,mouseCursorPosition:point,mouseButton:.left)?.post(tap:.cghidEventTap)
+        }
+        return .copy
     }
     override func draggingUpdated(_ sender:NSDraggingInfo)->NSDragOperation { hover ? .copy:[] }
     override func draggingExited(_ sender:NSDraggingInfo?) { hover=false;waiting?.cancel() }
-    override func performDragOperation(_ sender:NSDraggingInfo)->Bool { false }
+    override func prepareForDragOperation(_ sender:NSDraggingInfo)->Bool { hover && !paths.isEmpty && !triggered && shortcutHeld }
+    override func performDragOperation(_ sender:NSDraggingInfo)->Bool {
+        guard hover,!triggered,!paths.isEmpty,shortcutHeld,let model else { return false }
+        waiting?.cancel();triggered=true;hover=false
+        // Defer switching until AppKit has acknowledged the successful copy destination.
+        let files=paths,target=id,side=edge
+        Task { @MainActor in
+            await Task.yield()
+            model.perform("stage-edge",["id":target,"edge":side,"files":files,"dragCompleted":true])
+        }
+        return true
+    }
+    override func concludeDragOperation(_ sender:NSDraggingInfo?) { waiting?.cancel();hover=false;paths=[] }
 }

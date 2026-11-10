@@ -58,11 +58,28 @@ struct Device: Identifiable {
 @MainActor final class Model: ObservableObject {
     weak var appDelegate: AppDelegate?
     static let dockIconHiddenKey = "LanLink.HideDockIcon"
+    private static let developerOptionsKey = "LanLink.DeveloperOptions"
+    private var developerUnlockClicks = 0
+    @Published private(set) var developerOptionsEnabled: Bool
     private let preferences: UserDefaults
     @Published private(set) var dockIconHidden: Bool
     init(preferences: UserDefaults = .standard) {
         self.preferences = preferences
         dockIconHidden = preferences.bool(forKey: Self.dockIconHiddenKey)
+        developerOptionsEnabled = preferences.bool(forKey: Self.developerOptionsKey)
+    }
+    func registerMyDeviceClick() {
+        guard !developerOptionsEnabled else { return }
+        developerUnlockClicks += 1
+        if developerUnlockClicks == 10 {
+            setDeveloperOptionsEnabled(true)
+            showSuccessToast("开发者选项已开启")
+        }
+    }
+    func setDeveloperOptionsEnabled(_ enabled: Bool) {
+        developerUnlockClicks = 0
+        preferences.set(enabled, forKey: Self.developerOptionsKey)
+        developerOptionsEnabled = enabled
     }
     func setDockIconHidden(_ hidden: Bool) {
         guard appDelegate?.applyDockIconVisibility(hidden: hidden) == true else {
@@ -160,6 +177,12 @@ struct Device: Identifiable {
             await refresh()
         } catch { notice = error.localizedDescription }
     }
+    var masterDeviceSelection: Binding<String> {
+        Binding(get: { self.masterID }, set: { id in
+            guard let device = self.devices.first(where: { $0.id == id }) else { return }
+            Task { await self.chooseLayoutMaster(device) }
+        })
+    }
     @Published var layoutDragID: String?
     @Published var layoutDragPoint: CGPoint = .zero
     var layoutCanvasFrame: CGRect = .zero
@@ -181,12 +204,15 @@ struct Device: Identifiable {
     func remotePresented(){remoteFrameTimes.append(ProcessInfo.processInfo.systemUptime)}
     @Published var remoteBitrate=0.0
     @Published var firstDevicePermissionGuide = false
+    @Published var upgradePermissionKeys: Set<String>?
     var remoteGeometryRestored=false
     @Published var controlling = false
     @Published var remotePhone = false
     @Published var adbDevice: Device?
     @Published var permissionsVisible = false
-    @Published var sidebarPage = "devices"
+    @Published var sidebarPage = "devices" {
+        didSet { if sidebarPage != "information" { developerUnlockClicks = 0 } }
+    }
     @Published var stageBusy: Set<String> = []
     var stageActionVersions: [String: Int] = [:]
     @Published var outgoingFiles: [[String: Any]] = []
@@ -195,9 +221,10 @@ struct Device: Identifiable {
     var fallbackAccepted = false; var showingInputModeDialog = false; var handlingFallback = false
     var freshControl = true; var remoteOpenedAt = 0.0
     @Published var autoControl = false
-    @Published var clipboardToast="";var clipboardToastTask:Task<Void,Never>?
     @Published var successToast = ""
     @Published var successToastSymbol = "checkmark.circle.fill"
+    @Published var toastStartedAt: TimeInterval = 0
+    @Published var toastDuration = 3.0
     var successToastTask: Task<Void, Never>?
     private static let startupAgent = SMAppService.agent(plistName: "com.lanlink.login.plist")
     private static var startupRegistered: Bool {
@@ -266,6 +293,31 @@ struct Device: Identifiable {
         guard !UserDefaults.standard.bool(forKey: key) else { return }
         UserDefaults.standard.set(true, forKey: key)
         firstDevicePermissionGuide = true
+    }
+    private func checkPermissionsAfterUpdate() {
+        guard let build = state["buildInfo"] as? [String: Any],
+              let fingerprint = build["sourceFingerprint"] as? String, !fingerprint.isEmpty,
+              let capabilities = state["capabilities"] as? [String: Any],
+              capabilities["simulated"] as? Bool != true,
+              ["input", "inputMonitoring", "screen"].allSatisfy({ capabilities[$0] is Bool }) else { return }
+        let preferences = UserDefaults.standard
+        let key = "LanLink.lastPermissionBuild"
+        let oldBuild = preferences.string(forKey: key)
+        let grantsKey = "LanLink.lastPermissionGrants"
+        let previous = preferences.dictionary(forKey: grantsKey) as? [String: Bool]
+        let keys = ["input", "inputMonitoring", "screen"]
+        let current = Dictionary(uniqueKeysWithValues: keys.map { ($0, capabilities[$0] as? Bool == true) })
+        if current != previous { preferences.set(current, forKey: grantsKey) }
+        guard oldBuild != fingerprint else { return }
+        let id = state["id"] as? String ?? "local"
+        let legacyInstall = previous == nil && (oldBuild != nil ||
+            preferences.bool(forKey: "LanLink.systemPermissionGuide.v2.\(id)"))
+        preferences.set(fingerprint, forKey: key)
+        let missing = Set(keys.filter { current[$0] == false && (previous?[$0] == true || legacyInstall) })
+        if !missing.isEmpty {
+            upgradePermissionKeys = missing
+            firstDevicePermissionGuide = true
+        }
     }
     func launch() {
         guard !closing, process?.isRunning != true else { return }
@@ -385,14 +437,25 @@ struct Device: Identifiable {
         }
     }
     var clipboardSettings:[String:Any]{state["clipboardSettings"] as? [String:Any] ?? [:]}
-    func clipboardAction(_ method:String,_ args:[String:Any]=[:]){Task{do{let result=try await call(method,args);clipboardToast=result["message"] as? String ?? "剪贴板已同步";await refresh()}catch{clipboardToast=Model.readableMessage(error.localizedDescription);notice=error.localizedDescription};clipboardToastTask?.cancel();clipboardToastTask=Task{@MainActor in do{try await Task.sleep(nanoseconds:2_400_000_000);clipboardToast=""}catch{}}}}
+    func clipboardAction(_ method: String, _ args: [String: Any] = [:]) {
+        Task {
+            do {
+                let result = try await call(method, args)
+                showSuccessToast(result["message"] as? String ?? "剪贴板已同步")
+                await refresh()
+            } catch { notice = error.localizedDescription }
+        }
+    }
     func showSuccessToast(_ message: String, symbol: String = "checkmark.circle.fill") {
         successToastTask?.cancel()
         successToastSymbol = symbol
+        let duration = symbol == "exclamationmark.triangle.fill" ? 4.0 : 3.0
+        toastDuration = duration
+        toastStartedAt = ProcessInfo.processInfo.systemUptime
         successToast = message
         successToastTask = Task { @MainActor in
             do {
-                try await Task.sleep(nanoseconds: 3_000_000_000)
+                try await Task.sleep(for: .seconds(duration))
                 guard !Task.isCancelled else { return }
                 successToast = ""
             } catch {}
@@ -427,18 +490,45 @@ struct Device: Identifiable {
             await refresh()
         } catch {
             guard generation == serviceGeneration, !remoteSession || (remoteVersion == remoteOpenVersion && remoteControlVersion == controlVersion) else { return }
+            if error.localizedDescription.contains("HOST_INPUT_PERMISSION:") {
+                upgradePermissionKeys = ["input", "inputMonitoring"]
+                firstDevicePermissionGuide = true
+                await refresh()
+            }
             if remoteSession { showRemoteNotice(error.localizedDescription) }
             else { notice = error.localizedDescription }
         } }
     }
     private var updateNoticeVersion = ""
+    private var shownUpdateResult: Double = 0
+    func performUpdate(_ method: String) {
+        Task {
+            do { _ = try await call(method); await refresh() }
+            catch { notice = error.localizedDescription }
+        }
+    }
     func refresh() async {
         let generation = serviceGeneration
         do {
             let next = try await call("state")
             guard generation == serviceGeneration, !Task.isCancelled else { return }
-            if let update = next["update"] as? [String:Any], update["phase"] as? String == "available", let version = update["version"] as? String, version != updateNoticeVersion { updateNoticeVersion = version; notice = "发现新版本 " + version + "，请在设置中下载更新" }
+            if let update = next["update"] as? [String: Any], update["phase"] as? String == "available",
+               let version = update["version"] as? String, version != updateNoticeVersion {
+                updateNoticeVersion = version
+                let previous = update["result"] as? [String: Any]
+                if previous?["phase"] as? String != "failed" || previous?["version"] as? String != version {
+                    notice = L("发现新版本") + " " + version + " · " + L("请在设置中下载更新")
+                }
+            }
+            if let update = next["update"] as? [String: Any], let result = update["result"] as? [String: Any],
+               let at = result["at"] as? Double, at > 0, at != shownUpdateResult,
+               let message = result["message"] as? String {
+                shownUpdateResult = at
+                if result["phase"] as? String == "failed" { notice = message }
+                else { showSuccessToast(L(message) + " " + (result["version"] as? String ?? "")) }
+            }
             state = next; applyTheme(); applyLanguage(); var all = [Device(id: state["id"] as? String ?? "local", name: state["name"] as? String ?? "本机", platform: "darwin", online: true, local: true)]
+            checkPermissionsAfterUpdate()
             showFirstDevicePermissionGuideIfNeeded(wasFirstDevice: (state["groupMemberCount"] as? Int ?? 1) > 1 || !(state["knownDevices"] as? [String: Any] ?? [:]).isEmpty)
             refreshRequests(); startupEnabled = Self.startupRegistered
             for (id, info) in state["knownDevices"] as? [String: [String: Any]] ?? [:] { all.append(Device(id: id, name: info["name"] as? String ?? "已配对设备", platform: info["platform"] as? String ?? "")) }
@@ -584,8 +674,24 @@ struct Device: Identifiable {
         alert.informativeText = L("此手机尚未启用 Root / ADB 增强控制。备用模式支持点击、长按和滑动；拖动会在松开鼠标后执行，悬停、游戏和复杂快捷键受限。此旧版手机请升级到 0.3.9 并启用 ADB / Root 输入助手。\n\n可在设备菜单选择「ADB 键鼠授权」开启增强控制。")
         alert.addButton(withTitle: L("使用备用模式")); alert.addButton(withTitle: L("取消")); return alert.runModal() == .alertFirstButtonReturn
     }
+    func inputTarget(_ id: String) -> [String:Any]? {
+        let transport = state["inputTransport"] as? [String:Any]
+        return (transport?["targets"] as? [[String:Any]])?.first { $0["id"] as? String == id }
+    }
+    func bluetoothPreferred(_ id: String) -> Bool {
+        let target = inputTarget(id)
+        let readiness = target?["readiness"] as? [String:String]
+        return target?["preference"] as? String != "network_only" && readiness?["bluetooth"] == "ready"
+    }
+    var inputTargetTitle: String {
+        guard let id = state["active"] as? String, !id.isEmpty else { return L("本机") }
+        let target = inputTarget(id)
+        let name = target?["name"] as? String ?? devices.first { $0.id == id }?.name ?? L("远端设备")
+        let channel = target?["active"] as? String == "bluetooth" ? "蓝牙" : "网络"
+        return name + " · " + L(channel)
+    }
     func switchControl(_ device: Device) {
-        let fallback = device.platform == "android" && inputMode(device.id) == "accessibility-limited"
+        let fallback = device.platform == "android" && inputMode(device.id) == "accessibility-limited" && !bluetoothPreferred(device.id)
         if fallback && !confirmFallback() { return }
         perform("control", ["id": device.id, "capture": true, "newSession": true, "fallbackAccepted": fallback])
     }
@@ -1165,16 +1271,25 @@ struct Home: View {
         HStack(spacing: 0) {
         VStack(alignment: .leading, spacing: 14) {
             Label("LanLink", systemImage: "square.on.square").font(.title2).padding(.bottom, 18)
-            SidebarItem(title: L("设备"), icon: "desktopcomputer", selected: model.sidebarPage == "devices" || model.sidebarPage == "pairing") { navigate("devices") }
-            SidebarItem(title: L("暂存文件"), icon: "folder", selected: model.sidebarPage == "staging") { navigate("staging") }
-            SidebarItem(title: L("本组设备权限"), icon: "checkmark.shield", selected: model.sidebarPage == "permissions") { navigate("permissions") }
-            SidebarItem(title: L("安卓授权"), icon: "iphone.gen3.radiowaves.left.and.right", selected: model.sidebarPage == "adb") { navigate("adb") }
-            SidebarItem(title: L("连接质量分析"), icon: "chart.xyaxis.line", selected: model.sidebarPage == "quality") { navigate("quality") }
-            SidebarItem(title: L("剪贴板"), icon: "doc.on.clipboard", selected: model.sidebarPage == "clipboard") { navigate("clipboard") }
-            SidebarItem(title: L("设置"), icon: "gearshape", selected: model.sidebarPage == "settings") { navigate("settings") }
-            Spacer()
+            ScrollView {
+                VStack(alignment:.leading,spacing:14) {
+                    SidebarItem(title: L("设备"), icon: "desktopcomputer", selected: model.sidebarPage == "devices" || model.sidebarPage == "pairing") { navigate("devices") }
+                    SidebarItem(title: L("暂存文件"), icon: "folder", selected: model.sidebarPage == "staging") { navigate("staging") }
+                    SidebarItem(title: L("本组设备权限"), icon: "checkmark.shield", selected: model.sidebarPage == "permissions") { navigate("permissions") }
+                    SidebarItem(title: L("安卓授权"), icon: "iphone.gen3.radiowaves.left.and.right", selected: model.sidebarPage == "adb") { navigate("adb") }
+                    SidebarItem(title: L("连接质量分析"), icon: "chart.xyaxis.line", selected: model.sidebarPage == "quality") { navigate("quality") }
+                    SidebarItem(title: L("剪贴板"), icon: "doc.on.clipboard", selected: model.sidebarPage == "clipboard") { navigate("clipboard") }
+                    SidebarItem(title: L("设置"), icon: "gearshape", selected: model.sidebarPage == "settings") { navigate("settings") }
+                    if model.developerOptionsEnabled {
+                        SidebarItem(title: L("开发者选项"), icon: "hammer", selected: model.sidebarPage == "developer") { navigate("developer") }
+                    }
+                }
+            }
             if let name = model.controlledBy { VStack(alignment: .leading, spacing: 10) { Label(L("正在被控制"), systemImage: "dot.radiowaves.left.and.right").font(.caption.weight(.semibold)); Text(LF("{0} 正在操作或查看本机", name)).font(.caption).fixedSize(horizontal: false, vertical: true); Button(L("取消桌面控制")) { model.perform("stop-inbound") }.buttonStyle(FlatButtonStyle()) }.padding(12).frame(maxWidth: .infinity, alignment: .leading).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16)).overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.green.opacity(0.20))) }
-            SidebarItem(title: L("我的信息"), icon: "person.crop.circle", selected: model.sidebarPage == "information") { navigate("information") }
+            SidebarItem(title: L("我的设备"), icon: "person.crop.circle", selected: model.sidebarPage == "information") {
+                navigate("information")
+                model.registerMyDeviceClick()
+            }
         }.buttonStyle(.plain).padding(16).frame(width: 190)
         VStack(alignment: .leading, spacing: 12) {
         ZStack {
@@ -1183,7 +1298,7 @@ struct Home: View {
                 ScrollView(.horizontal) { HStack(spacing: 10) { ForEach(model.devices) { d in DeviceTile(model: model, device: d, compact: true).opacity(model.layoutDragID == d.id ? 0.35 : 1) } }.padding(1) }.frame(height: 82)
                 Text(L("同组布局与主设备标识自动同步。点击设备查看操作，拖动调整位置。")).font(.caption).foregroundStyle(.secondary)
                 LayoutCanvas(model: model).padding(10).frame(maxHeight: .infinity).layoutPriority(1).background(Palette.canvas, in: RoundedRectangle(cornerRadius: 20))
-                Divider(); HStack { Text(L("键鼠控制：") + (model.devices.first { $0.id == (model.state["active"] as? String) }?.name ?? "本机")).font(.caption); Spacer(); Button(L("返回本机 · Control + Option + F12")) { model.releaseAll() }.buttonStyle(.plain).font(.caption) }
+                Divider(); HStack { Text(L("键鼠控制：") + model.inputTargetTitle).font(.caption); Spacer(); Button(L("返回本机 · Control + Option + F12")) { model.releaseAll() }.buttonStyle(.plain).font(.caption) }
             }.coordinateSpace(name: "deviceLayout").opacity(settings || model.adbDevice != nil || model.sidebarPage != "devices" ? 0 : 1).allowsHitTesting(!settings && model.adbDevice == nil && model.sidebarPage == "devices").accessibilityHidden(settings || model.adbDevice != nil || model.sidebarPage != "devices")
             SettingsView(model: model, active: settings).opacity(settings && model.adbDevice == nil && !model.permissionsVisible ? 1 : 0).allowsHitTesting(settings && model.adbDevice == nil && !model.permissionsVisible).accessibilityHidden(!settings || model.adbDevice != nil || model.permissionsVisible)
             if model.permissionsVisible { DevicePermissionsView(model: model) }
@@ -1192,29 +1307,50 @@ struct Home: View {
             if model.sidebarPage=="staging"{StagingView(model:model)}
             if model.sidebarPage=="clipboard"{ClipboardHistoryView(model:model)}
             if model.sidebarPage == "information" { InformationView(model: model) }
+            if model.sidebarPage == "developer", model.developerOptionsEnabled {
+                DeveloperOptionsView {
+                    model.setDeveloperOptionsEnabled(false)
+                    navigate("information")
+                }
+            }
             if model.sidebarPage == "pairing" { PairingView(model: model) { navigate("devices") } }
             if let device = model.adbDevice { Group { if device.id.isEmpty { LocalAdbAuthorizationView(model:model) } else { AdbAuthorizationView(model:model,device:device) } }.id(device.id) }
         }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         GlobalNoticeView(model: model)
         }.frame(width: contentWidth, height: contentHeight, alignment: .topLeading).clipped().overlay(alignment: .topTrailing) {
-            VStack(alignment: .trailing, spacing: 8) {
-                if !model.successToast.isEmpty {
-                    Label(Model.displayMessage(model.successToast), systemImage: model.successToastSymbol)
-                        .font(.callout).padding(16).frame(maxWidth: 320)
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
-                        .accessibilityIdentifier("successToast")
-                }
-                if !model.clipboardToast.isEmpty {
-                    Text(Model.displayMessage(model.clipboardToast)).font(.callout).padding(16).frame(maxWidth: 320)
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
-                }
-            }.padding(16).allowsHitTesting(false)
+            if !model.successToast.isEmpty {
+                let tint = model.successToastSymbol == "exclamationmark.triangle.fill" ? Color.orange : Palette.accent
+                Label(Model.displayMessage(model.successToast), systemImage: model.successToastSymbol)
+                    .font(.caption).fixedSize(horizontal: false, vertical: true)
+                    .frame(minWidth: 116, maxWidth: 246, alignment: .leading)
+                    .padding(.bottom, 8)
+                    .overlay(alignment: .bottom) {
+                    TimelineView(.animation(minimumInterval: 1.0 / 30)) { _ in
+                        GeometryReader { track in
+                            let elapsed = ProcessInfo.processInfo.systemUptime - model.toastStartedAt
+                            let left = max(0, min(1, 1 - elapsed / model.toastDuration))
+                            Capsule().fill(tint.opacity(0.16))
+                                .overlay(alignment: .leading) { Capsule().fill(tint).frame(width: track.size.width * left) }
+                        }.frame(height: 2)
+                    }.accessibilityHidden(true)
+                    }
+                .padding(.horizontal, 10).padding(.vertical, 7)
+                .background(Palette.card, in: RoundedRectangle(cornerRadius: 10))
+                .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(Palette.line.opacity(0.9), lineWidth: 1) }
+                .shadow(color: .black.opacity(0.08), radius: 4, y: 2)
+                .fixedSize(horizontal: true, vertical: true)
+                .padding(.trailing, 10).padding(.top, 46).allowsHitTesting(false)
+                .accessibilityIdentifier("successToast")
+            }
         }.padding(26).background(Palette.surface.opacity(0.78), in: RoundedRectangle(cornerRadius: 22)).overlay(RoundedRectangle(cornerRadius: 22).stroke(Palette.line.opacity(0.82), lineWidth: 1)).padding(.trailing, 16).padding(.bottom, 16)
     }.frame(width: layout.size.width, height: layout.size.height).onChange(of: model.adbDevice?.id) { _, id in if id != nil { settings = false } }
         .sheet(isPresented:$model.specificPermissionGuide) { TargetPermissionGuide(model:model,request:model.specificPermissionRequest).id(model.specificPermissionRequest["requestId"] as? String ?? "") }
         .sheet(isPresented:$model.permissionTargetReminder) { SwitchDeviceGuideView(name:model.permissionTargetName) }
         .sheet(item: $model.managingDevice) { device in MemberPermissionsView(model: model, device: device) }
-        .sheet(isPresented: $model.firstDevicePermissionGuide, onDismiss: { if let request=model.state["permissionNotice"] as? [String:Any],request["explicit"] as? Bool != true { model.perform("permission-dismiss",["requestId":request["requestId"] ?? ""]) } }) { FirstDevicePermissionGuide(model: model) }
+        .sheet(isPresented: $model.firstDevicePermissionGuide, onDismiss: {
+            model.upgradePermissionKeys = nil
+            if let request=model.state["permissionNotice"] as? [String:Any],request["explicit"] as? Bool != true { model.perform("permission-dismiss",["requestId":request["requestId"] ?? ""]) }
+        }) { FirstDevicePermissionGuide(model: model) }
         }
         }
     }
@@ -1239,10 +1375,25 @@ struct BuildInformationView: View {
         }.font(.caption).textSelection(.enabled)
     }
 }
+struct DeveloperOptionsView: View {
+    let disable: () -> Void
+    var body: some View {
+        VStack(alignment:.leading,spacing:24) {
+            Text(L("开发者选项")).font(.title2)
+            ScrollView {
+                VStack(alignment:.leading,spacing:16) {
+                    Button(L("关闭开发者选项"), action:disable)
+                }.padding(24).frame(maxWidth:.infinity,alignment:.leading)
+                    .background(Palette.card,in:RoundedRectangle(cornerRadius:20))
+            }
+        }.frame(maxWidth:.infinity,maxHeight:.infinity,alignment:.topLeading)
+            .buttonStyle(FlatButtonStyle())
+    }
+}
 struct InformationView: View {
     @ObservedObject var model: Model
     var body: some View { ScrollView { VStack(alignment: .leading, spacing: 24) {
-        Text(L("我的信息")).font(.title2)
+        Text(L("我的设备")).font(.title2)
         VStack(alignment: .leading, spacing: 18) {
             Text(model.state["name"] as? String ?? "本机").font(.title3)
             Text(L("设备标识：") + (model.state["id"] as? String ?? "")).textSelection(.enabled)
@@ -1257,7 +1408,7 @@ struct AdbHubView: View {
     @State private var devices: [[String: Any]] = []
     @State private var message = "正在读取授权状态…"
     func refresh() async {
-        do { let result = try await model.call("adb-group"); devices = result["devices"] as? [[String: Any]] ?? []; message = devices.isEmpty ? "本组暂无安卓设备，请在我的信息中添加手机。" : "已授权的手机会自动恢复输入连接。" }
+        do { let result = try await model.call("adb-group"); devices = result["devices"] as? [[String: Any]] ?? []; message = devices.isEmpty ? "本组暂无安卓设备，请在我的设备中添加手机。" : "已授权的手机会自动恢复输入连接。" }
         catch { message = error.localizedDescription }
     }
     var body: some View { VStack(alignment: .leading, spacing: 24) {
@@ -1312,13 +1463,14 @@ struct DevicePermissionsView: View {
     @ObservedObject var model: Model
     @State private var devices: [[String: Any]] = []
     @State private var message = "正在读取组内权限…"
+    @State private var showingInputTransport = false
     func refreshDevices() async {
         do { let result = try await model.call("group-permissions"); guard !Task.isCancelled else { return }; devices = result["devices"] as? [[String:Any]] ?? []; message = "悬停查看含义 · 左键或右键打开菜单" }
         catch { message = error.localizedDescription }
     }
     var body: some View {
         VStack(alignment:.leading,spacing:18) {
-            HStack { Text(L("本组设备权限")).font(.title2); Spacer(); Button(L("刷新")) { Task { await refreshDevices() } } }
+            HStack { Text(L("本组设备权限")).font(.title2); Spacer(); Button(L("键鼠通道")) { showingInputTransport = true }; Button(L("刷新")) { Task { await refreshDevices() } } }
             Text(Model.displayMessage(message)).font(.caption).foregroundStyle(Palette.muted)
             HStack(spacing:18) { ForEach(["ready","unready","disabled"],id: \.self) { state in Label(L(permissionStateTitle(state)),systemImage:"circle.fill").font(.caption).foregroundStyle(permissionColor(state)) } }
             ScrollView([.horizontal,.vertical]) {
@@ -1335,7 +1487,267 @@ struct DevicePermissionsView: View {
                 }.padding(1)
             }
             Text(L("本机行：功能总开关；其他设备行：本机使用该设备的权限。")).font(.caption).foregroundStyle(Palette.muted)
-        }.frame(maxWidth:.infinity,maxHeight:.infinity).buttonStyle(FlatButtonStyle()).task { while !Task.isCancelled { await refreshDevices(); do { try await Task.sleep(nanoseconds:4_000_000_000) } catch { break } } }
+        }.sheet(isPresented:$showingInputTransport) { InputTransportView(model:model) }
+        .frame(maxWidth:.infinity,maxHeight:.infinity).buttonStyle(FlatButtonStyle()).task { while !Task.isCancelled { await refreshDevices(); do { try await Task.sleep(nanoseconds:4_000_000_000) } catch { break } } }
+    }
+}
+struct PremiumFeaturesView: View {
+    @ObservedObject var model: Model
+    @Environment(\.dismiss) private var dismiss
+    @State private var showingHid = false
+    @State private var devices: [[String:Any]] = []
+    @State private var selected: Device?
+    @State private var bluetoothName = ""
+    @State private var localBluetoothName = ""
+    @State private var busy = false
+    @State private var error = ""
+
+    private func refresh() async {
+        do {
+            let result = try await model.call("group-hid-status")
+            if !Task.isCancelled { devices = result["devices"] as? [[String:Any]] ?? [] }
+        } catch {
+            if !Task.isCancelled && self.error.isEmpty { self.error = Model.displayMessage(error.localizedDescription) }
+        }
+    }
+
+    private func perform(_ action: @escaping () async throws -> Void) {
+        guard !busy else { return }
+        busy = true
+        error = ""
+        Task {
+            defer { busy = false }
+            do { try await action(); await refresh() }
+            catch { self.error = Model.displayMessage(error.localizedDescription) }
+        }
+    }
+
+    private func row(_ data: [String:Any]) -> some View {
+        let device = Device(id:data.masterChoiceID, name:data["name"] as? String ?? L("设备"), platform:data["platform"] as? String ?? "")
+        let enabled = data["enabled"] as? Bool == true
+        let connected = data["incoming"] as? Bool == true || data["outgoing"] as? Bool == true
+        let toggleLabel = L(enabled ? "停用蓝牙键鼠" : "启用蓝牙键鼠")
+        return HStack(spacing:8) {
+            Button {
+                perform { _ = try await model.call("group-hid-toggle", ["id":device.id, "enabled":!enabled]) }
+            } label: {
+                Image(systemName:device.symbol).foregroundStyle(enabled ? Palette.accent : Color.gray)
+                    .frame(width:36,height:36)
+            }.buttonStyle(.plain).help(toggleLabel).accessibilityLabel(toggleLabel)
+            Button {
+                bluetoothName = ""
+                localBluetoothName = ""
+                error = ""
+                selected = device
+            } label: {
+                HStack {
+                    Text(device.name).lineLimit(1)
+                    Spacer()
+                    Text(L(connected ? "已连接" : data["incoming"] as? Bool == nil ? "状态未知" : "未连接"))
+                        .foregroundStyle(connected ? Color.green : Palette.muted)
+                }.frame(maxWidth:.infinity,alignment:.leading).contentShape(Rectangle())
+            }.buttonStyle(.plain)
+        }.padding(12).background(Palette.card,in:RoundedRectangle(cornerRadius:16))
+            .overlay(RoundedRectangle(cornerRadius:16).stroke(Palette.line))
+    }
+
+    var body: some View {
+        VStack(alignment:.leading,spacing:16) {
+            HStack {
+                if showingHid { Button(L("返回")) { showingHid = false; error = "" } }
+                Text(L(showingHid ? "蓝牙 HID 键鼠" : "高价功能")).font(.title2)
+                Spacer()
+                Button(L("完成")) { dismiss() }
+            }
+            if showingHid {
+                Text(L("点设备名称查看配对引导。点左侧图标切换蓝牙键鼠，停用后保留蓝牙连接并使用网络。"))
+                    .font(.caption).foregroundStyle(Palette.muted)
+                if devices.isEmpty { Text(L("暂无组内设备")).foregroundStyle(Palette.muted) }
+                ScrollView {
+                    VStack(spacing:8) { ForEach(devices,id: \.masterChoiceID) { row($0) } }.padding(1)
+                }.frame(maxHeight:340)
+                if selected == nil && !error.isEmpty { Text(error).font(.caption).foregroundStyle(.red) }
+            } else {
+                Button { showingHid = true } label: {
+                    HStack { Label(L("蓝牙 HID 键鼠"),systemImage:"keyboard"); Spacer(); Image(systemName:"chevron.right") }
+                }
+            }
+        }.padding(22).frame(width:490).buttonStyle(FlatButtonStyle())
+        .disabled(busy)
+        .task(id:showingHid) {
+            guard showingHid else { return }
+            while !Task.isCancelled {
+                if !busy { await refresh() }
+                do { try await Task.sleep(for:.seconds(2)) } catch { break }
+            }
+        }
+        .sheet(item:$selected) { device in
+            VStack(alignment:.leading,spacing:14) {
+                Text(device.name).font(.title2)
+                Text(L("请先让对方设备准备蓝牙配对，再打开本机的系统蓝牙设置，找到下方名称并连接。"))
+                if !bluetoothName.isEmpty { Text(bluetoothName).font(.headline).textSelection(.enabled) }
+                if !localBluetoothName.isEmpty {
+                    Text(LF("请在对方的系统蓝牙设置中连接 {0}。", localBluetoothName))
+                }
+                Button(L("让本机可被连接")) {
+                    perform {
+                        let result = try await model.call("group-hid-prepare", ["id":device.id])
+                        localBluetoothName = result["name"] as? String ?? ""
+                    }
+                }
+                if !error.isEmpty { Text(error).font(.caption).foregroundStyle(.red) }
+                HStack {
+                    Button(L("取消")) { selected = nil; error = "" }
+                    Spacer()
+                    if bluetoothName.isEmpty {
+                        Button(L("开启蓝牙配对")) {
+                            perform {
+                                let result = try await model.call("group-hid-pair", ["id":device.id])
+                                bluetoothName = result["name"] as? String ?? device.name
+                            }
+                        }
+                    } else {
+                        Button(L("打开蓝牙设置")) {
+                            if let url = URL(string:"x-apple.systempreferences:com.apple.BluetoothSettings") { NSWorkspace.shared.open(url) }
+                        }
+                        Button(L("已连接，确认")) {
+                            perform {
+                                let result = try await model.call("group-hid-pair", ["id":device.id,"confirm":true])
+                                guard result["connected"] as? Bool == true else { throw model.failure("蓝牙键鼠尚未就绪") }
+                                selected = nil
+                            }
+                        }
+                    }
+                }
+            }.padding(22).frame(width:490).buttonStyle(FlatButtonStyle()).disabled(busy)
+        }
+    }
+}
+struct InputTransportView: View {
+    @ObservedObject var model: Model
+    @Environment(\.dismiss) private var dismiss
+    @State private var status: [String:Any] = [:]
+    @State private var target = ""
+    @State private var host = ""
+    @State private var name = ""
+    @State private var preference = "auto_bt_first"
+    @State private var confirmed = false
+    @State private var busy = false
+    @State private var error = ""
+    private let modes = [("auto_bt_first", "自动（蓝牙优先）"), ("bluetooth_only", "仅蓝牙"), ("network_only", "仅网络")]
+    private var targets: [[String:Any]] { status["targets"] as? [[String:Any]] ?? [] }
+    private var hosts: [[String:Any]] { (status["hosts"] as? [[String:Any]] ?? []).filter { $0["reportSubscribed"] as? Bool == true } }
+    private var selected: [String:Any]? { targets.first { $0["id"] as? String == target } }
+
+    private func update(_ method: String, _ args: [String:Any] = [:]) {
+        guard !busy else { return }
+        busy = true
+        Task {
+            defer { busy = false }
+            do { status = try await model.call(method, args); error = "" }
+            catch { self.error = error.localizedDescription }
+        }
+    }
+    private func loadSelection() {
+        host = selected?["host"] as? String ?? ""
+        name = selected?["external"] as? Bool == true ? selected?["name"] as? String ?? "" : ""
+        preference = selected?["preference"] as? String ?? "auto_bt_first"
+        confirmed = false
+    }
+    private func readinessTitle(_ value: String) -> String {
+        ["ready":"已就绪", "pairing_required":"需配对", "connecting":"等待连接", "degraded":"尚未确认"][value] ?? "未就绪"
+    }
+    private var isExternal: Bool { selected?["external"] as? Bool == true }
+    private var automaticGroup: Bool { selected?["automaticGroup"] as? Bool == true }
+    private var savedHost: String { selected?["host"] as? String ?? "" }
+    private func save() {
+        var args: [String:Any] = ["preference":preference,"name":name,"confirmed":confirmed]
+        if target == "external" { args["external"] = true } else { args["id"] = target }
+        if !automaticGroup && host != savedHost { args["host"] = host }
+        update("input-transport-save",args)
+    }
+    private var targetPicker: some View {
+        Picker(L("设备"),selection:$target) {
+            Text(L("请选择设备")).tag("")
+            ForEach(targets,id: \.masterChoiceID) { row in
+                Text(row["name"] as? String ?? L("设备")).tag(row["id"] as? String ?? "")
+            }
+            Text(L("添加本机外部设备")).tag("external")
+        }.onChange(of:target) { _,_ in loadSelection() }
+    }
+    private var hostPicker: some View {
+        Picker(L("蓝牙目标"),selection:$host) {
+            Text(L("未绑定")).tag("")
+            ForEach(hosts,id: \.masterChoiceID) { row in
+                let id = row["id"] as? String ?? ""
+                Text(L("已订阅设备") + " · " + String(id.prefix(8))).tag(id)
+            }
+            if !host.isEmpty && !hosts.contains(where: { $0["id"] as? String == host }) {
+                Text(L("已绑定 · 当前离线")).tag(host)
+            }
+        }.onChange(of:host) { _,_ in confirmed = false }
+    }
+    @ViewBuilder private var targetStatus: some View {
+        let runtime = model.inputTarget(target) ?? selected
+        if let readiness = runtime?["readiness"] as? [String:String] {
+            let standby = (runtime?["bluetooth"] as? [String:Any])?["standby"] as? Bool == true
+            let bluetooth = L(standby ? "已连接 · 待命" : readinessTitle(readiness["bluetooth"] ?? ""))
+            let network = L(readinessTitle(readiness["network"] ?? ""))
+            let active = runtime?["active"] as? String
+            let channel = active == "bluetooth" ? "蓝牙" : active == "network" ? "网络" : "无"
+            Text("\(L("蓝牙")) · \(bluetooth)     \(L("网络")) · \(network)").font(.caption)
+            Text("\(L("当前通道")) · \(L(channel))").font(.caption)
+            if runtime?["authorization"] as? String == "denied" {
+                Text(L("目标设备未允许键鼠控制")).font(.caption)
+            }
+        }
+    }
+    @ViewBuilder private var targetSettings: some View {
+        if target == "external" || isExternal { TextField(L("外部设备名称"),text:$name) }
+        if !target.isEmpty {
+            Picker(L("偏好"),selection:$preference) {
+                ForEach(modes,id: \.0) { mode in Text(L(mode.1)).tag(mode.0) }
+            }
+            if automaticGroup {
+                Text(L("组内蓝牙跟随当前主设备。首次连接请在手机上允许附近设备权限，并按系统提示确认配对。")).font(.caption)
+            } else {
+                hostPicker
+                if !host.isEmpty && host != savedHost {
+                    Toggle(L("我已确认配对的设备就是所选目标"),isOn:$confirmed)
+                }
+            }
+            targetStatus
+            HStack {
+                Button(L("保存"),action:save)
+                if isExternal {
+                    Button(L("开始控制")) {
+                        model.perform("control", ["id":target,"capture":true,"newSession":true]); dismiss()
+                    }
+                    Button(L("解除绑定")) {
+                        update("input-transport-save",["id":target,"remove":true]); target = ""
+                    }
+                }
+            }
+        }
+    }
+    var body: some View {
+        VStack(alignment:.leading,spacing:12) {
+            HStack { Text(L("键鼠通道")).font(.title2); Spacer(); Button(L("完成")) { dismiss() } }
+            Text(L("打开蓝牙配对后，在目标设备的系统设置中连接 LanLink。一次只配对一台设备，再刷新列表。")).font(.callout)
+            HStack {
+                if !automaticGroup { Button(L("开启蓝牙配对")) { update("input-transport-start") } }
+                Button(L("刷新")) { update("input-transport-status") }
+            }
+            if let adapter = status["adapter"] as? [String:Any] {
+                let detail = adapter["reason"] as? String ?? ""
+                Text(L(adapter["hidServiceReady"] as? Bool == true ? "蓝牙服务已启动" : "蓝牙服务未就绪") + (detail.isEmpty ? "" : " · " + detail)).font(.caption)
+            }
+            targetPicker
+            targetSettings
+            Text(L("蓝牙控制时按 Control + Option + F12 返回本机。")).font(.caption)
+            if !error.isEmpty { Text(Model.displayMessage(error)).foregroundStyle(.red).font(.caption) }
+        }.padding(22).frame(width:490).disabled(busy)
+        .onAppear { update("input-transport-status") }
     }
 }
 struct PermissionCellView: View {
@@ -1532,7 +1944,11 @@ struct FirstDevicePermissionGuide: View {
     @ObservedObject var model: Model
     @Environment(\.dismiss) private var dismiss
     var capabilities: [String: Any] { model.state["capabilities"] as? [String: Any] ?? [:] }
-    func status(_ key: String) -> String { capabilities[key] as? Bool == true ? "已就绪" : "待开启" }
+    func status(_ key: String) -> String {
+        guard let granted = capabilities[key] as? Bool else { return "尚未检测" }
+        return granted ? "已就绪" : "待开启"
+    }
+    func showPermission(_ key: String) -> Bool { model.upgradePermissionKeys?.contains(key) ?? true }
     func open(_ pane: String) { NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?" + pane)!) }
     var body: some View {
         ScrollView { VStack(alignment: .leading, spacing: 22) {
@@ -1540,17 +1956,27 @@ struct FirstDevicePermissionGuide: View {
                 Image(systemName: "checkmark.shield.fill").font(.system(size: 32)).foregroundStyle(Palette.accent)
                     .frame(width: 54, height: 54).background(Color.blue.opacity(0.12), in: RoundedRectangle(cornerRadius: 16))
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(L("完成 Mac 协作权限设置")).font(.title2.weight(.semibold))
+                    Text(L(model.upgradePermissionKeys == nil ? "完成 Mac 协作权限设置" : "更新后检查 Mac 权限")).font(.title2.weight(.semibold))
                     Text(L("系统权限决定键鼠、屏幕共享等功能是否可用。现在开启，之后可以随时在“本组设备权限”中调整。"))
                         .font(.callout).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
                 }
             }
             VStack(spacing: 10) {
-                permissionRow(icon: "accessibility", title: L("辅助功能"), detail: "允许其他已授权设备控制这台 Mac", status: status("input"), action: { open("Privacy_Accessibility") })
-                permissionRow(icon: "cursorarrow.rays", title: L("输入监控"), detail: "允许本机键鼠在设备间切换", status: status("host"), action: { open("Privacy_ListenEvent") })
-                permissionRow(icon: "rectangle.inset.filled", title: L("屏幕录制"), detail: "允许向已授权设备分享屏幕", status: status("screen"), action: { open("Privacy_ScreenCapture") })
+                if showPermission("input") {
+                    permissionRow(icon: "accessibility", title: L("辅助功能"), detail: "允许其他已授权设备控制这台 Mac", status: status("input"), action: { open("Privacy_Accessibility") })
+                }
+                if showPermission("inputMonitoring") {
+                    permissionRow(icon: "cursorarrow.rays", title: L("输入监控"), detail: "允许本机键鼠在设备间切换", status: status("inputMonitoring"), action: { open("Privacy_ListenEvent") })
+                }
+                if showPermission("screen") {
+                    permissionRow(icon: "rectangle.inset.filled", title: L("屏幕录制"), detail: "允许向已授权设备分享屏幕", status: status("screen"), action: { open("Privacy_ScreenCapture") })
+                }
+                if capabilities["input"] as? Bool == true, capabilities["inputMonitoring"] as? Bool == true,
+                   capabilities["host"] as? Bool == false {
+                    Text(L("键鼠监听尚未就绪，请退出并重新打开 LanLink。")).font(.caption).foregroundStyle(Palette.muted)
+                }
             }
-            if status("input") != "已就绪" {
+            if showPermission("input"), status("input") == "待开启" {
                 Text(L("如果“辅助功能”列表中没有 LanLink，请在 Finder 的“应用程序”中找到 LanLink.app，将它拖入列表，再打开对应开关。"))
                     .font(.caption).foregroundStyle(Palette.muted).padding(14).frame(maxWidth: .infinity, alignment: .leading)
                     .background(Palette.canvas, in: RoundedRectangle(cornerRadius: 14))
@@ -1582,10 +2008,11 @@ struct FirstDevicePermissionGuide: View {
 extension Dictionary where Key == String, Value == Any { var masterChoiceID:String { self["id"] as? String ?? "" } }
 struct SettingsView: View {
     @ObservedObject var model: Model; let active: Bool
-    @State var name = ""; @State var masterId = ""; @State var permissions: [String: Bool] = [:]
+    @State var name = ""; @State var permissions: [String: Bool] = [:]
     @State var dirty = false; @State var saving = false; @State var status = "修改后点击保存；切换页面会保留草稿"
     @State var logs = false;@State var switchMode="dwell";@State var edgeHotkey="ctrl-alt";@State var dwell=100.0
     @State private var exportingLogs = false
+    @State private var showingPremium = false
 
     @MainActor private func exportLogs() async {
         exportingLogs = true
@@ -1601,22 +2028,75 @@ struct SettingsView: View {
             panel.nameFieldStringValue = name
             guard panel.runModal() == .OK, let url = panel.url else { return }
             try text.write(to: url, atomically: true, encoding: .utf8)
-            model.showSuccessToast(result["incomplete"] as? Bool == true ? "日志已保存，部分设备的日志未能收集" : "日志已保存")
+            if result["incomplete"] as? Bool == true {
+                model.showSuccessToast("日志已保存，部分设备的日志未能收集", symbol: "exclamationmark.triangle.fill")
+            } else { model.showSuccessToast("日志已保存") }
         } catch { model.notice = error.localizedDescription }
     }
     func mark() { dirty = true; status = "有未保存的更改 · 切换页面会保留草稿" }
-    func load() { name = model.state["name"] as? String ?? ""; masterId = model.state["masterId"] as? String ?? model.state["id"] as? String ?? ""; permissions = model.permissions;switchMode=model.state["switchMode"] as? String ?? "dwell";edgeHotkey=model.state["edgeHotkey"] as? String ?? "ctrl-alt";dwell=model.state["dwell"] as? Double ?? 100; dirty = false }
+    func load() { name = model.state["name"] as? String ?? ""; permissions = model.permissions;switchMode=model.state["switchMode"] as? String ?? "dwell";edgeHotkey=model.state["edgeHotkey"] as? String ?? "ctrl-alt";dwell=model.state["dwell"] as? Double ?? 100; dirty = false }
+    var settingsValues: [String: Any] { ["name": name, "switchMode": switchMode, "edgeHotkey": edgeHotkey, "dwell": Int(dwell)] }
     func save() {
         guard !saving else { return }
         saving = true; status = "正在保存…保存期间暂时不能修改设置"
-        var values: [String: Any] = ["name": name, "switchMode": switchMode, "edgeHotkey": edgeHotkey, "dwell": Int(dwell)]
-        if !masterId.isEmpty { values["masterId"] = masterId }
+        let values = settingsValues
         Task { do {
             let result = try await model.call("settings", values)
             name = name.trimmingCharacters(in: .whitespacesAndNewlines); dirty = false
             status = model.presentOperationResult(result, success: "本机设置已保存")
             await model.refresh()
         } catch { status = Model.readableMessage(error.localizedDescription) }; saving = false }
+    }
+    @ViewBuilder private var updateControls: some View {
+        let update = model.state["update"] as? [String: Any] ?? [:]
+        let phase = update["phase"] as? String ?? "idle"
+        let version = update["version"] as? String ?? ""
+        let result = update["result"] as? [String: Any] ?? [:]
+        let fallback = update["downloadPage"] as? String ??
+            (result["phase"] as? String == "failed" ? result["page"] as? String : nil)
+        let working = ["checking", "preparing", "downloading", "verifying"].contains(phase)
+        Picker(L("更新通道"), selection: Binding(
+            get: { model.state["updateChannel"] as? String ?? "stable" },
+            set: { model.perform("settings", ["updateChannel": $0]) }
+        )) {
+            Text(L("正式版")).tag("stable")
+            Text(L("测试版")).tag("beta")
+        }.disabled(working || phase == "ready" || !model.serviceReady)
+        HStack {
+            Button(L("检查更新")) { model.performUpdate("update-check") }
+            if phase == "available" || (phase == "error" && !version.isEmpty) {
+                Button(L(phase == "error" ? "重试" : "下载并准备更新")) { model.performUpdate("update-install") }
+            }
+        }.disabled(working || phase == "ready" || !model.serviceReady)
+        if phase == "downloading" || phase == "verifying" {
+            let received = update["received"] as? Double ?? 0
+            let total = update["total"] as? Double ?? 0
+            let speed = update["speed"] as? Double ?? 0
+            let alternate = (update["attempt"] as? Int ?? 0) > 1
+            let label = phase == "verifying" ? "正在校验" :
+                (update["kind"] as? String == "full" ? "正在下载全量包" : "正在下载增量包")
+            ProgressView(value: received, total: max(1, total))
+            let percent = total > 0 ? min(100, (received * 100 / total).rounded(.down)) : 0
+            let detail = String(format: "%.0f%% · %.1f / %.1f MiB", percent, received / 1048576, total / 1048576)
+            let rate = phase == "downloading" ? String(format: " · %.2f MiB/s", speed / 1048576) : ""
+            Text(L(label) + (alternate && phase == "downloading" ? " · " + L("备用下载源") : "") + " · " + detail + rate).font(.caption)
+        } else if phase == "checking" || phase == "preparing" {
+            ProgressView(L(phase == "checking" ? "正在检查更新" : "正在准备更新"))
+        } else if phase == "available" {
+            Text(L("发现新版本") + " " + version).font(.caption)
+        } else if let message = update["message"] as? String, !message.isEmpty {
+            Text((version.isEmpty ? "" : version + " · ") + Model.displayMessage(message)).font(.caption)
+        }
+        if phase == "ready" {
+            Button(L("安装并重启")) { NSApp.terminate(nil) }
+        }
+        if let message = result["message"] as? String, !message.isEmpty {
+            Text(L(message) + " · " + (result["version"] as? String ?? "")).font(.caption)
+        }
+        if !working, let fallback, let url = URL(string: fallback), url.scheme == "https",
+           url.host == "lanlink.sites.show" || (["github.com", "gitee.com"].contains(url.host ?? "") && url.path.hasPrefix("/lokey-t/lanlink/releases/tag/")) {
+            Link(L(url.host == "lanlink.sites.show" ? "打开官网下载区" : "查看此版本发布页"), destination: url)
+        }
     }
     var body: some View { VStack(alignment: .leading, spacing: 20) {
         HStack(alignment: .top) { VStack(alignment: .leading, spacing: 8) { Text(L("设置")).font(.system(size: 26, weight: .semibold)); Text(L("管理设备名称、主设备与启动选项")).font(.caption).foregroundStyle(.secondary) }; Spacer(); Button(L("保存设置"), action: save).disabled(saving || model.state["id"] == nil) }
@@ -1625,15 +2105,7 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     Text(L("通用")).font(.headline)
                     Toggle(L("自动检测更新"),isOn:Binding(get:{model.state["autoCheckUpdates"] as? Bool ?? true},set:{model.perform("settings",["autoCheckUpdates":$0])}))
-                    Picker(L("更新通道"), selection: Binding(
-                        get: { model.state["updateChannel"] as? String ?? "stable" },
-                        set: { model.perform("settings", ["updateChannel": $0]) }
-                    )) {
-                        Text(L("正式版")).tag("stable")
-                        Text(L("测试版")).tag("beta")
-                    }
-                    HStack { Button(L("检查更新")){model.perform("update-check")}; Button(L("下载并准备更新")){model.perform("update-install")} }
-                    Text((model.state["update"] as? [String:Any])?["message"] as? String ?? ((model.state["update"] as? [String:Any])?["version"] as? String ?? "")).font(.caption)
+                    updateControls
 
                     Text(L("名称需点击保存；语言、外观和登录启动立即保存。")).font(.caption).foregroundStyle(.secondary)
                     Picker(L("语言"), selection: Binding(get: { model.languagePreference }, set: { model.setLanguage($0) })) {
@@ -1655,13 +2127,15 @@ struct SettingsView: View {
                 }.padding(22).background(Palette.card, in: RoundedRectangle(cornerRadius: 18))
                 VStack(alignment: .leading, spacing: 16) {
                     Text(L("无界鼠标")).font(.headline)
-                    Picker(L("键鼠主设备"),selection:Binding(get:{masterId},set:{masterId=$0;mark()})){
-                        if masterId.isEmpty { Text(L("尚未选择")).tag("") }
-                        ForEach(model.state["masterDevices"] as? [[String:Any]] ?? [],id: \.masterChoiceID){device in Text((device["name"] as? String ?? L("电脑"))+((device["online"] as? Bool ?? false) ? "":L(" · 离线"))).tag(device["id"] as? String ?? "")}
-                    }
+                    Picker(L("键鼠主设备"),selection:model.masterDeviceSelection){
+                        if model.masterID.isEmpty { Text(L("尚未选择")).tag("") }
+                        ForEach(model.devices.filter { ["darwin","win32"].contains($0.platform) }) { device in
+                            Text(device.name+(device.online ? "":L(" · 离线"))).tag(device.id)
+                        }
+                    }.disabled(model.layoutMasterSaving || !model.serviceReady)
                     Toggle(L("键鼠切换时显示边缘光效"),isOn:Binding(get:{model.state["edgeGlowEnabled"] as? Bool ?? true},set:{model.perform("settings",["edgeGlow":$0])}))
                     Toggle(L("鼠标移走后隐藏光效"),isOn:Binding(get:{model.state["edgeGlowHideAway"] as? Bool ?? false},set:{model.perform("settings",["edgeGlowHideAway":$0])}))
-                    Text(L("主设备与以下切换设置需点击保存；边缘光效开关立即保存。")).font(.caption).foregroundStyle(.secondary)
+                    Text(L("主设备与设备布局保持一致，选择后立即同步；以下切换设置需点击保存。")).font(.caption).foregroundStyle(.secondary)
                     Picker(L("键鼠切换设备方式"),selection:Binding(get:{switchMode},set:{switchMode=$0;mark()})){Text(L("边缘停留")).tag("dwell");Text(L("快捷键 + 边缘")).tag("hotkey")}.pickerStyle(.segmented)
                     if switchMode=="dwell"{Text(LF("边缘停留时间 · {0} 毫秒", String(Int(dwell))));Slider(value:Binding(get:{dwell},set:{dwell=$0;mark()}),in:0...3000,step:50);if dwell==0{Text(L("即使停留时间为零，创建连接仍需要少量等待时间。")).font(.caption).foregroundStyle(.secondary)}}else{Picker(L("按住组合键到达边缘"),selection:Binding(get:{edgeHotkey},set:{edgeHotkey=$0;mark()})){Text("Control + Option").tag("ctrl-alt");Text("Control + Shift").tag("ctrl-shift");Text("Option + Shift").tag("alt-shift");Text("Command + Shift").tag("meta-shift")}}
                 }.padding(22).background(Palette.card,in:RoundedRectangle(cornerRadius:18))
@@ -1671,6 +2145,11 @@ struct SettingsView: View {
                     HStack{Toggle(L("允许自动获取组剪贴板到本机"),isOn:Binding(get:{model.clipboardSettings["download"] as? Bool ?? true},set:{model.perform("settings",["clipboardDownload":$0])}));if !(model.clipboardSettings["download"] as? Bool ?? true){Button(L("下载剪贴板")){model.clipboardAction("clipboard-download")}}}
                     if !(model.clipboardSettings["upload"] as? Bool ?? true) || !(model.clipboardSettings["download"] as? Bool ?? true){Toggle(L("在首页显示快捷同步剪贴板按钮"),isOn:Binding(get:{model.clipboardSettings["shortcuts"] as? Bool ?? false},set:{model.perform("settings",["clipboardShortcuts":$0])}))}
                     Text(L("开关立即保存，成功后生效。关闭上传后停止后续自动上传；已经共享的内容仍按有效期保留。同步保留单独设置的设备授权限制。")).font(.caption).foregroundStyle(.secondary)
+                }.padding(22).background(Palette.card,in:RoundedRectangle(cornerRadius:18))
+                VStack(alignment:.leading,spacing:16) {
+                    Button { showingPremium = true } label: {
+                        HStack { Text(L("高价功能")).font(.headline); Spacer(); Image(systemName:"chevron.right") }
+                    }
                 }.padding(22).background(Palette.card,in:RoundedRectangle(cornerRadius:18))
                 VStack(alignment:.leading,spacing:16){
                     Text(L("其他")).font(.headline)
@@ -1683,9 +2162,9 @@ struct SettingsView: View {
         }
         Text(Model.displayMessage(status)).font(.caption).foregroundStyle(.secondary)
     }.buttonStyle(FlatButtonStyle()).toggleStyle(.switch)
+        .sheet(isPresented:$showingPremium) { PremiumFeaturesView(model:model) }
         .onAppear { load() }.onChange(of: active) { _, shown in if shown && !dirty && !saving { load() } }
         .onChange(of: model.state["groupId"] as? String) { _, _ in if !dirty && !saving { load() } }
-        .onChange(of: model.state["masterId"] as? String) { _, _ in if !dirty && !saving { load() } }
     }
 }
 struct PairingView: View {

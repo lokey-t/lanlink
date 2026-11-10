@@ -9,12 +9,12 @@ import org.json.*;
 
 /** Read-only whole-group preview; master selection uses its separate explicit control. */
 final class GroupLayoutPanel extends LinearLayout {
-  private final Activity activity;
+  private final MainActivity activity;
   private final LinkService service;
   private final Ui ui;
   private String signature = "";
   private boolean busy;
-  GroupLayoutPanel(Activity activity, Ui ui, LinkService service) {
+  GroupLayoutPanel(MainActivity activity, Ui ui, LinkService service) {
     super(activity); this.activity = activity; this.ui = ui; this.service = service;
     setOrientation(VERTICAL); refresh();
   }
@@ -29,7 +29,7 @@ final class GroupLayoutPanel extends LinearLayout {
     service.jobs.execute(() -> {
       String failure = null; try { action.run(); } catch (Exception error) { failure = error.getMessage(); }
       String message = failure;
-      activity.runOnUiThread(() -> { busy = false; if (message != null) Toast.makeText(activity, Language.t(message), Toast.LENGTH_LONG).show(); signature = ""; refresh(); });
+      activity.runOnUiThread(() -> { busy = false; if (message != null) activity.showOperationError(message); signature = ""; refresh(); });
     });
   }
   void refresh() {
@@ -56,7 +56,7 @@ final class GroupLayoutPanel extends LinearLayout {
   }
   private void chooseMaster(JSONObject devices) {
     List<String> choices = new ArrayList<>(); for (String id : ids(devices)) if (GroupLayout.desktop(devices.optJSONObject(id))) choices.add(id);
-    if (choices.isEmpty()) { Toast.makeText(activity, Language.t("请先将 Mac 或 Windows 电脑加入当前组"), Toast.LENGTH_LONG).show(); return; }
+    if (choices.isEmpty()) { activity.showOperationError("请先将 Mac 或 Windows 电脑加入当前组"); return; }
     String[] names = new String[choices.size()]; for (int i = 0; i < names.length; i++) names[i] = label(devices, choices.get(i));
     JSONObject current = service.groupLayout.master();
     new AlertDialog.Builder(activity).setTitle(Language.t("选择主控电脑")).setSingleChoiceItems(names, current == null ? -1 : choices.indexOf(current.optString("id")), (dialog, which) -> { String id = choices.get(which); dialog.dismiss(); change(() -> service.groupLayout.chooseMaster(id)); }).setNegativeButton(Language.t("取消"), null).show();

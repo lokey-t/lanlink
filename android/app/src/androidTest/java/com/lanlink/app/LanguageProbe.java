@@ -68,10 +68,9 @@ final class LanguageProbe {
         try {
           java.lang.reflect.Method picker = MainActivity.class.getDeclaredMethod("showLanguagePicker");
           picker.setAccessible(true);
-          android.app.AlertDialog dialog = (android.app.AlertDialog) picker.invoke(first);
-          android.widget.ListView list = dialog.getListView();
+          android.app.Dialog dialog = (android.app.Dialog) picker.invoke(first);
           int french = java.util.Arrays.asList(LanguageSelection.IDS).indexOf("fr");
-          list.performItemClick(list.getChildAt(french), french, list.getAdapter().getItemId(french));
+          dialog.getWindow().getDecorView().findViewWithTag("choice-" + french).performClick();
         } catch (Exception failure) { throw new RuntimeException(failure); }
       });
       activity = test.waitForMonitorWithTimeout(recreated, 10000);

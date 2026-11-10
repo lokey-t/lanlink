@@ -49,5 +49,16 @@ test('ending a drag during manifest preparation cannot publish a stale pending e
 
 test('edge file sharing cancels the local OS drag, binds metadata to control, and retracts on return',async t=>{const {a,b,dir}=await pair(t),file=path.join(dir,'edge.txt'),session=randomUUID();await writeFile(file,'preserved original');a.config.master=true;a.config.edges.right=b.config.id;a.active=b.config.id;a.activeSession={edgeSession:session};const actions=createActions(a);await actions('stage-edge',{id:b.config.id,edge:'right',files:[file]});assert.ok(a.native.calls.some(c=>c.m==='file-drag-cancel'));assert.equal(b.staging.list()[0].state,'pending');assert.equal([...b.staging.rows.values()][0].ephemeral,session);await a.returnLocal();await until(()=>b.staging.list().length===0);assert.equal(await readFile(file,'utf8'),'preserved original');});
 
+test('completed Mac edge drop preserves the source and does not cancel the successful OS drag',{skip:process.platform!=='darwin'},async t=>{
+  const {a,b,dir}=await pair(t),file=path.join(dir,'mac-drop.txt'),session=randomUUID();
+  await writeFile(file,'original stays here');a.config.master=true;a.config.edges.right=b.config.id;
+  a.active=b.config.id;a.activeSession={edgeSession:session};
+  await createActions(a)('stage-edge',{id:b.config.id,edge:'right',files:[file],dragCompleted:true});
+  assert.equal(a.native.calls.some(c=>c.m==='file-drag-cancel'),false);
+  assert.equal(b.staging.list().length,1);assert.equal(b.staging.list()[0].state,'pending');
+  assert.equal(await readFile(file,'utf8'),'original stays here');
+  await a.returnLocal();await until(()=>b.staging.list().length===0);
+});
+
 // More than the Android RPC worker count must queue without holding control workers.
 test('a large multi-file share queues receivers and completes every source exactly once',async t=>{const {a,b,dir}=await pair(t),paths=[];for(let i=0;i<12;i++){const file=path.join(dir,'batch-'+i+'.bin');await writeFile(file,Buffer.alloc(220001+i,i));paths.push(file);}const bytes=a.fileBytes.bind(a);let release;const gate=new Promise(r=>release=r);let held=false;a.fileBytes=async(...args)=>{held=true;await gate;return bytes(...args);};try{await a.staging.share(b.config.id,paths);await until(()=>b.staging.list().length===12&&b.staging.list().filter(r=>r.state==='receiving').length===4);assert.equal(b.staging.list().filter(r=>r.state==='receiving').length,4);assert.equal(b.staging.list().filter(r=>r.state==='queued').length,8);assert.deepEqual(await b.getPeer(a.config.id).request('linkPing',{}),{});}finally{release();}await until(()=>b.staging.list().every(r=>r.state==='ready')).catch(e=>{console.error(b.staging.list().map(r=>({name:r.name,state:r.state,error:r.error})));throw e;});for(let i=0;i<12;i++){const row=b.staging.list().find(r=>r.name==='batch-'+i+'.bin');assert.deepEqual(await readFile((await b.staging.ready(row.id)).path),Buffer.alloc(220001+i,i));}await until(()=>a.staging.exports.size===0);});

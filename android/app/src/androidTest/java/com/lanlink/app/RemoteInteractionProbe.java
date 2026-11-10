@@ -159,7 +159,7 @@ final class RemoteInteractionProbe {
         });
     // Use the real encrypted request transport; hold the remote acquire response to expose races.
     String remoteId = "22222222-2222-4222-8222-222222222222";
-    byte[] key = new byte[32];
+    byte[] key = Wire.parseToken(service.token);
     CountDownLatch acquired = new CountDownLatch(1), released = new CountDownLatch(1);
     AtomicReference<String> acquireId = new AtomicReference<>();
     AtomicReference<Throwable> outcome = new AtomicReference<>();

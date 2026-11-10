@@ -50,6 +50,436 @@
     }
   ],
   "messages": {
+    "我的设备": {
+      "en": "My Device",
+      "zh-Hant": "我的裝置",
+      "ja": "マイデバイス",
+      "ko": "내 기기",
+      "de": "Mein Gerät",
+      "fr": "Mon appareil",
+      "es": "Mi dispositivo",
+      "pt": "Meu dispositivo"
+    },
+    "开发者选项": {
+      "en": "Developer Options",
+      "zh-Hant": "開發者選項",
+      "ja": "開発者向けオプション",
+      "ko": "개발자 옵션",
+      "de": "Entwickleroptionen",
+      "fr": "Options pour les développeurs",
+      "es": "Opciones de desarrollador",
+      "pt": "Opções do desenvolvedor"
+    },
+    "关闭开发者选项": {
+      "en": "Turn Off Developer Options",
+      "zh-Hant": "關閉開發者選項",
+      "ja": "開発者向けオプションをオフにする",
+      "ko": "개발자 옵션 끄기",
+      "de": "Entwickleroptionen deaktivieren",
+      "fr": "Désactiver les options pour les développeurs",
+      "es": "Desactivar las opciones de desarrollador",
+      "pt": "Desativar as opções do desenvolvedor"
+    },
+    "开发者选项已开启": {
+      "en": "Developer options enabled",
+      "zh-Hant": "開發者選項已開啟",
+      "ja": "開発者向けオプションが有効になりました",
+      "ko": "개발자 옵션이 켜졌습니다",
+      "de": "Entwickleroptionen aktiviert",
+      "fr": "Options pour les développeurs activées",
+      "es": "Opciones de desarrollador activadas",
+      "pt": "Opções do desenvolvedor ativadas"
+    },
+    "无法保存开发者选项，请重试。": {
+      "en": "Could not save developer options. Try again.",
+      "zh-Hant": "無法儲存開發者選項，請重試。"
+    },
+    "本组暂无安卓设备，请在我的设备中添加手机。": {
+      "en": "There are no Android devices in this group. Add a phone from My Device.",
+      "zh-Hant": "此群組暫無 Android 裝置，請在「我的裝置」中新增手機。"
+    },
+    "高价功能": {
+      "en": "Premium features",
+      "zh-Hant": "高價功能"
+    },
+    "蓝牙 HID 键鼠": {
+      "en": "Bluetooth HID keyboard and mouse",
+      "zh-Hant": "藍牙 HID 鍵鼠"
+    },
+    "启用蓝牙键鼠": {
+      "en": "Enable Bluetooth keyboard and mouse",
+      "zh-Hant": "啟用藍牙鍵鼠"
+    },
+    "停用蓝牙键鼠": {
+      "en": "Disable Bluetooth keyboard and mouse",
+      "zh-Hant": "停用藍牙鍵鼠"
+    },
+    "打开蓝牙设置": {
+      "en": "Open Bluetooth settings",
+      "zh-Hant": "開啟藍牙設定"
+    },
+    "已连接，确认": {
+      "en": "Confirm connection",
+      "zh-Hant": "已連線，確認"
+    },
+    "暂无组内设备": {
+      "en": "No other devices in the group",
+      "zh-Hant": "暫無群組內裝置"
+    },
+    "已连接 · 蓝牙 HID": {
+      "en": "Connected · Bluetooth HID",
+      "zh-Hant": "已連線 · 藍牙 HID"
+    },
+    "让本机可被连接": {
+      "en": "Make this device discoverable",
+      "zh-Hant": "讓本機可被連線"
+    },
+    "点设备名称查看配对引导。点左侧图标切换蓝牙键鼠，停用后保留蓝牙连接并使用网络。": {
+      "en": "Select a device for pairing instructions. Use the icon on the left to switch between Bluetooth and network control while keeping the Bluetooth connection.",
+      "zh-Hant": "點選裝置名稱查看配對引導。點左側圖示切換藍牙鍵鼠，停用後保留藍牙連線並使用網路。"
+    },
+    "请先让对方设备准备蓝牙配对，再打开本机的系统蓝牙设置，找到下方名称并连接。": {
+      "en": "Prepare the other device for pairing. Then open Bluetooth settings on this device and connect using the name below.",
+      "zh-Hant": "請先讓對方裝置準備藍牙配對，再開啟本機的系統藍牙設定，找到下方名稱並連線。"
+    },
+    "请在对方的系统蓝牙设置中连接 {0}。": {
+      "en": "Connect to {0} in Bluetooth settings on the other device.",
+      "zh-Hant": "請在對方的系統藍牙設定中連線至 {0}。"
+    },
+    "请在本机的系统蓝牙设置中连接 {0}。": {
+      "en": "Connect to {0} in Bluetooth settings on this device.",
+      "zh-Hant": "請在本機的系統藍牙設定中連線至 {0}。"
+    },
+    "请在对方设备打开蓝牙 HID 键鼠配对引导": {
+      "en": "Open the Bluetooth HID pairing guide on the other device",
+      "zh-Hant": "請在對方裝置開啟藍牙 HID 鍵鼠配對引導"
+    },
+    "请先在对方设备的蓝牙 HID 键鼠页面开启配对": {
+      "en": "Start pairing from the Bluetooth HID page on the other device first",
+      "zh-Hant": "請先在對方裝置的藍牙 HID 鍵鼠頁面開啟配對"
+    },
+    "请确认系统已连接该蓝牙键鼠，并一次只配对一台设备": {
+      "en": "Check that the Bluetooth keyboard and mouse are connected. Pair one device at a time.",
+      "zh-Hant": "請確認系統已連線至該藍牙鍵鼠，並一次只配對一台裝置"
+    },
+    "本机不支持蓝牙 HID 配对": {
+      "en": "This device does not support Bluetooth HID pairing",
+      "zh-Hant": "本機不支援藍牙 HID 配對"
+    },
+    "蓝牙键鼠尚未就绪": {
+      "en": "Bluetooth keyboard and mouse are not ready",
+      "zh-Hant": "藍牙鍵鼠尚未就緒"
+    },
+    "请先在对方设备开启蓝牙": {
+      "en": "Turn on Bluetooth on the other device first",
+      "zh-Hant": "請先在對方裝置開啟藍牙"
+    },
+    "已连接 · 待命": {
+      "en": "Connected · Standby"
+    },
+    "蓝牙已连接 · 待命": {
+      "en": "Bluetooth connected · Standby"
+    },
+    "组内蓝牙权限与重连": {
+      "en": "Group Bluetooth permissions and reconnect"
+    },
+    "正在重新连接组内主设备的蓝牙": {
+      "en": "Reconnecting to the group’s primary device over Bluetooth"
+    },
+    "组内蓝牙跟随当前主设备。首次连接请在手机上允许附近设备权限，并按系统提示确认配对。": {
+      "en": "Group Bluetooth follows the primary device. Allow Nearby devices on your phone and confirm the first pairing if prompted."
+    },
+    "本机键鼠监听尚未就绪": {
+      "en": "Local keyboard and mouse monitoring is not ready"
+    },
+    "请在本机系统设置中开启辅助功能": {
+      "en": "Enable Accessibility for LanLink in System Settings"
+    },
+    "请在本机系统设置中开启输入监控": {
+      "en": "Enable Input Monitoring for LanLink in System Settings"
+    },
+    "打开蓝牙配对后，在目标设备的系统设置中连接 LanLink。一次只配对一台设备，再刷新列表。": {
+      "en": "Start pairing, then connect to LanLink in the target device’s Bluetooth settings. Pair one device at a time and refresh the list."
+    },
+    "键鼠通道": {
+      "en": "Keyboard and mouse transport"
+    },
+    "自动（蓝牙优先）": {
+      "en": "Auto (prefer Bluetooth)"
+    },
+    "仅蓝牙": {
+      "en": "Bluetooth only"
+    },
+    "仅网络": {
+      "en": "Network only"
+    },
+    "开启蓝牙配对": {
+      "en": "Start Bluetooth pairing"
+    },
+    "蓝牙服务已启动": {
+      "en": "Bluetooth service started"
+    },
+    "蓝牙服务未就绪": {
+      "en": "Bluetooth service unavailable"
+    },
+    "添加本机外部设备": {
+      "en": "Add a local external device"
+    },
+    "外部设备名称": {
+      "en": "External device name"
+    },
+    "已订阅设备": {
+      "en": "Subscribed device"
+    },
+    "蓝牙目标": {
+      "en": "Bluetooth target"
+    },
+    "未绑定": {
+      "en": "Unbound"
+    },
+    "已绑定 · 当前离线": {
+      "en": "Bound · Offline"
+    },
+    "偏好": {
+      "en": "Preference"
+    },
+    "当前通道": {
+      "en": "Active transport"
+    },
+    "需配对": {
+      "en": "Pairing required"
+    },
+    "等待连接": {
+      "en": "Waiting for connection"
+    },
+    "尚未确认": {
+      "en": "Awaiting confirmation"
+    },
+    "目标设备未允许键鼠控制": {
+      "en": "The target has not authorized keyboard and mouse control"
+    },
+    "我已确认配对的设备就是所选目标": {
+      "en": "I confirmed that the paired device is the selected target"
+    },
+    "蓝牙键鼠控制中": {
+      "en": "Bluetooth input active"
+    },
+    "解除绑定": {
+      "en": "Unbind"
+    },
+    "打开蓝牙配对后，在目标设备的系统设置中连接 LanLink HID。一次只配对一台设备，再刷新列表。": {
+      "en": "Start pairing, then connect to LanLink HID in the target device’s Bluetooth settings. Pair one device at a time and refresh the list."
+    },
+    "打开蓝牙配对后，在目标设备的系统设置中连接本机。一次只配对一台设备，再刷新列表。": {
+      "en": "Start pairing, then connect to this PC in the target device’s Bluetooth settings. Pair one device at a time and refresh the list."
+    },
+    "蓝牙控制时按 Control + Option + F12 返回本机。": {
+      "en": "Press Control + Option + F12 to return input to this Mac."
+    },
+    "蓝牙控制时按 Ctrl + Alt + F12 返回本机。": {
+      "en": "Press Ctrl + Alt + F12 to return input to this PC."
+    },
+    "接收请求已提交": {
+      "en": "Receive request submitted"
+    },
+    "已交给目标应用复制": {
+      "en": "Copy handed off to the destination app"
+    },
+    "重新发起": {
+      "en": "Request again"
+    },
+    "授权请求已结束，请重新发起。": {
+      "en": "The authorization request ended. Send a new request."
+    },
+    "此版本暂未提供适用于本机的安装包": {
+      "en": "This release has no installer for this device"
+    },
+    "当前下载源缺少安装包": {
+      "en": "The current source does not have the installer"
+    },
+    "打开官网下载区": {
+      "en": "Open the official downloads page"
+    },
+    "查看此版本发布页": {
+      "en": "View this release"
+    },
+    "请在设置中下载更新": {
+      "en": "Download the update in Settings"
+    },
+    "无法连接更新服务器，请稍后重试": {
+      "en": "Could not reach the update server. Try again later."
+    },
+    "无法读取更新信息，请稍后重试": {
+      "en": "Could not read update information. Try again later."
+    },
+    "下载连接中断，请重试": {
+      "en": "Download interrupted. Try again."
+    },
+    "安装包校验失败，请重试": {
+      "en": "The installer failed verification. Try again."
+    },
+    "安装包下载不完整，请重试": {
+      "en": "The installer download is incomplete. Try again."
+    },
+    "无法写入更新目录，请手动安装": {
+      "en": "Could not write to the update folder. Install manually."
+    },
+    "无法完成更新准备，请重试": {
+      "en": "Could not prepare the update. Try again."
+    },
+    "更新已准备好，请退出软件以完成安装": {
+      "en": "Update ready. Exit LanLink to finish installing."
+    },
+    "已安装更新": {
+      "en": "Update installed"
+    },
+    "未能退出 LanLink，更新尚未安装": {
+      "en": "LanLink did not exit. The update has not been installed."
+    },
+    "安装更新失败，当前版本仍可使用": {
+      "en": "Installation failed. The current version is still available."
+    },
+    "安装更新失败，已恢复旧版本": {
+      "en": "Installation failed. The previous version was restored."
+    },
+    "安装更新失败，无法恢复旧版本，请手动安装": {
+      "en": "Installation and rollback failed. Install manually."
+    },
+    "请安装或放弃已下载的更新后再切换通道": {
+      "en": "Install or discard the downloaded update before switching channels."
+    },
+    "正在检查更新，请稍后切换通道": {
+      "en": "Checking for updates. Wait before switching channels."
+    },
+    "正在安装更新，请稍后切换通道": {
+      "en": "Installing the update. Wait before switching channels."
+    },
+    "正在下载或校验更新，请稍后切换通道": {
+      "en": "Downloading or verifying the update. Wait before switching channels."
+    },
+    "正在下载全量包 · 备用下载源": {
+      "en": "Downloading full package · Backup source"
+    },
+    "备用下载源": {
+      "en": "Backup source"
+    },
+    "当前安装使用旧签名，需要迁移安装": {
+      "en": "The installed app uses an older signature and requires migration."
+    },
+    "查看签名迁移说明": {
+      "en": "View signing migration instructions"
+    },
+    "签名迁移说明": {
+      "en": "Signing migration"
+    },
+    "系统无法覆盖安装。请先保存需要的文件并确认可以重新配对设备。卸载旧版会清除本机应用数据。完成备份后，再卸载旧版并安装发布页上的 APK。": {
+      "en": "Android cannot install this update over the current app. Save the files you need and make sure you can pair your devices again. Uninstalling clears local app data. After backing up, uninstall the old app and install the APK from the release page."
+    },
+    "系统阻止了此次安装，请检查设备的安装限制": {
+      "en": "Android blocked installation. Check the installation restrictions on this device."
+    },
+    "安装与设备上已有的应用冲突": {
+      "en": "Installation conflicts with an app already on this device."
+    },
+    "更新后检查 Mac 权限": {
+      "en": "Review Mac permissions after updating"
+    },
+    "键鼠监听尚未就绪，请退出并重新打开 LanLink。": {
+      "en": "Keyboard and mouse monitoring is unavailable. Quit and reopen LanLink."
+    },
+    "尚未检测": {
+      "en": "Not checked yet"
+    },
+    "无法打开网页": {
+      "en": "Could not open the web page"
+    },
+    "下载全量更新": {
+      "en": "Download full update"
+    },
+    "正在检查更新": {
+      "en": "Checking for updates"
+    },
+    "正在准备更新": {
+      "en": "Preparing update"
+    },
+    "正在校验": {
+      "en": "Verifying download"
+    },
+    "正在下载全量包": {
+      "en": "Downloading full package"
+    },
+    "正在下载增量包": {
+      "en": "Downloading incremental package"
+    },
+    "正在从备用下载源下载": {
+      "en": "Downloading from backup mirror"
+    },
+    "安装并重启": {
+      "en": "Install and restart"
+    },
+    "立即安装": {
+      "en": "Install now"
+    },
+    "放弃本次更新": {
+      "en": "Discard update"
+    },
+    "去官网下载全量包": {
+      "en": "Download full package from the official site"
+    },
+    "目标版本": {
+      "en": "Target version"
+    },
+    "更新已下载": {
+      "en": "Update downloaded"
+    },
+    "更新已安装": {
+      "en": "Update installed"
+    },
+    "尚未允许安装未知应用": {
+      "en": "Installing unknown apps is still disabled"
+    },
+    "下载或校验更新失败": {
+      "en": "Update download or verification failed"
+    },
+    "更新包无效": {
+      "en": "Invalid update package"
+    },
+    "此更新与当前版本或设备不兼容": {
+      "en": "This update is incompatible with the current version or device"
+    },
+    "安装签名与新版不同。请先保留需要的数据，再按官网说明迁移安装。": {
+      "en": "This installation uses a different signing key. Save the data you need and follow the migration instructions on the official site."
+    },
+    "请允许 LanLink 安装未知应用，然后返回继续。": {
+      "en": "Allow LanLink to install unknown apps, then return to continue."
+    },
+    "前往授权": {
+      "en": "Open installation settings"
+    },
+    "正在准备安装": {
+      "en": "Preparing installation"
+    },
+    "无法打开安装授权设置": {
+      "en": "Could not open installation settings"
+    },
+    "无法启动安装，请重试": {
+      "en": "Could not start installation. Try again."
+    },
+    "等待确认安装": {
+      "en": "Waiting for installation confirmation"
+    },
+    "安装已取消，可以继续安装": {
+      "en": "Installation canceled. You can install again."
+    },
+    "存储空间不足，释放空间后重试": {
+      "en": "Free up storage and try again"
+    },
+    "系统阻止安装，请检查安装授权": {
+      "en": "Android blocked installation. Check installation permissions."
+    },
+    "安装失败，可以重试": {
+      "en": "Installation failed. You can try again."
+    },
     "收到文件": {
       "en": "Incoming files",
       "zh-Hant": "收到檔案",
@@ -1365,6 +1795,18 @@
       "pt": "Ocultar brilho ao afastar o ponteiro",
       "it": "Nascondi luce quando il puntatore si allontana",
       "ru": "Убирать подсветку при отведении указателя"
+    },
+    "主设备与设备布局保持一致，选择后立即同步；以下切换设置需点击保存。": {
+      "en": "The host is shared with Devices & Layout and syncs immediately. Save the switching settings below manually.",
+      "zh-Hant": "主裝置與裝置佈局保持一致，選擇後立即同步；以下切換設定需點擊儲存。",
+      "ja": "ホストはデバイス配置と共通で、選択するとすぐに同期されます。以下の切り替え設定は保存が必要です。",
+      "ko": "주 장치는 기기 배치와 동일하며 선택 즉시 동기화됩니다. 아래 전환 설정은 저장해야 합니다.",
+      "de": "Das Hauptgerät ist mit dem Gerätelayout identisch und wird sofort synchronisiert. Wechseloptionen unten bitte speichern.",
+      "fr": "L’appareil principal est commun à la disposition et se synchronise immédiatement. Enregistrez les options de changement ci-dessous.",
+      "es": "El equipo principal es el mismo que en la distribución y se sincroniza al elegirlo. Guarda los ajustes de cambio inferiores.",
+      "pt": "O dispositivo principal é o mesmo do layout e sincroniza ao selecionar. Salve as opções de troca abaixo.",
+      "it": "Il dispositivo principale è condiviso con il layout e si sincronizza subito. Salva le opzioni di cambio sottostanti.",
+      "ru": "Главное устройство совпадает с выбранным в схеме и синхронизируется сразу. Настройки переключения ниже нужно сохранить."
     },
     "主设备与以下切换设置需点击保存；边缘光效开关立即保存。": {
       "en": "Save host and switching changes manually. Edge glow options save immediately.",

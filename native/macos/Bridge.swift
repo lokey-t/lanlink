@@ -20,9 +20,12 @@ let output = BridgeOutput { value in
  print(line); fflush(stdout)
 }
 func emit(_ value: [String: Any]) { output.emit(value) }
+let bluetoothHid = BluetoothHid()
 let commandCapacity = DispatchSemaphore(value: 128)
 let screenCapacity = DispatchSemaphore(value: 2)
 var remote = false
+var remoteBluetooth = false
+var inputSessionActive = true
 var cursorDetached = false
 var capturedCursorPosition: CGPoint?
 var capturedDisplay: CGDirectDisplayID?
@@ -57,7 +60,9 @@ func mouseButton(_ button: Int, _ down: Bool) {
 }
 func releaseAll() { for k in Array(held) { key(k, false) }; for b in Array(buttons) { mouseButton(b, false) } }
 func stopCapture() {
+ bluetoothHid.reset()
  remote = false
+ remoteBluetooth = false
  if cursorDetached { _ = CGAssociateMouseAndMouseCursorPosition(1); cursorDetached = false }
  capturedCursorPosition = nil
  if let display = capturedDisplay { _ = CGDisplayShowCursor(display); capturedDisplay = nil }
@@ -79,7 +84,12 @@ let callback: CGEventTapCallBack = { _, type, event, _ in
  if type == .keyDown || type == .keyUp || type == .flagsChanged {
   var down = type == .keyDown
   if type == .flagsChanged { down = physicalModifiers.contains(code) }
-  if let name = reverseCodes[code] { emit(["type":"input","kind":"key","code":name,"down":down]) }
+  if let name = reverseCodes[code] {
+   if remoteBluetooth && type == .flagsChanged && code == 57 {
+    emit(["type":"input","kind":"key","code":name,"down":true])
+    emit(["type":"input","kind":"key","code":name,"down":false])
+   } else { emit(["type":"input","kind":"key","code":name,"down":down]) }
+  }
   if !down && localModifierUps.remove(code) != nil{return Unmanaged.passUnretained(event)}
  } else if [.mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged].contains(type) {
   if let position = capturedCursorPosition { _ = CGWarpMouseCursorPosition(position) }
@@ -119,17 +129,54 @@ func command(_ message: [String: Any]) {
  let a = message["args"] as? [String: Any] ?? [:]
  let display = CGMainDisplayID(), bounds = CGDisplayBounds(display)
  switch method {
+ case "hid-start":
+  guard let map = a["reportMap"] as? [UInt8], !map.isEmpty, map.count <= 512 else { failure(id, "HID 报告描述无效"); return }
+  let serviceId = (a["serviceId"] as? String).flatMap(UUID.init(uuidString:))
+  bluetoothHid.start(Data(map), serviceId:serviceId); reply(id)
+ case "hid-stop": bluetoothHid.stop(); reply(id)
+ case "hid-claim":
+  guard let nonce = a["nonce"] as? String, let host = bluetoothHid.claim(nonce) else { failure(id, "蓝牙连接凭证已过期"); return }
+  reply(id,["host":host.uuidString])
+ case "hid-status": reply(id, bluetoothHid.status())
+ case "bt-input":
+  guard let host = (a["host"] as? String).flatMap(UUID.init(uuidString:)),
+        let frames = a["frames"] as? [[UInt8]], !frames.isEmpty, frames.count <= 64,
+        frames.allSatisfy({ !$0.isEmpty && $0.count <= 20 }) else { failure(id, "蓝牙输入数据无效"); return }
+  var sent = true
+  for frame in frames { sent = bluetoothHid.sendInput(host: host, data: Data(frame)) && sent }
+  reply(id, ["sent": sent])
+ case "hid-send":
+  guard let host = (a["host"] as? String).flatMap(UUID.init(uuidString:)), let raw = a["reports"] as? [[Any]], raw.count <= 256 else { failure(id, "HID 报告无效"); return }
+  let reports: [(Int, Data)] = raw.compactMap { report in
+   guard report.count == 2, let number = report[0] as? Int, [1,2].contains(number),
+         let bytes = report[1] as? [UInt8], bytes.count == (number == 1 ? 4 : 8) else { return nil }
+   return (number - 1, Data(bytes))
+  }
+  guard reports.count == raw.count else { failure(id, "HID 报告无效"); return }
+  guard remote && inputSessionActive || reports.allSatisfy({ $0.1.allSatisfy { $0 == 0 } }) else {
+   failure(id, "本机键鼠会话已结束"); return
+  }
+  bluetoothHid.send(host, values: reports) { sent in
+   if sent { reply(id) } else { failure(id, "蓝牙键鼠报告无法发送") }
+  }
  case "compactMotion": motionOutputLock.lock();compactMotionOutput=a["enabled"] as? Bool ?? false;motionOutputLock.unlock();reply(id)
- case "capabilities": reply(id,["inputBatch":1,"compactMotion":1,"relativeInput":true,"host":AXIsProcessTrusted() && (tap.map { CGEvent.tapIsEnabled(tap: $0) } ?? false),"input":AXIsProcessTrusted(),"screen":CGPreflightScreenCaptureAccess(),"clipboard":true,"shutdown":true,"width":bounds.width,"height":bounds.height])
+ case "capabilities": ensureInputTap(); reply(id,["inputBatch":1,"compactMotion":1,"relativeInput":true,"host":AXIsProcessTrusted() && (tap.map { CGEvent.tapIsEnabled(tap: $0) } ?? false),"input":AXIsProcessTrusted(),"inputMonitoring":CGPreflightListenEventAccess(),"screen":CGPreflightScreenCaptureAccess(),"clipboard":true,"shutdown":true,"width":bounds.width,"height":bounds.height])
  case "mode":
   if a["remote"] as? Bool == true {
+   ensureInputTap()
    if !remote {
-    guard AXIsProcessTrusted(), let tap, CGEvent.tapIsEnabled(tap: tap) else { failure(id,"缺少辅助功能或输入监控权限，无法接管本机键鼠"); return }
+    guard inputSessionActive else { failure(id,"CONTROL_ENDED: 本机系统会话未激活"); return }
+    guard AXIsProcessTrusted() else { failure(id,"HOST_INPUT_PERMISSION: 请在本机系统设置中开启辅助功能"); return }
+    guard let tap, CGEvent.tapIsEnabled(tap: tap) else {
+     failure(id,CGPreflightListenEventAccess() ? "HOST_INPUT_PERMISSION: 本机键鼠监听尚未就绪" : "HOST_INPUT_PERMISSION: 请在本机系统设置中开启输入监控")
+     return
+    }
     guard CGAssociateMouseAndMouseCursorPosition(0) == .success else { failure(id,"无法暂停本机鼠标，请重新授予辅助功能权限"); return }
     cursorDetached = true; capturedCursorPosition = CGEvent(source: nil)?.location
     guard CGDisplayHideCursor(display) == .success else { stopCapture(); failure(id,"无法隐藏本机光标，已恢复本机操作"); return }
     capturedDisplay = display; localModifierUps = physicalModifiers; remote = true
    }
+   remoteBluetooth = a["inputTransport"] as? String == "bluetooth"
    lease = Date().addingTimeInterval(3)
   } else { stopCapture() }
   reply(id)
@@ -184,13 +231,35 @@ func command(_ message: [String: Any]) {
  default: failure(id,"不支持的原生操作")
  }
 }
+func ensureInputTap() {
+ if let tap, CFMachPortIsValid(tap) {
+  if !CGEvent.tapIsEnabled(tap: tap) && !remote { CGEvent.tapEnable(tap: tap, enable: true) }
+  return
+ }
+ guard AXIsProcessTrusted() else { return }
+ let types: [CGEventType] = [.keyDown,.keyUp,.flagsChanged,.mouseMoved,.leftMouseDragged,.rightMouseDragged,.otherMouseDragged,.leftMouseDown,.leftMouseUp,.rightMouseDown,.rightMouseUp,.otherMouseDown,.otherMouseUp,.scrollWheel]
+ let mask = types.reduce(CGEventMask(0)) { $0 | (CGEventMask(1) << $1.rawValue) }
+ tap = CGEvent.tapCreate(tap:.cghidEventTap,place:.headInsertEventTap,options:.defaultTap,eventsOfInterest:mask,callback:callback,userInfo:nil)
+ if let t = tap { let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault,t,0);CFRunLoopAddSource(CFRunLoopGetMain(),source,.commonModes);CGEvent.tapEnable(tap:t,enable:true) }
+}
+
 @main struct BridgeMain {
 static func main() {
 _ = NSApplication.shared
-let types: [CGEventType] = [.keyDown,.keyUp,.flagsChanged,.mouseMoved,.leftMouseDragged,.rightMouseDragged,.otherMouseDragged,.leftMouseDown,.leftMouseUp,.rightMouseDown,.rightMouseUp,.otherMouseDown,.otherMouseUp,.scrollWheel]
-let mask = types.reduce(CGEventMask(0)) { $0 | (CGEventMask(1) << $1.rawValue) }
-tap = CGEvent.tapCreate(tap:.cghidEventTap,place:.headInsertEventTap,options:.defaultTap,eventsOfInterest:mask,callback:callback,userInfo:nil)
-if let t = tap { let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault,t,0);CFRunLoopAddSource(CFRunLoopGetMain(),source,.commonModes);CGEvent.tapEnable(tap:t,enable:true) }
+ensureInputTap()
+let workspace = NSWorkspace.shared.notificationCenter
+let workspaceObservers = [
+ workspace.addObserver(forName: NSWorkspace.sessionDidResignActiveNotification, object: nil, queue: .main) { _ in
+  inputSessionActive = false; stopCapture(); emit(["type":"input-interrupted","blocked":true])
+ },
+ workspace.addObserver(forName: NSWorkspace.sessionDidBecomeActiveNotification, object: nil, queue: .main) { _ in
+  inputSessionActive = true; emit(["type":"input-restored"])
+ },
+ workspace.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { _ in
+  stopCapture(); emit(["type":"emergency"])
+ }
+]
+defer { workspaceObservers.forEach(workspace.removeObserver) }
 var ticks = 0
 Timer.scheduledTimer(withTimeInterval:0.02,repeats:true) { _ in
  if remote && Date()>lease { stopCapture();emit(["type":"emergency"]) }

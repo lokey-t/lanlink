@@ -233,9 +233,9 @@ final class SettingsProbe {
       }
       page("permissions");
       check(!service.peers.containsKey(c) && !service.knownDevices().has(c),"fixture is only a group member, never connected");
-      check(find(decor,"尚未连接的电脑 键鼠标操作")!=null,"offline group member can be configured before first connection");
+      check(find(((Dialog)field(activity, "popupDialog")).getWindow().getDecorView(),"尚未连接的电脑 键鼠标操作")!=null,"offline group member can be configured before first connection");
       check(!service.consent.hasGrant(c) && service.consent.allowed(c,"input"),"viewing the page preserves implicit group defaults");
-      click(decor,"尚未连接的电脑 键鼠标操作");
+      click(((Dialog)field(activity, "popupDialog")).getWindow().getDecorView(),"尚未连接的电脑 键鼠标操作");
       until=SystemClock.elapsedRealtime()+3000;
       while(service.consent.allowed(c,"input") && SystemClock.elapsedRealtime()<until)Thread.sleep(30);
       check(!service.consent.allowed(c,"input") && service.consent.allowed(c,"screen"),"disabling one default leaves other features allowed");
@@ -250,8 +250,8 @@ final class SettingsProbe {
       try{service.setDevicePermission("not-a-group-device","input",true);throw new AssertionError("nonmember accepted");}catch(IOException expected){}
       page("permissions");
       capture("group-preauthorization");
-      check(find(decor, "工作电脑 键鼠标操作") != null, "per-device switch");
-      click(decor, "工作电脑 键鼠标操作");
+      check(find(((Dialog)field(activity, "popupDialog")).getWindow().getDecorView(), "工作电脑 键鼠标操作") != null, "per-device switch");
+      click(((Dialog)field(activity, "popupDialog")).getWindow().getDecorView(), "工作电脑 键鼠标操作");
       until = SystemClock.elapsedRealtime() + 3000;
       while (!service.consent.allowed(a, "input") && SystemClock.elapsedRealtime() < until)
         Thread.sleep(30);

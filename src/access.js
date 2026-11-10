@@ -21,18 +21,26 @@ export class Access {
     try { await Promise.all([...this.service.peers.values()].map(async p=>{if(Date.now()-(p.accessAt||0)<3000)return;try{await this.read(p);}catch{p.access=accessState(null,p.info?.platform);p.accessAt=Date.now();}})); }
     finally {this.polling=false;}
   }
-  async prepare(id, keys) {
+  async prepare(id, keys, capture = false) {
     const peer=this.service.getPeer(id);
     keys=[...new Set((Array.isArray(keys)?keys:[]).filter(k=>['input','screen','clipboard','shutdown'].includes(k)))];
     if(!keys.length)throw Error('请选择需要的权限');
-    if(keys.includes('input') || keys.includes('screen')) {
+    const keyboardMouse = capture && keys.length === 1 && keys[0] === 'input';
+    const preference = this.service.inputTransport?.preference(id);
+    const hasHid = keyboardMouse && peer.info?.capabilities?.bluetoothControl === 1 &&
+      preference !== 'network_only' && this.service.inputTransport?.ready(id);
+    let report = hasHid ? await this.read(peer) : null;
+    const bluetooth = hasHid && report.inputTransport?.bluetoothEnabled !== false;
+    if (keyboardMouse && preference === 'bluetooth_only' && !bluetooth)
+      throw Error('蓝牙键鼠尚未就绪，请检查配对及通道设置');
+    if(!bluetooth && (keys.includes('input') || keys.includes('screen'))) {
       try {await this.service.adbGuide.check(peer,{id,feature:true,screen:keys.includes('screen')});}
       catch(error){if(error.message.startsWith('ADB_SETUP_REQUIRED:'))return {ready:false,guide:true};throw error;}
     }
-    const report=await this.read(peer);
+    report ||= await this.read(peer);
     if(!report.permissions)throw Error('请更新被控设备的 LanLink 后重试');
     if(keys.some(k=>report.permissions[k]?.supported===false))throw Error('被控设备不支持此功能');
-    if(keys.some(k=>report.permissions[k]?.appEnabled!==true || report.permissions[k]?.systemGranted!==true)) {
+    if(keys.some(k=>report.permissions[k]?.appEnabled!==true || !(bluetooth && k==='input') && report.permissions[k]?.systemGranted!==true)) {
       await peer.request('permission-prepare',{permissions:keys},4000);
       throw Error('PERMISSION_REQUIRED: 设备未就绪，请在被控设备完成权限设置后重试');
     }
@@ -52,9 +60,10 @@ export class Access {
     const generation=this.generation,report=await this.read(peer);
     if(generation!==this.generation)throw Error('CONTROL_ENDED: 请求已取消');
     // Older peers still enforce their own prepare/acquire permissions.
-    if(!report.permissions)return;
+    if(!report.permissions){if(intent.transport==='bluetooth')throw Error('蓝牙键鼠授权状态未知');return;}
+    if(intent.transport==='bluetooth' && report.inputTransport?.bluetoothEnabled===false)throw Error('BLUETOOTH_NOT_READY: 对方已停用蓝牙键鼠');
     const keys=intent.screen?['input','screen']:['input'];
-    if(keys.some(k=>report.permissions[k]?.appEnabled===false || report.permissions[k]?.systemGranted===false)) {
+    if(keys.some(k=>report.permissions[k]?.appEnabled===false || !(intent.transport==='bluetooth' && k==='input') && report.permissions[k]?.systemGranted===false)) {
       await peer.request('permission-prepare',{permissions:keys},4000);
       throw Error('PERMISSION_REQUIRED: 设备未就绪，请在被控设备完成权限设置');
     }

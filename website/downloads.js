@@ -35,12 +35,7 @@ export function releaseLinks(release, source) {
   const links = {};
   for (const [platform, pattern] of Object.entries(patterns)) {
     const asset = (release.assets || []).find(a => a.name?.startsWith(`LanLink-${version}-`) && pattern.test(a.name));
-    if (!asset) {
-      const suffix = { windows: 'windows-x64-setup.exe', windowsPortable: 'windows-x64.zip', mac: 'macos-arm64.zip', android: 'android.apk' }[platform];
-      const origin = source === 'gitee' ? 'https://gitee.com' : 'https://github.com';
-      links[platform] = origin + '/lokey-t/lanlink/releases/download/' + encodeURIComponent(release.tag_name) + '/LanLink-' + version + '-' + suffix;
-      continue;
-    }
+    if (!asset) continue;
     try {
       const url = new URL(asset.browser_download_url);
       const host = source === 'gitee' ? 'gitee.com' : 'github.com';
@@ -56,8 +51,13 @@ export async function loadRelease(source, fetcher = fetch) {
 
 export async function resolveDownload(source, platform, fetcher = fetch) {
   const release = await loadRelease(source, fetcher);
-  if (!release.links[platform]) throw new Error('Missing download');
-  return { ...release, url: release.links[platform] };
+  if (release.links[platform]) return { ...release, url: release.links[platform] };
+  const other = source === 'github' ? 'gitee' : 'github';
+  const mirror = await loadRelease(other, fetcher).catch(() => null);
+  if (mirror?.version === release.version && mirror.links[platform]) {
+    return { ...release, links: { ...mirror.links, ...release.links }, url: mirror.links[platform] };
+  }
+  throw new Error('Missing download');
 }
 
 export function setupDownloads({ document, storage, onChange, getText, navigate = url => window.location.assign(url) }) {

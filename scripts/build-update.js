@@ -13,7 +13,7 @@ for(const [target,spec]of Object.entries(input.targets)){
  const previous=android?{'app.apk':{bytes:await readFile(spec.previous)}}:await snapshot(spec.previous);
  const full={},patch={};for(const [name,file]of Object.entries(current)){if(file.link!==undefined){full[name]={link:file.link};patch[name]={link:file.link};continue;}const before=previous[name]?.bytes;full[name]={sha256:hash(file.bytes),mode:file.mode,ops:[file.bytes.toString('base64')]};patch[name]={...full[name],...(before?{base:hash(before),ops:delta(before,file.bytes)}:{})};}
  bundle.targets[target]={from:spec.from,files:patch};
- manifest.targets[target]={full:await asset(`LanLink-${input.version}-${target}.full${android?'.apk':'.json.gz'}`,android?current['app.apk'].bytes:gzipSync(JSON.stringify({format:1,version:input.version,files:full})))};
+ manifest.targets[target]={deltaFrom:spec.from,full:await asset(`LanLink-${input.version}-${target}.full${android?'.apk':'.json.gz'}`,android?current['app.apk'].bytes:gzipSync(JSON.stringify({format:1,version:input.version,files:full})))};
 }
 manifest.delta=await asset(`LanLink-${input.version}-delta.json.gz`,gzipSync(JSON.stringify(bundle)));
 await writeFile(path.join(out,'lanlink-update.json'),JSON.stringify(manifest,null,2),{flag:'wx'});

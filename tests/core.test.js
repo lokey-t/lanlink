@@ -381,3 +381,220 @@ test('permission matrix opens the guide on the selected peer and requires local 
   assert.equal(target.consent.allowed(source.config.id,'screen'),true);
   assert.equal(target.consent.allowed(source.config.id,'input'),false,'other permissions remain disabled');
 });
+
+async function bluetoothFixture(t) {
+  const { a, b } = await pair(t);
+  let connected = true;
+  const original = a.native.call.bind(a.native);
+  a.native.call = async (method, args) => {
+    await original(method, args);
+    if (method === 'hid-status') return {
+      adapterPresent:true, peripheralSupported:true, hidServiceReady:true,
+      hosts:connected ? [{id:'fixture-host', bonded:true, hostConnected:true, reportSubscribed:true, ready:true}] : [],
+    };
+    if (method === 'hid-send' && !connected) throw Error('Disconnected');
+    return {};
+  };
+  const id = b.config.id;
+  const {hosts:[host]} = await a.inputTransport.refresh();
+  await a.inputTransport.save(id, {host:host.id, confirmed:true});
+  a.native.calls.length = 0;
+  return {a,b,id, disconnect:() => {connected = false;}};
+}
+
+test('Bluetooth carries both mouse and keyboard without network injection and preserves group revocation', async t => {
+  const {a,b,id} = await bluetoothFixture(t);
+  b.native.capabilities.input = false;
+  await a.switchTo(id);
+  assert.equal(b.owner.transport,'bluetooth');
+  assert.equal(a.state().inputTransport.targets[0].active,'bluetooth');
+  assert.equal(a.state().inputTransport.targets[0].availability,'bluetooth_only');
+  await a.nativeEvent({type:'input',kind:'move',dx:300,dy:-140});
+  await a.nativeEvent({type:'input',kind:'key',code:'KeyA',down:true});
+  await assert.rejects(a.getPeer(id).request('input',{kind:'button',button:0,down:true}), /蓝牙键鼠/);
+  assert.equal(b.native.calls.some(call=>call.method==='input'),false);
+  const reports = a.native.calls.filter(call=>call.method==='hid-send').map(call=>call.args);
+  assert.ok(reports.every(report=>report.host==='fixture-host'));
+  assert.deepEqual(reports[1].reports,[[1,[0,127,129,0]],[1,[0,127,243,0]],[1,[0,46,0,0]]]);
+  assert.deepEqual(reports[2].reports,[[2,[0,0,4,0,0,0,0,0]]]);
+  await b.setConsent(a.config.id,{input:false});
+  await until(()=>!a.active && !a.returning);
+  assert.deepEqual(a.native.calls.filter(call=>call.method==='hid-send').at(-1).args.reports,
+    [[1,[0,0,0,0]],[2,[0,0,0,0,0,0,0,0]]]);
+  await assert.rejects(a.switchTo(id), /CONSENT/);
+});
+
+test('Bluetooth loss releases the old session before authorized network fallback and respects only modes', async t => {
+  const {a,b,id,disconnect} = await bluetoothFixture(t);
+  await a.inputTransport.save(id,{preference:'network_only'});
+  await a.switchTo(id);
+  assert.equal(a.activeSession.transport,'network');
+  assert.equal(a.native.calls.some(call=>call.method==='hid-send'),false);
+  await a.inputTransport.save(id,{preference:'auto_bt_first'});
+  await a.switchTo(id);
+  const prior = a.activeSession.edgeSession;
+  disconnect();
+  await a.tick();
+  assert.equal(a.activeSession.transport,'network');
+  assert.notEqual(a.activeSession.edgeSession,prior);
+  assert.equal(b.owner.transport,'network');
+  await a.inputTransport.save(id,{preference:'bluetooth_only'});
+  await assert.rejects(a.switchTo(id), /蓝牙键鼠尚未就绪/);
+  assert.equal(a.active,null);
+  assert.equal(b.owner,null);
+});
+
+test('group HID settings preserve a connected link while the receiver selects network input', async t => {
+  const {a,b,id} = await bluetoothFixture(t);
+  const sender = a.config.id;
+  const offline = randomUUID();
+  b.config.knownDevices[offline] = {name:'Offline group device',platform:'win32'};
+  const {createActions} = await import('../src/actions.js');
+  const invoke = createActions(b);
+  const devices = async () => (await invoke('group-hid-status', {})).devices;
+  let rows = await devices();
+  assert.equal(rows.find(row=>row.id === sender).incoming, true);
+  assert.equal(rows.find(row=>row.id === offline).incoming, null);
+  assert.ok(rows.every(row=>row.id !== id));
+
+  await invoke('group-hid-toggle', {id:sender,enabled:false});
+  rows = await devices();
+  assert.equal(rows.find(row=>row.id === sender).enabled, false);
+  assert.equal(rows.find(row=>row.id === sender).incoming, true);
+  await a.switchTo(id);
+  assert.equal(a.activeSession.transport, 'network');
+  assert.equal(b.owner.transport, 'network');
+  assert.equal(a.inputTransport.connected(id), true);
+
+  await a.returnLocal();
+  await invoke('group-hid-toggle', {id:sender,enabled:true});
+  await a.switchTo(id);
+  assert.equal(a.activeSession.transport, 'bluetooth');
+});
+
+test('a local-only Bluetooth target cannot be rebound as a second target or enter the group', async t => {
+  const {a,id} = await bluetoothFixture(t);
+  const [{host}] = a.state().inputTransport.targets;
+  await assert.rejects(a.inputTransport.save(null,{external:true,name:'iPad',host,confirmed:true}),/已绑定/);
+  await a.inputTransport.save(id,{host:''});
+  const {targets} = await a.inputTransport.save(null,{external:true,name:'iPad',host,confirmed:true});
+  const external = targets.find(target=>target.external);
+  assert.equal(external.availability,'bluetooth_only');
+  assert.equal(a.group.data.members[external.id],undefined);
+  await a.switchTo(external.id);
+  assert.equal(a.activeSession.external,true);
+  await a.inputTransport.save(external.id,{remove:true});
+  assert.equal(a.active,null);
+  assert.equal(a.inputTransport.record(external.id).host,undefined);
+});
+
+test('automatic mode can use the network if the initial HID report fails after acquisition', async t => {
+  const {a,b,id,disconnect} = await bluetoothFixture(t);
+  disconnect(); // Leave the cached subscription ready until the first native send.
+  await a.switchTo(id);
+  assert.equal(a.activeSession.transport,'network');
+  assert.equal(b.owner.transport,'network');
+  assert.equal(a.native.calls.filter(call=>call.method==='mode' && call.args?.remote).length,1);
+});
+
+test('LAN capture refreshes stale host permissions and reports which Mac permission is missing', async t => {
+  const {a,b} = await pair(t);
+  const original = a.native.call.bind(a.native);
+  a.native.capabilities.host = false;
+  a.native.call = async (method, args) => method === 'capabilities'
+    ? {host:false, input:false, inputMonitoring:true} : original(method,args);
+  await assert.rejects(a.switchTo(b.config.id), /HOST_INPUT_PERMISSION: .*辅助功能/);
+  assert.equal(b.owner, null);
+  a.native.call = async (method, args) => method === 'capabilities'
+    ? {host:true, input:true, inputMonitoring:true} : original(method,args);
+  await a.switchTo(b.config.id);
+  await a.nativeEvent({type:'input',kind:'move',dx:23,dy:41});
+  assert.equal(b.owner.transport, 'network');
+  assert.ok(b.native.calls.some(call=>call.method==='input' && call.args.kind==='move'));
+});
+
+test('group Bluetooth requires a physical-link challenge and loses authorization when the master changes', async t => {
+  const {a,b} = await pair(t);
+  const id = b.config.id;
+  const target = a.getPeer(id);
+  target.info.capabilities.autoHidTarget = 1;
+  const claimed = new Set();
+  const original = a.native.call.bind(a.native);
+  a.native.call = async (method,args) => {
+    if (method==='hid-claim') {
+      if (!['a'.repeat(32), 'c'.repeat(32)].includes(args.nonce) || claimed.has(args.nonce)) throw Error('凭证已过期');
+      claimed.add(args.nonce);
+      return {host:'fixture-ble-link'};
+    }
+    if (method==='hid-status') return {
+      hidServiceReady:true, rendezvousReady:true,
+      hosts:[{id:'fixture-ble-link',hostConnected:true,reportSubscribed:true,ready:true}],
+    };
+    return original(method,args);
+  };
+  const phone = b.getPeer(a.config.id);
+  const {serviceId} = await phone.request('bluetooth-offer');
+  assert.equal(serviceId,a.inputTransport.serviceId);
+  assert.equal(a.inputTransport.ready(id),false);
+  await assert.rejects(phone.request('bluetooth-claim',{serviceId,nonce:'b'.repeat(32)}),/凭证已过期/);
+  await phone.request('bluetooth-claim',{serviceId,nonce:'a'.repeat(32)});
+  assert.equal(a.inputTransport.ready(id),true);
+  await assert.rejects(phone.request('bluetooth-claim',{serviceId,nonce:'a'.repeat(32)}),/凭证已过期/);
+
+  await a.access.read(target);
+  const status = () => a.state().inputTransport.targets.find(row=>row.id===id);
+  const reports = () => a.native.calls.filter(call=>call.method==='hid-send');
+  assert.equal(status().bluetooth.standby,true);
+  assert.equal(status().active,'none');
+  await a.tick();
+  assert.equal(reports().length,0,'standby must not send input or neutral reports');
+  assert.equal(b.owner,null,'standby must not acquire an input lease');
+
+  phone.close();
+  await until(()=>!a.peers.size && !b.peers.size);
+  await a.connect('127.0.0.1',b.port);
+  await until(()=>a.peers.get(id)?.info && b.peers.get(a.config.id)?.info);
+  const reconnected = a.getPeer(id);
+  reconnected.info.capabilities.autoHidTarget = 1;
+  assert.equal(a.inputTransport.ready(id),false,'a new LAN session must reauthenticate the existing Bluetooth link');
+  const returnedPhone = b.getPeer(a.config.id);
+  await returnedPhone.request('bluetooth-claim',{serviceId,nonce:'c'.repeat(32)});
+  await a.access.read(reconnected);
+  assert.equal(status().bluetooth.standby,true);
+  assert.equal(reports().length,0);
+
+  await a.switchTo(id);
+  assert.equal(status().bluetooth.standby,false);
+  assert.equal(status().active,'bluetooth');
+  await a.nativeEvent({type:'input',kind:'key',code:'KeyA',down:true});
+  await a.returnLocal();
+  const afterRelease = reports().length;
+  await a.tick();
+  assert.equal(status().bluetooth.standby,true);
+  assert.equal(status().active,'none');
+  assert.equal(reports().length,afterRelease);
+  assert.equal(b.owner,null);
+
+  await a.settings({masterId:id});
+  assert.equal(a.inputTransport.ready(id),false);
+  await assert.rejects(returnedPhone.request('bluetooth-offer'),/当前主设备/);
+});
+
+test('automatic input retries ordinary network authorization when Bluetooth fails before permission preflight', async t => {
+  const {a,b,id} = await bluetoothFixture(t);
+  const peer = a.getPeer(id);
+  delete peer.access;
+  let probes = 0;
+  a.inputTransport.ready = () => ++probes === 1;
+  await a.switchTo(id);
+  assert.equal(a.activeSession.transport, 'network');
+  await a.nativeEvent({type:'input',kind:'key',code:'KeyA',down:true});
+  assert.ok(b.native.calls.some(call=>call.method==='input' && call.args.code==='KeyA'));
+
+  await a.returnLocal();
+  await b.setConsent(a.config.id,{input:false});
+  delete peer.access;
+  probes = 0;
+  await assert.rejects(a.switchTo(id), /CONSENT/);
+  assert.equal(b.owner, null);
+});

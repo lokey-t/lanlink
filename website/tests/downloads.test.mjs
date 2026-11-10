@@ -11,7 +11,7 @@ test('region detection and network failure fallback', async () => {
   assert.equal(await detectSource(async () => { throw Error('offline'); }), 'github');
 });
 const release = (host, version = '0.91.0') => ({ tag_name: 'v' + version, assets: [
-  `LanLink-${version}-windows-x64-setup.exe`, `LanLink-${version}-macos-arm64.zip`, `LanLink-${version}-android.apk`, `LanLink-${version}-win32-x64.full.json.gz`
+  `LanLink-${version}-windows-x64-setup.exe`, `LanLink-${version}-windows-x64.zip`, `LanLink-${version}-macos-arm64.zip`, `LanLink-${version}-android.apk`, `LanLink-${version}-win32-x64.full.json.gz`
 ].map(name => ({ name, browser_download_url: `https://${host}/lokey-t/lanlink/releases/download/v${version}/${name}` })) });
 test('both sources resolve installers and follow future stable versions', async () => {
   for (const [source, host] of [['gitee', 'gitee.com'], ['github', 'github.com']]) {
@@ -24,7 +24,7 @@ test('both sources resolve installers and follow future stable versions', async 
   }
 });
 test('missing assets keep release fallback and untrusted URLs are rejected', () => {
-  assert.equal(releaseLinks({ tag_name: 'v1.0.0', assets: [] }, 'github').links.windowsPortable, 'https://github.com/lokey-t/lanlink/releases/download/v1.0.0/LanLink-1.0.0-windows-x64.zip');
+  assert.equal(releaseLinks({ tag_name: 'v1.0.0', assets: [] }, 'github').links.windowsPortable, undefined);
   assert.equal(releaseLinks(release('evil.example'), 'github').links.windows, undefined);
   assert.throws(() => releaseLinks({ ...release('github.com'), prerelease: true }, 'github'));
 });
@@ -41,15 +41,24 @@ test('every platform offers separate release and direct download links', async (
   assert.match(html, /data-i18n="downloadFallback"/);
 });
 
-test('each click resolves the latest version and generates both Windows download variants', async () => {
+test('each click resolves the latest version and only links listed Windows downloads', async () => {
   let version = '0.91.0';
   let calls = 0;
-  const fetcher = async () => { calls++; return { ok: true, json: async () => ({ tag_name: 'v' + version, assets: [] }) }; };
+  const fetcher = async () => { calls++; return { ok: true, json: async () => release('gitee.com', version) }; };
   assert.ok((await resolveDownload('gitee', 'windows', fetcher)).url.endsWith('/LanLink-0.91.0-windows-x64-setup.exe'));
   version = '1.0.0';
   assert.equal((await resolveDownload('gitee', 'windowsPortable', fetcher)).url, 'https://gitee.com/lokey-t/lanlink/releases/download/v1.0.0/LanLink-1.0.0-windows-x64.zip');
   assert.equal(calls, 2);
   await assert.rejects(resolveDownload('github', 'android', async () => { throw Error('offline'); }));
+});
+test('the fallback mirror must carry the same version and the requested asset', async () => {
+  let version = '1.0.0';
+  const fetcher = async url => ({ ok: true, json: async () => url.includes('gitee.com')
+    ? {tag_name:'v1.0.0', assets:[]}
+    : release('github.com', version) });
+  assert.match((await resolveDownload('gitee', 'windows', fetcher)).url, /^https:\/\/github\.com\//);
+  version = '0.91.0';
+  await assert.rejects(resolveDownload('gitee', 'windows', fetcher), /Missing download/);
 });
 import { websiteQrUrl } from '../downloads.js';
 test('website QR uses the public download page and excludes local preview addresses', () => {

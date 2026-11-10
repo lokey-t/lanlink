@@ -57,7 +57,7 @@ export async function receivePermissionToggle(service, peer, key, enabled) {
 
 export function permissionReport(service, requester = service.config.id) {
   const caps = service.native.capabilities, local = requester === service.config.id;
-  return { version: 1, requestPending: service.consent.pending?.has(requester) === true, requestRejected: service.consent.denied?.has(requester) === true, permissions: Object.fromEntries(Object.keys(labels).map(key => [key, {
+  return { version: 1, inputTransport: { schemaVersion:1, networkInputReady:caps.input === true, bluetoothEnabled:service.inputTransport?.preference(requester) !== 'network_only' }, requestPending: service.consent.pending?.has(requester) === true, requestRejected: service.consent.denied?.has(requester) === true, permissions: Object.fromEntries(Object.keys(labels).map(key => [key, {
     supported: true, appEnabled: service.config.permissions[key] === true,
     systemGranted: caps.simulated ? null : typeof caps[key] === 'boolean' ? caps[key] : null,
     peerAllowed: local ? true : key === 'clipboard' ? service.canShareClipboard(requester) : service.consent.allowed(requester, key),
@@ -89,7 +89,13 @@ export async function groupPermissions(service) {
       else if (online) report = await peer.request('permission-status', {}, 3000);
       if (online && report?.version !== 1) message = '请升级此设备以查看权限';
     } catch { message = '暂时无法读取，请确认设备在线并已升级'; }
+    const inputTransport = local ? null : service.inputTransport?.describe(id, report?.permissions?.input);
+    const permissions = permissionRows(report);
+    if (inputTransport?.readiness.bluetooth === 'ready') {
+      const input = permissions.find(row => row.key === 'input');
+      Object.assign(input, { system:'已就绪', state:'ready', status:'已就绪' });
+    }
     return { id, name: local ? service.config.name : peer?.info?.name || info.name || '设备', platform: local ? process.platform : peer?.info?.platform || info.platform,
-      local, online, message, permissions: permissionRows(report), inboundPermissions:local?[]:Object.entries(labels).map(([key,label])=>({key,label,allowed:service.consent.allowed(id,key)})), engine: report?.engine || null };
+      local, online, message, inputTransport, permissions, inboundPermissions:local?[]:Object.entries(labels).map(([key,label])=>({key,label,allowed:service.consent.allowed(id,key)})), engine: report?.engine || null };
   })) };
 }

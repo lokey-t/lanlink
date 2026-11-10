@@ -25,7 +25,7 @@ export function createActions(service) {
     'quality-export': qualityAction(() => quality.export()),
     'logs-export': () => exportLogs(service),
     'update-check':()=>service.updater.check(),
-    'update-install':()=>service.updater.install(),
+    'update-install':()=>service.updater.beginInstall(),
     'stage-list':()=>({files:service.staging.list(),outgoing:service.staging.outgoingList()}),
     'stage-outgoing-list':()=>({files:service.staging.outgoingList()}),
     'stage-outgoing-retry':a=>service.staging.retryOutgoing(a.id),
@@ -45,10 +45,12 @@ export function createActions(service) {
       while(service.switching&&Date.now()<deadline)await new Promise(r=>setTimeout(r,30));
       check();
       if(service.active!==a.id)await service.switchTo(a.id,a.edge,true,false,false,false,true);
-      await service.native.call('file-drag-cancel');
+      if (!(process.platform === 'darwin' && a.dragCompleted === true)) {
+        await service.native.call('file-drag-cancel');
+      }
       return service.staging.share(a.id,a.files,false);
     },
-    'stage-start':a=>{if(!service.staging.rows.has(a.id))throw Error('暂存文件不存在');service.staging.start(a.id).catch(e=>service.log(e.message));return {message:'正在接收文件…'};},
+    'stage-start':a=>{if(!service.staging.rows.has(a.id))throw Error('暂存文件不存在');service.staging.start(a.id).catch(e=>service.log(e.message));return {message:'接收请求已提交'};},
     'stage-ready':a=>service.staging.ready(a.id),
     'stage-remove':a=>service.staging.remove(a.id),
     'clipboard-upload':()=>service.clipboardSync.uploadNow(),
@@ -73,7 +75,18 @@ export function createActions(service) {
     'adb-local-devices': () => adb.localDevices(),
     'adb-local-authorize': a => adb.authorizeLocal(a.serial),
     'adb-connect': async a => { const match=await adb.match(a.id);if(!match.connected)throw Error(match.message);return adb.authorize({id:a.id,serial:match.serial}); },
-    'feature-prepare': a => service.access.prepare(a.id,a.permissions),
+    'feature-prepare': a => service.access.prepare(a.id,a.permissions,a.capture === true),
+    'group-hid-status': () => service.inputTransport.groupHid(),
+    'group-hid-toggle': a => service.configure(() => {
+      if (!a.id || a.id === service.config.id || service.inputTransport.record(a.id).external || typeof a.enabled !== 'boolean')
+        throw Error('请选择有效的组内设备');
+      return service.inputTransport.save(a.id, { preference:a.enabled ? 'auto_bt_first' : 'network_only', keepSession:true });
+    }),
+    'group-hid-prepare': a => service.configure(() => service.inputTransport.preparePairing(a.id)),
+    'group-hid-pair': a => service.inputTransport.requestPairing(a.id, a.confirm === true),
+    'input-transport-status': () => service.inputTransport.refresh(),
+    'input-transport-start': () => service.inputTransport.advertise(),
+    'input-transport-save': a => service.configure(() => service.inputTransport.save(a.id,{ ...a, systemPairing:false, keepSession:false })),
     'access-request': a => service.access.request(a.id,a.permissions),
     'access-status': a => service.access.status(a.requestId),
     'access-complete': a => service.access.complete(a.requestId),
@@ -118,8 +131,8 @@ export function createActions(service) {
     control: a => service.switchTo(a.id, a.edge || 'right', !!a.capture, a.newSession === true, a.fallbackAccepted === true, a.screen === true),
     release: a => !a?.id || service.active === a.id || service.controlIntent?.id === a.id ? service.returnLocal() : {},
     stop: () => { setTimeout(() => service.emit('stop'), 50); },
-    input: a => { if (service.active !== a.id) throw new Error('请先开始控制'); return service.getPeer(a.id).request('input', a.input); },
-    text: a => { if (service.active !== a.id) throw new Error('请先开始控制'); return service.getPeer(a.id).request('text', { text: a.text }); },
+    input: a => { if (service.active !== a.id) throw new Error('请先开始控制'); if(service.activeSession?.transport==='bluetooth')throw Error('此会话使用蓝牙键鼠，请使用本机键鼠'); return service.getPeer(a.id).request('input', a.input); },
+    text: a => { if (service.active !== a.id) throw new Error('请先开始控制'); if(service.activeSession?.transport==='bluetooth')throw Error('此会话使用蓝牙键鼠，请使用本机键鼠'); return service.getPeer(a.id).request('text', { text: a.text }); },
     screen: a => service.screenFrom(a.id),
     'stream-open': a => service.openStream(a.id, a.jpegOnly === true),
     'stream-next': a => service.videoViewer.next(a.id),

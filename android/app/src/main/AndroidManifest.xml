@@ -2,6 +2,11 @@
  <uses-permission android:name="android.permission.INTERNET"/>
  <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
  <uses-permission android:name="android.permission.CAMERA"/>
+ <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30"/>
+ <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30"/>
+ <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
+ <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE"/>
+ <uses-feature android:name="android.hardware.bluetooth_le" android:required="false"/>
  <uses-feature android:name="android.hardware.camera.any" android:required="false"/>
  <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
  <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
@@ -20,6 +25,7 @@
    <intent-filter><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/><data android:scheme="lanlink" android:host="pair"/></intent-filter>
   </activity>
   <activity android:name=".ScanActivity" android:exported="false"/>
+  <receiver android:name=".AppUpdater$InstallResultReceiver" android:exported="false"/>
   <service android:name=".LinkService" android:exported="false" android:foregroundServiceType="connectedDevice|mediaProjection"/>
   <provider android:name=".ReceivedProvider" android:authorities="com.lanlink.app.received" android:exported="false" android:grantUriPermissions="true"/>
   <provider android:name=".AdbSetupProvider" android:authorities="com.lanlink.app.adbsetup" android:exported="true"/>

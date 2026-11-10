@@ -2,9 +2,17 @@
 set -eu
 cd "$(dirname "$0")/.."
 VERSION=$(node -p "JSON.parse(require('fs').readFileSync('package.json')).version")
+SIGN_IDENTITY=${LANLINK_MAC_SIGN_IDENTITY:--}
+NOTARY_PROFILE=${LANLINK_MAC_NOTARY_PROFILE:-}
+if [ "$SIGN_IDENTITY" != "-" ] && [ -z "$NOTARY_PROFILE" ]; then
+  echo 'Set LANLINK_MAC_NOTARY_PROFILE for Developer ID builds'; exit 1
+fi
+if [ "$SIGN_IDENTITY" = "-" ] && [ -n "$NOTARY_PROFILE" ]; then
+  echo 'Set LANLINK_MAC_SIGN_IDENTITY to a Developer ID Application identity'; exit 1
+fi
 case "$(uname -m)" in arm64) ARCH=arm64;; x86_64) ARCH=x64;; *) echo 'Unsupported architecture'; exit 1;; esac
 # Extract an official Node.js 22+ distribution for this Mac before building.
-if [ -z "$LANLINK_NODE_DIST" ]; then echo 'Set LANLINK_NODE_DIST to an extracted official Node.js distribution'; exit 1; fi
+if [ -z "${LANLINK_NODE_DIST:-}" ]; then echo 'Set LANLINK_NODE_DIST to an extracted official Node.js distribution'; exit 1; fi
 test -x "$LANLINK_NODE_DIST/bin/node"
 test -f "$LANLINK_NODE_DIST/LICENSE"
 test -f node_modules/werift/package.json || { echo 'Run npm ci --ignore-scripts before packaging'; exit 1; }
@@ -26,7 +34,6 @@ mkdir -p "$BUNDLE/Contents/Resources/native/quic"
 cp -R native/macos native/windows "$BUNDLE/Contents/Resources/native/"
 cp -R native/quic/src native/quic/Cargo.toml native/quic/Cargo.lock "$BUNDLE/Contents/Resources/native/quic/"
 cp runtime/liblanlink_quic.dylib "$BUNDLE/Contents/Resources/runtime/"
-codesign --force --sign - "$BUNDLE/Contents/Resources/runtime/liblanlink_quic.dylib"
 cp build-info.json package.json package-lock.json "$BUNDLE/Contents/Resources/"
 cp "$LANLINK_NODE_DIST/bin/node" "$BUNDLE/Contents/Resources/runtime/node"
 cp "$LANLINK_NODE_DIST/LICENSE" "$BUNDLE/Contents/Resources/runtime/NODE-LICENSE"
@@ -45,7 +52,6 @@ if [ -n "${LANLINK_FFMPEG_DIST:-}" ]; then
     if [ -f "$library" ]; then mkdir -p "$BUNDLE/Contents/Resources/runtime/video/lib"; cp "$library" "$BUNDLE/Contents/Resources/runtime/video/lib/"; fi
   done
   if [ -d "$LANLINK_FFMPEG_DIST/notices" ]; then cp -R "$LANLINK_FFMPEG_DIST/notices" "$BUNDLE/Contents/Resources/runtime/video/"; fi
-  codesign --force --sign - "$BUNDLE/Contents/Resources/runtime/video/bin/ffmpeg"
 fi
 cat > "$BUNDLE/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -56,6 +62,7 @@ cat > "$BUNDLE/Contents/Info.plist" <<EOF
 <key>CFBundleLocalizations</key><array><string>zh-Hans</string><string>zh-Hant</string><string>en</string><string>ja</string><string>ko</string><string>de</string><string>fr</string><string>es</string><string>pt</string><string>it</string><string>ru</string></array>
 <key>LanLinkInstanceProtocol</key><integer>1</integer>
 <key>CFBundleName</key><string>LanLink</string>
+<key>NSBluetoothAlwaysUsageDescription</key><string>LanLink uses Bluetooth to share your keyboard and mouse with targets you bind.</string>
 <key>CFBundleExecutable</key><string>LanLink</string>
 <key>CFBundleIconFile</key><string>LanLink</string>
 <key>CFBundlePackageType</key><string>APPL</string>
@@ -71,11 +78,54 @@ cat > "$BUNDLE/Contents/Info.plist" <<EOF
 <key>NSAppleEventsUsageDescription</key><string>在用户启用关机权限后执行设备关机。</string>
 </dict></plist>
 EOF
-codesign --force --sign - "$BUNDLE/Contents/Resources/native/macos/LanLinkBridge"
-codesign --force --sign - "$BUNDLE"
+bridge="$BUNDLE/Contents/Resources/native/macos/LanLinkBridge"
+runtime="$BUNDLE/Contents/Resources/runtime/node"
+if [ "$SIGN_IDENTITY" = "-" ]; then
+  codesign --force --sign - --identifier com.lanlink.native.bridge "$bridge"
+  if [ -f "$BUNDLE/Contents/Resources/runtime/video/bin/ffmpeg" ]; then
+    codesign --force --sign - "$BUNDLE/Contents/Resources/runtime/video/bin/ffmpeg"
+  fi
+  codesign --force --sign - "$BUNDLE"
+else
+  work=$(mktemp -d)
+  trap 'rm -rf "$work"' EXIT
+  cat > "$work/node-entitlements.plist" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>com.apple.security.cs.allow-jit</key><true/>
+</dict></plist>
+EOF
+  # Sign the shipped executables and libraries before sealing the application.
+  find "$BUNDLE/Contents/Resources" -type f ! -path "$bridge" ! -path "$runtime" -exec sh -c '
+    set -e
+    identity=$1
+    shift
+    for item do
+      case $(file -b "$item") in
+        *Mach-O*) codesign --force --timestamp --options runtime --sign "$identity" "$item";;
+      esac
+    done
+  ' sign-resources "$SIGN_IDENTITY" {} +
+  codesign --force --timestamp --options runtime --sign "$SIGN_IDENTITY" --identifier com.lanlink.native.bridge "$bridge"
+  codesign --force --timestamp --options runtime --sign "$SIGN_IDENTITY" --entitlements "$work/node-entitlements.plist" "$runtime"
+  codesign --force --timestamp --options runtime --sign "$SIGN_IDENTITY" "$BUNDLE"
+  codesign --verify --deep --strict "$BUNDLE"
+  ditto -c -k --sequesterRsrc --keepParent "$BUNDLE" "$work/LanLink.zip"
+  xcrun notarytool submit "$work/LanLink.zip" --keychain-profile "$NOTARY_PROFILE" --wait
+  xcrun stapler staple "$BUNDLE"
+  xcrun stapler validate "$BUNDLE"
+fi
 cp README.md README.en.md CHANGELOG.md THIRD_PARTY_NOTICES.md "$DEST/"
 cp -R docs "$DEST/"
 ditto -c -k --sequesterRsrc --keepParent "$DEST" "$DEST.zip"
 ln -s /Applications "$DEST/Applications"
 hdiutil create -volname "LanLink $VERSION" -srcfolder "$DEST" -ov -format UDZO "$DEST.dmg"
-echo "Built $BUNDLE (ad-hoc signed, not notarized)"
+if [ "$SIGN_IDENTITY" != "-" ]; then
+  xcrun notarytool submit "$DEST.dmg" --keychain-profile "$NOTARY_PROFILE" --wait
+  xcrun stapler staple "$DEST.dmg"
+  xcrun stapler validate "$DEST.dmg"
+  echo "Built $BUNDLE (Developer ID signed and notarized)"
+else
+  echo "Built $BUNDLE (ad-hoc signed, not notarized)"
+fi

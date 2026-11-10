@@ -89,10 +89,12 @@ test('a refused target cannot strand the captured mouse or leave two owners',asy
 });
 
 test('an offline neighbor is skipped while other return paths remain usable',async t=>{
-  const {master,a,b}=await graph(t);await enter(master,a);
+  const {master,a,b,d}=await graph(t);await enter(master,a);
   master.getPeer(b.config.id).close();await until(()=>!master.peers.has(b.config.id));
-  master.position.x=1;master.edge.cooldown=0;await master.checkReturnEdge();
-  assert.equal(master.active,a.config.id);assert.equal(a.owner.id,master.config.id);
+  await cross(master,'right',d);
+  assert.equal(a.owner,null);assert.equal(d.owner.id,master.config.id);
+  await cross(master,'left',a);
+  assert.equal(d.owner,null);assert.equal(a.owner.id,master.config.id);
   await cross(master,'left',master);assert.equal(a.owner,null);
 });
 

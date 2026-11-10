@@ -83,7 +83,7 @@ final class GroupLayoutProbe {
       });
       Thread.sleep(500);
       test.runOnMainSync(()->{
-        GroupLayoutPanel panel=new GroupLayoutPanel(activity,new Ui(activity),service);
+        GroupLayoutPanel panel=new GroupLayoutPanel((MainActivity)activity,new Ui(activity),service);
         android.view.View preview=find(panel,"layoutPreview");check(preview!=null,"whole-group preview exists");previewOnly(preview);
         String masterBefore=state.master().toString(),layoutBefore=state.layout().toString();
         for(String id:new String[]{own,mac,windows}){android.view.View tile=find(preview,"layoutDevice-"+id);check(tile!=null,"group member remains visible");check(!tile.performClick()&&!tile.performLongClick(),"tapping or holding a preview tile must do nothing");}

@@ -19,6 +19,7 @@ import { parseToken, saveConfig, commitConfig, accountId } from './identity.js';
 import { startDiscovery } from './discovery.js';
 import { EdgeSwitch } from './edge.js';
 import { InputQueue } from './input-queue.js';
+import { InputTransport, selectTransport } from './input-transport.js';
 import { Pairing } from './pairing.js';
 import { Group } from './group.js';
 import { Consent, permissionNames } from './consent.js';
@@ -55,15 +56,17 @@ export class Service extends EventEmitter {
     this.outgoingIntents = new Set(); this.screenViewers = new Map(); this.screenTargets = new Map(); this.returning = 0; this.messageTasks = new Set();
     this.videoHost = new VideoHost(this); this.videoViewer = new VideoViewer(this);this.bulk=new BulkHost(this);
     this.androidRecovery = new AndroidRecovery(this);
+    this.inputTransport = new InputTransport(this);
     if (this.config.master === undefined && Object.values(this.config.edges || {}).some(Boolean)) this.config.master = true;
     this.native.on('event', e => this.nativeEvent(e).catch(err => this.log(err.message)));
     this.native.on('diagnostic', m => this.log(m));
   }
   log(message) { this.logs.unshift({ time: Date.now(), message: String(message).slice(0, 300) }); this.logs.length = Math.min(this.logs.length, runtimeLogLimit); this.emit('change'); }
   trackTask(task) { this.messageTasks.add(task); const done = () => this.messageTasks.delete(task); task.then(done, done); return task; }
-  identity() { return { id: this.config.id, name: this.config.name, platform: process.platform, masterSelection:masterSelection(this),layout:layoutSelection(this),capabilities: { ...this.native.capabilities,qualityProbe:1,qualityBuild,staging:1,quic:this.quic.enabled?1:0,motionV2:this.quic.native?.binaryMotion?2:0,bulk:1,rtcVideo:1, controlPrepare: true, dualLink: true, memberKey: this.group.own.key } }; }
+  identity() { return { id: this.config.id, name: this.config.name, platform: process.platform, masterSelection:masterSelection(this),layout:layoutSelection(this),capabilities: { ...this.native.capabilities,qualityProbe:1,qualityBuild,staging:1,quic:this.quic.enabled?1:0,motionV2:this.quic.native?.binaryMotion?2:0,bulk:1,rtcVideo:1, controlPrepare: true, bluetoothControl: 1, hidSettings: 1, autoHidMaster: ['darwin','win32'].includes(process.platform) ? 1 : 0, dualLink: true, memberKey: this.group.own.key } }; }
   async start() {
     this.updater=new Updater(this);
+    await this.updater.loadResult();
     if (this.config.pendingGroupMerge) {
       const pendingMerge = this.config.pendingGroupMerge;
       this.group.adopt(pendingMerge.group, pendingMerge.token);
@@ -77,7 +80,7 @@ export class Service extends EventEmitter {
       this.config.knownDevices = {}; this.config.deviceGrants = {}; this.config.edges = {};delete this.config.layout;delete this.config.masterSelection;this.config.master=false;this.consent.reset(this.config.deviceGrants);
     }
     delete this.config.pendingGroupJoin;
-    await initializeMaster(this);await initializeLayout(this);await saveConfig(this.dir, this.config);await this.staging.load(); this.group.start(); await this.native.start(); this.secret = parseToken(this.config.token);
+    await initializeMaster(this);await initializeLayout(this);await saveConfig(this.dir, this.config);await this.staging.load(); this.group.start(); await this.native.start(); if (Object.keys(this.inputTransport.records).some(id => this.inputTransport.record(id).host)) this.inputTransport.advertise().catch(() => {}); this.secret = parseToken(this.config.token);
     this.server = net.createServer(s => this.attach(s));
     await new Promise((resolve, reject) => { this.server.once('error', reject); this.server.listen(this.options.port ?? 45831, this.options.host || '0.0.0.0', resolve); });
       this.server.on('error', e => this.log('网络监听失败：' + e.message)); this.port = this.server.address().port;
@@ -183,14 +186,14 @@ export class Service extends EventEmitter {
   }
   needsFallback(peer, capabilities = peer.info?.capabilities) { return peer.info?.platform === 'android' && capabilities?.inputMode === 'accessibility-limited'; }
   canShareClipboard(id) { return !Object.hasOwn(this.config.deviceGrants,id) || this.consent.allowed(id, 'clipboard'); }
-  authorize(peer, permission) {
+  authorize(peer, permission, bluetooth = false) {
     if (this.config.dissolvedGroups?.[this.group.data.id]) throw Error('当前组已解散');
     if (this.group.excluded(peer.remote.id) || !this.currentPeer(peer)) throw new Error('设备连接已结束');
     if (permission === 'input' || permission === 'screen') this.assertCanReceiveControl();
     // A local user who is actively controlling a target may transfer their clipboard to it.
     // This is session-scoped and never overrides an explicit saved per-device denial.
     if (permission !== 'clipboard' || !this.canShareClipboard(peer.remote.id)) this.consent.require(peer.remote.id, peer.info?.name, permission);
-    if (!this.config.permissions[permission] || this.native.capabilities[permission] === false) {
+    if (!this.config.permissions[permission] || !bluetooth && this.native.capabilities[permission] === false) {
       this.permissionNotice = { requestId: randomUUID(), id: peer.remote.id, name: peer.info?.name || '已配对设备', permission, expires: Date.now() + 120000 };
       throw new Error('PERMISSION_REQUIRED: 被控设备尚未允许此功能或缺少系统权限，请在被控设备开启');
     }
@@ -222,7 +225,16 @@ export class Service extends EventEmitter {
     if(!grant.clipboard){if(this.clipboard?.source===id)this.clipboard=null;await effect(()=>this.staging.cancelPeer(id));}
     if(!grant.shutdown)this.cancelShutdown();this.emit('change');return warnings.length?{message:'授权已保存，部分运行状态未能恢复，请重启服务',warning:warnings.join('；')}:{};
   }
-  requireOwner(peer) { this.authorize(peer, 'input'); if (this.owner?.id !== peer.remote.id || this.owner.until < Date.now()) throw new Error('请先取得控制权'); this.owner.until = Date.now() + 4000; }
+  requireOwner(peer, heartbeat = false, session) {
+    const owner = this.owner, bluetooth = owner?.id === peer.remote.id && owner?.transport === 'bluetooth';
+    this.authorize(peer, 'input', bluetooth);
+    if (owner?.id !== peer.remote.id || owner.until < Date.now()) throw Error('请先取得控制权');
+    if (bluetooth && (!heartbeat || session !== owner.edgeSession)) throw Error('此会话使用蓝牙键鼠');
+    if (!bluetooth && session && session !== owner.edgeSession) throw Error('控制会话已结束');
+    if (bluetooth && this.inputTransport.preference(peer.remote.id) === 'network_only') throw Error('BLUETOOTH_NOT_READY: 已停用蓝牙键鼠');
+    if (bluetooth && owner.pointer && masterSelection(this) && masterSelection(this).id !== peer.remote.id) throw Error('主控设备已变更');
+    owner.until = Date.now() + 4000;
+  }
   async message(peer, m) {
     if(this.closing) return;
     if(!this.currentPeer(peer))return;
@@ -243,7 +255,7 @@ export class Service extends EventEmitter {
     if(m.type==='identity')queueMicrotask(()=>this.quic.connect(peer).catch(()=>{}));
     if (m.type === 'identity') {
       peer.info={name:String(m.name).slice(0,80),platform:String(m.platform).slice(0,30),capabilities:m.capabilities||{}};this.androidRecovery.identity(peer);
-      if(this.active===peer.remote.id&&this.needsFallback(peer)&&!this.fallbackAccepted){const edge=this.enteredEdge,capture=this.capture;await this.returnLocal();if(!this.currentPeer(peer))return;this.showFallback(peer.remote.id,edge,capture);}
+      if(this.active===peer.remote.id&&this.activeSession?.transport!=='bluetooth'&&this.needsFallback(peer)&&!this.fallbackAccepted){const edge=this.enteredEdge,capture=this.capture;await this.returnLocal();if(!this.currentPeer(peer))return;this.showFallback(peer.remote.id,edge,capture);}
       this.config.knownDevices||={};const old=this.config.knownDevices[peer.remote.id],info={name:peer.info.name,platform:peer.info.platform};this.config.knownDevices[peer.remote.id]=info;
       if(JSON.stringify(old)!==JSON.stringify(info))await saveConfig(this.dir,this.config);
       if(!this.currentPeer(peer))return;
@@ -267,6 +279,14 @@ export class Service extends EventEmitter {
   async handle(peer, method, a) {
     if (this.group.excluded(peer.remote.id)) throw Error('设备已移出组');
     if (!this.currentPeer(peer)) throw Error('设备连接已结束');
+    if (method === 'hid-link-status') {
+      await this.inputTransport.refresh();
+      return { connected:this.currentPeer(peer) && this.inputTransport.connected(peer.remote.id) };
+    }
+    if (method === 'hid-pair-start' || method === 'hid-pair-confirm')
+      return this.configure(() => this.inputTransport.pairIncoming(peer, method === 'hid-pair-confirm'));
+    if (method === 'bluetooth-offer') return this.inputTransport.offer(peer);
+    if (method === 'bluetooth-claim') return this.inputTransport.claim(peer,a);
     if (method === 'runtime-logs') return { logs: this.logs.slice() };
     if (method === 'permission-guide-open') return showPermissionGuide(this, a.permission, peer.remote.id, peer.info?.name);
     if (method === 'permission-toggle') return receivePermissionToggle(this, peer, a.permission, a.enabled);
@@ -300,21 +320,26 @@ export class Service extends EventEmitter {
       if (a.pointer === true && masterSelection(this) && masterSelection(this).id !== peer.remote.id) throw Error('CONTROL_CONFLICT: 只有本组选择的主控鼠标可以跨屏控制');
       const generation=this.inboundGeneration, session=typeof a.edgeSession==='string'&&a.edgeSession.length===36?a.edgeSession:null;
       this.checkInbound(generation,peer,session);
+      const bluetooth = a.inputTransport === 'bluetooth';
+      const hidTouchpad = a.touchpad === true && peer.info?.platform === 'android' && a.pointer !== true;
+      if (bluetooth && (!session || !(a.pointer === true || hidTouchpad) || a.screen === true)) throw Error('蓝牙键鼠控制请求无效');
+      if (bluetooth && this.inputTransport.preference(peer.remote.id) === 'network_only') throw Error('BLUETOOTH_NOT_READY: 已停用蓝牙键鼠');
       if(session)this.preparedInbound.set(peer,session);
       this.consent.require(peer.remote.id, peer.info?.name, 'input');
       if (a.screen === true) this.consent.require(peer.remote.id, peer.info?.name, 'screen');
       await this.refreshCapabilities();
       this.checkInbound(generation,peer,session);
-      this.authorize(peer, 'input');
+      this.authorize(peer, 'input', bluetooth);
+      if (bluetooth && this.inputTransport.preference(peer.remote.id) === 'network_only') throw Error('BLUETOOTH_NOT_READY: 已停用蓝牙键鼠');
       if (a.screen === true) this.authorize(peer, 'screen');
       if (a.pointer === true && masterSelection(this) && masterSelection(this).id !== peer.remote.id) throw Error('CONTROL_CONFLICT: 只有本组选择的主控鼠标可以跨屏控制');
       if (this.owner && this.owner.id !== peer.remote.id && this.owner.until > Date.now()) throw new Error('CONTROL_CONFLICT: 设备正在被其他来源控制');
       if (method === 'prepare') return { ready: true };
       this.preparedInbound.delete(peer);
-      this.clearInboundEdge();this.owner = { id: peer.remote.id, until: Date.now() + 4000, pointer:a.pointer===true, edgeSession:session, glowSeq:0 }; return this.native.capabilities;
+      this.clearInboundEdge();this.owner = { id: peer.remote.id, until: Date.now() + 4000, pointer:a.pointer===true, transport:bluetooth?'bluetooth':'network', edgeSession:session, glowSeq:0 }; return this.native.capabilities;
     }
     if (method === 'release') { if(a.edgeSession && (this.owner?.id!==peer.remote.id||this.owner.edgeSession!==a.edgeSession))return {}; this.screenViewers.delete(peer.remote.id); if (this.owner?.id === peer.remote.id) { if(!a.edgeExit || !this.inboundEdge(peer,a.edgeExit,true))this.clearInboundEdge();this.owner = null; await this.native.call('release'); } return {}; }
-    if (method === 'keepControl') { this.requireOwner(peer); await this.native.call('heartbeat'); return {}; }
+    if (method === 'keepControl') { this.requireOwner(peer, true, a.edgeSession); if (this.owner.transport !== 'bluetooth') await this.native.call('heartbeat'); return {}; }
     if (method === 'input') {
       this.requireOwner(peer); const input = validateInput(a);
       // Network motion (including loss recovery and click snapshots) is not a
@@ -323,7 +348,15 @@ export class Service extends EventEmitter {
       if (input.kind === 'move' || input.kind === 'relative') { this.edge.suppress(); this.cancelEdgeFeedback(); }
       return this.native.call('input', input);
     }
-    if (method === 'text') { this.requireOwner(peer); if (typeof a.text !== 'string' || a.text.length > 100000) throw new Error('文本过长'); return this.native.call('text', a); }
+    if (method === 'text') {
+      if (a.touchpad === true && peer.info?.platform === 'android' && this.owner?.id === peer.remote.id &&
+          this.owner.transport === 'bluetooth' && !this.owner.pointer && this.owner.until > Date.now()) {
+        this.authorize(peer, 'input');
+        if (this.inputTransport.preference(peer.remote.id) === 'network_only') throw Error('BLUETOOTH_NOT_READY: 已停用蓝牙键鼠');
+      } else this.requireOwner(peer);
+      if (typeof a.text !== 'string' || a.text.length > 100000) throw new Error('文本过长');
+      return this.native.call('text', a);
+    }
     if (method === 'screen') { const generation=this.inboundGeneration; this.authorize(peer, 'screen'); if (this.capturing) throw new Error('屏幕正在捕获'); this.capturing = true; this.screenViewers.set(peer.remote.id, Date.now() + 4000); try { const frame = await this.native.call('screen'); this.checkInbound(generation,peer); this.authorize(peer, 'screen'); return frame; } catch (e) { this.screenViewers.delete(peer.remote.id); throw e; } finally { this.capturing = false; } }
     if(method==='clipboard-sync'){if(!this.clipboardSync.allowed(peer.remote.id))throw Error('剪贴板共享未授权');await this.clipboardSync.inventory(peer,a.ids);return {latest:this.clipboardSync.latest};}
     if (method === 'clipboardGet') { this.authorize(peer, 'clipboard'); return this.snapshotClipboard(false); }
@@ -458,6 +491,14 @@ export class Service extends EventEmitter {
       if (next) {try {await this.switchTo(next.target, next.edge,true,false,false,false,true,{position:{x:e.x/Math.max(1,e.width-1),y:e.y/Math.max(1,e.height-1)}});} finally {this.cancelEdgeFeedback();}} return;
     }
     if (e.type !== 'input' || !this.active) return;
+    const session = this.activeSession;
+    if (session?.transport === 'bluetooth') {
+      const event = e.kind === 'move' ? { kind:'move', dx:e.dx, dy:e.dy } : validateInput(e);
+      if (e.kind === 'move' && ![e.dx,e.dy].every(Number.isFinite)) return;
+      try { await session.inputQueue.request('input', event); }
+      catch { if (this.activeSession === session) await this.bluetoothLost(session); }
+      return;
+    }
     const p = this.getPeer(this.active);
     if (e.kind === 'move') {
       const width = p.info?.capabilities?.width || 1920, height = p.info?.capabilities?.height || 1080;
@@ -486,6 +527,7 @@ export class Service extends EventEmitter {
     if(!owner || owner.id!==peer.remote.id || owner.until<Date.now() || !owner.pointer || !this.config.permissions.input || !this.consent.allowed(owner.id,'input') || !owner.edgeSession || m.session!==owner.edgeSession || !Number.isSafeInteger(m.seq) || m.seq<=owner.glowSeq)return false;
     if(!['left','right','top','bottom'].includes(m.edge) || !(exiting?m.phase==='depart':['countdown','cancel'].includes(m.phase)) || m.phase==='countdown'&&(!Number.isFinite(m.progress)||m.progress<0||m.progress>1))return false;
     owner.glowSeq=m.seq;
+    if(owner.transport === 'bluetooth') return false;
     if(this.config.edgeGlow!==false){this.inboundGlow=m.phase!=='cancel';this.emit('edge-feedback',{phase:m.phase,edge:m.edge,progress:m.progress,hideAway:true});}
     return true;
   }
@@ -508,6 +550,7 @@ export class Service extends EventEmitter {
   checkReturnEdge() {
     if (!this.active || !this.capture || this.switching || this.returning) return;
     if(masterSelection(this) && !this.isEdgeMaster())return this.returnLocal().catch(e=>this.log(e.message));
+    if (this.activeSession?.transport === 'bluetooth') return;
     const p = this.peers.get(this.active); if (!p) return;
     const width = p.info?.capabilities?.width || 1920, height = p.info?.capabilities?.height || 1080;
     const opposite = { left: 'right', right: 'left', top: 'bottom', bottom: 'top' }[this.enteredEdge];
@@ -527,25 +570,62 @@ export class Service extends EventEmitter {
     const clamp=value=>Math.max(.015,Math.min(.985,Number.isFinite(value)?value:.5));
     return {x:edge==='right'?.015:edge==='left'?.985:clamp(position.x),y:edge==='bottom'?.015:edge==='top'?.985:clamp(position.y)};
   }
-  async switchTo(id, edge = 'right', capture = true, newSession = false, fallbackAccepted = false, screen = false, edgeTrigger = false, transition = null) {
+  async switchTo(id, edge = 'right', capture = true, newSession = false, fallbackAccepted = false, screen = false, edgeTrigger = false, transition = null, forceNetwork = false) {
     if (this.switching || this.returning) throw Error('CONTROL_CONFLICT: 正在切换控制，请稍后重试'); this.assertCanSendControl();
     if(capture && masterSelection(this) && !this.isEdgeMaster())throw Error('CONTROL_CONFLICT: 只有本组选择的主控鼠标可以跨屏控制');
-    if (capture && !this.native.capabilities.host) throw new Error('本机尚未具备全局键鼠权限');
-    const p = this.getPeer(id);
-    if (this.needsFallback(p) && !fallbackAccepted) { this.showFallback(id, edge, capture); throw Error('FALLBACK_CONFIRMATION: 该手机仅可使用无障碍备用模式，请先确认操作限制'); }
+    if (capture && !this.native.capabilities.host) {
+      await this.refreshCapabilities();
+      if (this.switching || this.returning) throw Error('CONTROL_CONFLICT: 正在切换控制，请稍后重试');
+      this.assertCanSendControl();
+      if (masterSelection(this) && !this.isEdgeMaster()) throw Error('CONTROL_CONFLICT: 只有本组选择的主控鼠标可以跨屏控制');
+      if (!this.native.capabilities.host) {
+        const caps = this.native.capabilities;
+        const reason = caps.input === false ? '请在本机系统设置中开启辅助功能' :
+          caps.inputMonitoring === false ? '请在本机系统设置中开启输入监控' : '本机键鼠监听尚未就绪';
+        throw Error('HOST_INPUT_PERMISSION: ' + reason);
+      }
+    }
+    const external = this.inputTransport?.record(id).external === true;
+    const p = external ? null : this.getPeer(id);
+    const preference = this.inputTransport?.preference(id);
+    const host = this.inputTransport?.host(id);
+    const bluetooth = !forceNetwork && capture && !screen && this.inputTransport?.ready(id) && (external || p.info?.capabilities?.bluetoothControl === 1);
+    const transport = selectTransport(preference, bluetooth, !external);
+    if (transport === 'none') {
+      const readiness = this.inputTransport?.describe(id)?.readiness?.bluetooth;
+      const host = this.inputTransport?.host(id);
+      const detail = readiness === 'pairing_required' ? '尚未与电脑完成蓝牙配对'
+        : readiness === 'unavailable' ? '电脑的蓝牙外设未就绪'
+        : readiness === 'degraded' ? '电脑未收到完整的键鼠报告订阅'
+        : host ? '系统已连接，等待键鼠报告订阅'
+        : '手机系统尚未连接蓝牙 HID，请在系统蓝牙设置中重新连接电脑后重试';
+      throw Error('蓝牙键鼠尚未就绪：' + detail);
+    }
+    if (transport === 'network' && this.needsFallback(p) && !fallbackAccepted) { this.showFallback(id, edge, capture); throw Error('FALLBACK_CONFIRMATION: 该手机仅可使用无障碍备用模式，请先确认操作限制'); }
     const handoff=transition?.fromSession;
     if(handoff && (!capture || this.activeSession!==handoff || this.active!==transition.fromId))throw Error('CONTROL_ENDED: 跨屏会话已改变');
     // Older peers expect a fresh-session flag after a receiver stops control.
     newSession ||= edgeTrigger;
-    if(!capture || this.edgeFeedback?.edge!==edge)this.cancelEdgeFeedback();const intent = { id, edge, edgeTrigger, fromSession:handoff, edgeSession:randomUUID(), cancelled: false }; this.controlIntent = intent; this.switching = true;
-    const check = () => { if (intent.cancelled || this.controlIntent !== intent || capture&&masterSelection(this)&&!this.isEdgeMaster()) throw Error('CONTROL_ENDED: 控制请求已取消'); this.assertCanSendControl(); if (this.getPeer(id) !== p) throw Error('设备连接已结束'); };
+    if(!capture || this.edgeFeedback?.edge!==edge)this.cancelEdgeFeedback();const intent = { id, edge, edgeTrigger, transport, host, external, fromSession:handoff, edgeSession:randomUUID(), cancelled: false }; this.controlIntent = intent; this.switching = true;
+    let retryNetwork = false;
+    const hidFailure = () => Object.assign(Error('蓝牙键鼠连接已结束'), {code:'HID_LINK_LOST'});
+    const check = () => { if (intent.cancelled || this.controlIntent !== intent || capture&&masterSelection(this)&&!this.isEdgeMaster()) throw Error('CONTROL_ENDED: 控制请求已取消'); this.assertCanSendControl(); if (p && this.getPeer(id) !== p) throw Error('设备连接已结束'); if (transport === 'bluetooth' && (this.inputTransport.preference(id) === 'network_only' || !this.inputTransport.ready(id) || this.inputTransport.host(id)?.id !== host?.id)) throw hidFailure();  };
     try {
       if (this.active && !handoff) await this.returnLocal(intent); check();
-      await this.adbGuide.check(p, { id, edge, capture, newSession, fallbackAccepted, screen }); check();
-      await this.access.check(p, { id, edge, capture, newSession, fallbackAccepted, screen }); check();
-      if (p.info?.capabilities?.controlPrepare) { await p.request('prepare', { newSession, screen, pointer: capture, edgeSession:intent.edgeSession }); check(); }
-      const capabilities = await p.request('acquire', { newSession, fallbackAccepted, screen, pointer: capture, edge, edgeSession:intent.edgeSession }); intent.acquired = true; check();
-      if ((this.needsFallback(p) || this.needsFallback(p, capabilities)) && !fallbackAccepted) { this.showFallback(id, edge, capture); throw Error('FALLBACK_CONFIRMATION: 该手机仅可使用无障碍备用模式，请先确认操作限制'); }
+      if (p) {
+        if (transport === 'network') await this.adbGuide.check(p, { id, edge, capture, newSession, fallbackAccepted, screen });
+        check();
+        await this.access.check(p, { id, edge, capture, newSession, fallbackAccepted, screen, transport }); check();
+        const args = { newSession, fallbackAccepted, screen, pointer:capture, edge, edgeSession:intent.edgeSession, ...(transport === 'bluetooth' ? { inputTransport:transport } : {}) };
+        if (p.info?.capabilities?.controlPrepare) { await p.request('prepare', args); check(); }
+        const leaseStart = Date.now();
+        const capabilities = await p.request('acquire', args); intent.acquired = true; check();
+        if (transport === 'bluetooth') intent.leaseUntil = leaseStart + 3500;
+        if (transport === 'network' && (this.needsFallback(p) || this.needsFallback(p, capabilities)) && !fallbackAccepted) {
+          this.showFallback(id, edge, capture);
+          throw Error('FALLBACK_CONFIRMATION: 该手机仅可使用无障碍备用模式，请先确认操作限制');
+        }
+      }
       if(handoff){
         if(this.activeSession!==handoff)throw Error('CONTROL_ENDED: 跨屏会话已改变');
         intent.transferring=true;
@@ -558,15 +638,23 @@ export class Service extends EventEmitter {
           return this.nativeEvent(event);
         });
         const exit=this.remoteEdge('depart',edge,1);
+        if (handoff.transport === 'bluetooth') await this.inputTransport.release(handoff);
         await this.getPeer(transition.fromId).request('release',{edgeSession:handoff.edgeSession,...(exit?{edgeExit:exit}:{})});check();
         this.staging.end(handoff.edgeSession);this.screenTargets.delete(transition.fromId);
         intent.carriedKeys=[...this.keys].filter(code=>/^(Control|Shift|Alt|Meta)(Left|Right)$/.test(code));this.keys.clear();
       }
       this.active = id; this.activeSession = intent; this.capture = capture; this.enteredEdge = edge; this.fallbackAccepted = fallbackAccepted; this.fallbackNotice = null;
       this.position = this.entryPosition(edge,transition?.position);
-      if (capture) await p.request('input', { kind: 'move', ...this.position }); check(); if (capture) await this.native.call('mode', { remote: true }); check();
-      for(const code of intent.carriedKeys||[]){await p.request('input',{kind:'key',code,down:true});this.keys.add(code);check();}
-      intent.committed=true;this.edge.reset(); this.log('控制已切换到 ' + (p.info?.name || id));
+      if (transport === 'bluetooth') {
+        try { await this.inputTransport.release(intent, true); }
+        catch { throw hidFailure(); }
+        check();
+        intent.inputQueue = this.inputTransport.queue(intent);
+      }
+      if (capture && transport === 'network') await p.request('input', { kind: 'move', ...this.position });
+      check(); if (capture) await this.native.call('mode', { remote: true, ...(transport === 'bluetooth' ? { inputTransport:transport } : {}) }); check();
+      if (transport === 'network') for(const code of intent.carriedKeys||[]){await p.request('input',{kind:'key',code,down:true});this.keys.add(code);check();}
+      intent.committed=true;this.edge.reset(); this.log('控制已切换到 ' + (p?.info?.name || this.inputTransport?.record(id).name || id));
       if (capture && !handoff) {this.edgeFeedback=null;this.edgeTransition = { id: randomUUID(), edge, at: Date.now() };if(this.config.edgeGlow!==false)this.emit('edge-feedback',{phase:'depart',edge,hideAway:!!this.config.edgeGlowHideAway});}
     } catch (e) {
       this.cancelEdgeFeedback();
@@ -577,14 +665,22 @@ export class Service extends EventEmitter {
       // Readiness can change between the initial preflight and prepare/acquire.
       // Re-enter setup only for an Android permission failure, after releasing
       // local capture; never convert denial of this peer's control grant to ADB.
-      if(!intent.cancelled && p.info?.platform==='android' && !this.adbGuide.notice && /^(PERMISSION_REQUIRED|INPUT_RECOVERING|CONSENT_DENIED):/.test(e.message)){
+      if(!intent.cancelled && p?.info?.platform==='android' && !this.adbGuide.notice && /^(PERMISSION_REQUIRED|INPUT_RECOVERING|CONSENT_DENIED):/.test(e.message)){
         try {await this.adbGuide.check(p,{id,edge,capture,newSession,fallbackAccepted,screen});}
         catch(setupError){if(setupError.message.startsWith('ADB_SETUP_REQUIRED:'))throw setupError;}
       }
-      throw e;
+      // The retry goes through the ordinary network authorization and readiness
+      // checks. Bluetooth can fail before any permission report has been cached.
+      retryNetwork = transport === 'bluetooth' &&
+        (e.code === 'HID_LINK_LOST' || /^BLUETOOTH_NOT_READY:/.test(e.message)) &&
+        !intent.cancelled && !external && this.inputTransport.preference(id) === 'auto_bt_first';
+      if (!retryNetwork) throw e;
     } finally { if (this.controlIntent === intent) { this.controlIntent = null; this.switching = false; } intent.transferring=false;intent.resumeInput?.();this.emit('change'); }
+    if (retryNetwork && !intent.cancelled && !this.active && this.inputTransport.preference(id) === 'auto_bt_first')
+      return this.switchTo(id, edge, capture, true, fallbackAccepted, screen, edgeTrigger, null, true);
   }
   async returnLocal(preserveIntent = null, edgeExit = false, transition = null) {
+    this.returnGeneration = (this.returnGeneration || 0) + 1;
     this.staging?.end(this.activeSession?.edgeSession);
     const outgoingEdge=transition?.edge||{left:'right',right:'left',top:'bottom',bottom:'top'}[this.enteredEdge];
     const exitFeedback=edgeExit?this.remoteEdge('depart',outgoingEdge):null;
@@ -593,11 +689,12 @@ export class Service extends EventEmitter {
     if(this.active && this.capture && (!this.activeSession?.edgeTrigger || this.activeSession.committed) && this.config.edgeGlow!==false)this.emit('edge-feedback',{phase:'return',edge:this.enteredEdge,hideAway:!!this.config.edgeGlowHideAway});
     // Detach the active session before dismissing permission guides: their
     // cancel callbacks can otherwise recursively start a second return.
-    const previous = this.active, session=this.activeSession?.edgeSession; this.active = null; this.activeSession = null; this.capture = false; this.fallbackAccepted = false; this.keys.clear(); this.pendingMove = null; this.edge.reset(); this.screenTargets.delete(previous); this.returning++;
+    const previous = this.active, inputSession=this.activeSession, session=inputSession?.edgeSession; this.active = null; this.activeSession = null; this.capture = false; this.fallbackAccepted = false; this.keys.clear(); this.pendingMove = null; this.edge.reset(); this.screenTargets.delete(previous); this.returning++;
     if (!preserveIntent) this.adbGuide.cancel();
     if (!preserveIntent) this.access.cancel();
     if (this.controlIntent && this.controlIntent !== preserveIntent) this.controlIntent.cancelled = true;
     try {
+      if (inputSession?.transport === 'bluetooth') await this.inputTransport.release(inputSession);
       await this.native.call('mode', { remote: false }).catch(() => {});
       if(transition)await this.native.call('warp',this.entryPosition(transition.edge,transition.position)).catch(()=>{});
       const p = this.peers.get(previous); if (p) await p.request('release',{edgeSession:session,...(exitFeedback?{edgeExit:exitFeedback}:{})}).catch(() => {});
@@ -605,7 +702,27 @@ export class Service extends EventEmitter {
       if (previous && this.config.permissions.clipboard && this.clipboardSync.download && this.clipboard && this.clipboard.source !== this.config.id) await this.materialize(this.clipboard).catch(e => this.log('返回本机后同步剪贴板失败：' + e.message));
     } finally { this.returning--; this.emit('change'); }
   }
+  async bluetoothLost(session) {
+    if (this.activeSession !== session || session.recovering) return;
+    session.recovering = true;
+    const { id, edge, external } = session;
+    const peer = this.peers.get(id), group = this.group.data.id;
+    const releasing = this.returnLocal(), generation = this.returnGeneration;
+    await releasing;
+    if (generation !== this.returnGeneration || external || this.active || this.switching || this.closing || this.group.data.id !== group || !peer ||
+        this.inputTransport.preference(id) !== 'auto_bt_first') return;
+    try {
+      const report = await this.access.read(peer);
+      const input = report.permissions?.input;
+      if (input?.appEnabled === true && input.systemGranted === true && input.peerAllowed === true &&
+          this.peers.get(id) === peer && generation === this.returnGeneration && this.group.data.id === group && !this.active && !this.switching &&
+          this.inputTransport.preference(id) === 'auto_bt_first') {
+        await this.switchTo(id, edge, true, true, false, false, false, null, true);
+      }
+    } catch (error) { this.log(error.message); }
+  }
   async pasteTo(id) {
+    if (this.active === id && this.activeSession?.transport === 'bluetooth') throw Error('蓝牙键鼠会话可使用目标设备本地的粘贴快捷键');
     if (!this.clipboard) await this.snapshotClipboard();
     return this.getPeer(id).request('paste', { offer: this.clipboard }, 120000);
   }
@@ -614,19 +731,38 @@ export class Service extends EventEmitter {
     this.access.poll().catch(()=>{});
     this.clipboardSync.prune();if(this.config.permissions.clipboard)for(const p of this.peers.values())this.clipboardSync.sendInventory(p);
     this.consent.list(); if (this.permissionNotice?.expires <= Date.now()) this.permissionNotice = null;
-    if (this.permissionNotice) { try { this.native.capabilities = await this.native.call('capabilities'); } catch {} }
+    if (this.permissionNotice || this.native.capabilities.host === false && Date.now() - (this.hostProbeAt || 0) >= 4000) {
+      this.hostProbeAt = Date.now();
+      this.refreshCapabilities().catch(() => {});
+    }
     for (const p of this.peers.values()) { if(!this.currentPeer(p))continue;if (Date.now() - p.lastSeen > 10000) p.close(); else p.send({ type: 'ping',masterSelection:masterSelection(this),...layoutExchange(this,p) }); }
+    if (this.inputTransport.started && this.activeSession?.transport !== 'bluetooth') this.inputTransport.refresh().catch(() => {});
     if (this.active) {
       const session = this.activeSession, id = this.active, edge = this.enteredEdge, capture = this.capture;
-      try { await this.getPeer(id).request('keepControl', {}, 2500); if (this.activeSession === session && this.capture) await this.native.call('heartbeat'); }
-      catch (e) { if (e.code !== 'QUIC_BUSY' && this.activeSession === session) { await this.returnLocal(); if (!this.active && !this.switching && /^FALLBACK_CONFIRMATION:/.test(e.message)) this.showFallback(id, edge, capture); } }
+      try {
+        if (session?.transport === 'bluetooth') {
+          if (!session.committed) return;
+          await this.inputTransport.refresh();
+          if (this.activeSession !== session) return;
+          if (this.inputTransport.preference(id) === 'network_only' || !this.inputTransport.ready(id)) { await this.bluetoothLost(session); return; }
+          if (!session.external) {
+            const leaseStart = Date.now();
+            await this.getPeer(id).request('keepControl', {edgeSession:session.edgeSession}, 2000);
+            session.leaseUntil = leaseStart + 3500;
+          }
+        } else await this.getPeer(id).request('keepControl', {}, 2500);
+        if (this.activeSession === session && this.capture) await this.native.call('heartbeat');
+      }
+      catch (e) { if (e.code !== 'QUIC_BUSY' && this.activeSession === session) {
+        if (session?.transport === 'bluetooth' && /^BLUETOOTH_NOT_READY:/.test(e.message)) { await this.bluetoothLost(session); return; }
+        await this.returnLocal(); if (!this.active && !this.switching && /^FALLBACK_CONFIRMATION:/.test(e.message)) this.showFallback(id, edge, capture); } }
     }
     if (this.owner && this.owner.until < Date.now()) { this.clearInboundEdge();this.owner = null; await this.native.call('release'); }
     for (const [id, offer] of this.offers) if (offer.until < Date.now()) this.offers.delete(id);
   }
   configure(run){const work=(this.configurationWork||Promise.resolve()).catch(()=>{}).then(run);this.configurationWork=work;return work;}
   settings(a) {return this.configure(()=>applySettings(this,a));}
-  state() { return { update:this.updater?.state(),updateChannel:this.updater?.channel()??'stable',autoCheckUpdates:this.config.autoCheckUpdates!==false, buildInfo, language:languagePreference(this.config.language), theme:['system','dark','light'].includes(this.config.theme)?this.config.theme:'system', clipboardSettings:this.clipboardSync.state(), masterId:masterSelection(this)?.id||(this.config.master?this.config.id:""), masterDevices:masterChoices(this), edgeGlowHideAway:!!this.config.edgeGlowHideAway, switchMode:this.config.switchMode||"dwell", edgeHotkey:this.config.edgeHotkey||"ctrl-alt", edgeGlowEnabled: this.config.edgeGlow !== false, edgeTransition: this.edgeTransition, id: this.config.id, name: this.config.name, groupId: this.group.data.id, groupEstablished: this.group.established, groupMemberCount: Object.keys(this.group.data.members).length, account: this.group.data.id, controlEnded: this.controlEnded, androidDisconnectNotice: this.androidRecovery.notice, fallbackNotice: this.fallbackNotice, stageIncoming:this.staging.incoming(), adbGuide: this.adbGuide.notice, adbAuthorization: this.adb.authorizationNotice(), accessNotice: this.access.notice, viewers: [...new Set([...this.videoHost.sessions.values()].map(s => s.peer.remote.id).concat(this.liveScreens(this.screenViewers)))], port: this.port, dwell: this.config.dwell ?? 100, edges: layoutEdges(this), reachableEdges:reachableLayoutEdges(this), layout:layoutSelection(this),layoutDevices:layoutDevices(this),consentRequests: this.consent.list(), deviceGrants: this.config.deviceGrants, permissionNotice: this.permissionNotice, permissions: this.config.permissions, master: !!this.config.master, capabilities: this.native.capabilities, knownDevices: this.config.knownDevices || {}, peers: [...this.peers].map(([id, p]) => ({ id, ...p.info, address: p.socket.remoteAddress, transport: this.links.status(p), access: p.access || {status:"未就绪",permissions:{}} })), active: this.active, pendingControl: this.controlIntent?.id, owner: this.owner?.id, shutdownAt: this.shutdownAt, transfer: this.transfer, clipboard: this.clipboard ? { source: this.clipboard.source, files: this.clipboard.files.length, textLength: this.clipboard.text.length } : null, logs: this.logs }; }
+  state() { return { inputTransport:this.inputTransport.state(), update:this.updater?.state(),updateChannel:this.updater?.channel()??'stable',autoCheckUpdates:this.config.autoCheckUpdates!==false, buildInfo, language:languagePreference(this.config.language), theme:['system','dark','light'].includes(this.config.theme)?this.config.theme:'system', clipboardSettings:this.clipboardSync.state(), masterId:masterSelection(this)?.id||(this.config.master?this.config.id:""), masterDevices:masterChoices(this), edgeGlowHideAway:!!this.config.edgeGlowHideAway, switchMode:this.config.switchMode||"dwell", edgeHotkey:this.config.edgeHotkey||"ctrl-alt", edgeGlowEnabled: this.config.edgeGlow !== false, edgeTransition: this.edgeTransition, id: this.config.id, name: this.config.name, groupId: this.group.data.id, groupEstablished: this.group.established, groupMemberCount: Object.keys(this.group.data.members).length, account: this.group.data.id, controlEnded: this.controlEnded, androidDisconnectNotice: this.androidRecovery.notice, fallbackNotice: this.fallbackNotice, stageIncoming:this.staging.incoming(), adbGuide: this.adbGuide.notice, adbAuthorization: this.adb.authorizationNotice(), accessNotice: this.access.notice, viewers: [...new Set([...this.videoHost.sessions.values()].map(s => s.peer.remote.id).concat(this.liveScreens(this.screenViewers)))], port: this.port, dwell: this.config.dwell ?? 100, edges: layoutEdges(this), reachableEdges:reachableLayoutEdges(this), layout:layoutSelection(this),layoutDevices:layoutDevices(this),consentRequests: this.consent.list(), deviceGrants: this.config.deviceGrants, permissionNotice: this.permissionNotice, permissions: this.config.permissions, master: !!this.config.master, capabilities: this.native.capabilities, knownDevices: this.config.knownDevices || {}, peers: [...this.peers].map(([id, p]) => ({ id, ...p.info, address: p.socket.remoteAddress, transport: this.links.status(p), access: p.access || {status:"未就绪",permissions:{}} })), active: this.active, pendingControl: this.controlIntent?.id, owner: this.owner?.id, shutdownAt: this.shutdownAt, transfer: this.transfer, clipboard: this.clipboard ? { source: this.clipboard.source, files: this.clipboard.files.length, textLength: this.clipboard.text.length } : null, logs: this.logs }; }
   async stopInbound() {
     if(this.stoppingInbound)return;
     this.stoppingInbound=true;
@@ -652,7 +788,7 @@ export class Service extends EventEmitter {
     } finally { this.stoppingInbound=false;this.emit('change'); }
   }
   async groupChanged() {
-    this.changingGroup = true;await initializeMaster(this);await initializeLayout(this);await this.quic.reset();this.bulk.closeAll();
+    this.changingGroup = true;this.inputTransport.masterChanged();await initializeMaster(this);await initializeLayout(this);await this.quic.reset();this.bulk.closeAll();
     try {
     if (this.controlIntent) this.controlIntent.cancelled = true; for (const intent of this.outgoingIntents) intent.cancelled = true; this.screenTargets.clear(); this.screenViewers.clear(); this.fallbackNotice = null;
     this.secret = parseToken(this.config.token);this.staging.clearExports(); this.stopDiscovery?.(); this.videoHost.closeAll(); await this.videoViewer.closeAll(); await this.returnLocal(); this.clearInboundEdge();this.owner = null; await this.native.call('release'); this.offers.clear(); this.clipboard = null;this.clipboardSync.clear(); this.permissionNotice = null; this.cancelShutdown(); this.consent.reset(this.config.deviceGrants);

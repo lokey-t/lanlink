@@ -58,7 +58,7 @@ extension Model {
         if let id=pendingFeatureID,id != device.id{notice="请先完成或取消当前设备的连接请求";return}
         pendingFeatureID=device.id;pendingFeature={ [weak self] in self?.feature(device,keys,action) }
         Task {do{
-            let result=try await call("feature-prepare",["id":device.id,"permissions":keys])
+            let result=try await call("feature-prepare",["id":device.id,"permissions":keys,"capture":keys == ["input"]])
             guard result["ready"] as? Bool == true else{await refresh();return}
             if result["allowed"] as? Bool == true{cancelFeature(device.id);action();return}
             let alert=NSAlert();alert.messageText=L("需要设备授权");alert.informativeText=LF("请在「{0}」上授权此功能。", device.name);alert.addButton(withTitle:L("发起授权"));alert.addButton(withTitle:L("取消"))

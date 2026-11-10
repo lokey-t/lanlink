@@ -18,6 +18,8 @@ The update channel controls which releases can be checked and downloaded. Stable
 
 Upload identical assets to both Releases, tagged `vVERSION`: one combined delta, the update manifest, and each target's full asset. Conventional distribution ZIPs may coexist; the updater uses the generated full assets.
 
+发布前从两个公开 Release 分别检查清单列出的每个资产可下载，并核对字节数和 SHA-256。还需验证官网下载区的 Windows EXE/ZIP、macOS DMG 和 Android APK 链接。
+
 ## 生成
 
 先完成各平台正式打包，保留上个版本的原始安装目录及 APK。创建输入 JSON，例如：
@@ -41,12 +43,14 @@ Windows 输入为含 `LanLink.exe` 和 `runtime` 的目录；macOS 输入为完�
 
 Build final distribution trees first. Windows input is the directory containing `LanLink.exe` and `runtime`; macOS input is the signed `.app`; Android input is an APK signed with the existing installation key. The generator refuses existing output assets and links escaping the package; relative internal symbolic links are preserved.
 
+macOS 正式构建须给 `scripts/package-macos.sh` 提供 `LANLINK_MAC_SIGN_IDENTITY`（Developer ID Application）和 `LANLINK_MAC_NOTARY_PROFILE`（已配置的 notarytool 钥匙串配置名）。打包流程签署并公证应用和 DMG。使用完成公证的应用生成更新资产。后续版本保持 Team ID、`com.lanlink.native` 和 `com.lanlink.native.bridge` 不变，并验证从前一个正式签名版本更新后辅助功能、输入监控和屏幕录制仍可用。从临时签名版迁移时，系统可能要求重新授权。
+
 ## 失败与安装
 
-补丁仅针对清单的 `from` 版本；跨版本、基础文件校验失败、损坏或缺失补丁、合成失败均自动下载全量资产。全量下载也失败时保留原安装并显示错误。旧版本无需发布多个增量包。
+桌面增量仅适用于匹配的基础版本。跨版本、基础文件校验失败、损坏或缺失补丁、合成失败均下载全量资产。三端显示下载字节数、速度和校验状态。应用内下载失败时，更新页面提供目标版本的发布页；检查失败且目标版本未知时，提供官网下载区。
 
-桌面先构建完整的新目录，退出 UI 和服务后才替换安装目录；替换失败恢复旧目录，错误保存在更新临时目录的 `plan.json.error`。原目录保留为 `.backup-时间戳`。需有安装目录及其父目录的写权限；源码运行不支持自替换。macOS 更新后沿用新包的签名，实际权限行为应在 Mac 真机验证。
+桌面先构建完整的新目录，退出 UI 和服务后才替换安装目录。重新打开后，更新页面显示上次安装结果。替换失败时尝试恢复旧目录，并将详细错误写到更新临时目录的 `plan.json.error`。成功替换后原目录保留为 `.backup-时间戳`。需有安装目录及其父目录的写权限；源码运行不支持自替换。macOS 更新后沿用新包的签名，实际权限行为应在 Mac 真机验证。
 
-Android 校验并合成完整 APK 后打开系统安装器；首次需允许“安装未知应用”，授权返回后继续。拒绝安装不会覆盖现有应用。系统安装失败（如签名不一致）需修正发布包；全量 APK 不能绕过系统签名要求。
+Android 直接下载全量 APK。校验完成后选择「立即安装」，首次安装需允许「安装未知应用」。授权返回后进入系统安装确认。取消后可继续使用已下载的 APK。旧签名安装会收到迁移提示。
 
-An unsupported base version, corrupt/missing delta or reconstruction failure triggers a full download. Desktop replacement occurs only after both processes exit, with directory rollback on replacement errors and a retained backup. Android installation requires user confirmation and matching package signatures. SHA-256 protects asset integrity against corruption; trust is rooted in HTTPS and the repository's Release publishing permissions.
+An unsupported desktop base version, corrupt/missing delta or reconstruction failure triggers a full download. Desktop replacement occurs after both processes exit, with directory rollback on replacement errors and a retained backup. Android downloads the full APK and keeps the verified download available if installation is canceled. All clients show download progress and offer the official download page after an in-app download failure. SHA-256 protects asset integrity against corruption; trust is rooted in HTTPS and the repository's Release publishing permissions.

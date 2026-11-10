@@ -30,6 +30,7 @@ final class AdbInputProbe {
         externalKeys = new java.util.concurrent.atomic.AtomicInteger(),
         moves = new java.util.concurrent.atomic.AtomicInteger();
     android.widget.Button[] target = new android.widget.Button[1];
+    Dialog[] inputWindow = new Dialog[1];
     StringBuffer digitEvents = new StringBuffer();
     long[] digitDownTime = {0};
     java.util.concurrent.atomic.AtomicInteger badKeyTimes =
@@ -44,7 +45,11 @@ final class AdbInputProbe {
           android.widget.FrameLayout.LayoutParams lp =
               new android.widget.FrameLayout.LayoutParams(500, 400, android.view.Gravity.CENTER);
           frame.addView(target[0], lp);
-          activity.setContentView(frame);
+          // Keep the fixture visible when MainActivity rebuilds its connection UI.
+          inputWindow[0] = new Dialog(activity, android.R.style.Theme_Material_Light_NoActionBar);
+          inputWindow[0].setContentView(frame);
+          inputWindow[0].show();
+          inputWindow[0].getWindow().setLayout(-1, -1);
           target[0].requestFocus();
           target[0].setOnClickListener(v -> clicks.incrementAndGet());
           target[0].setOnKeyListener(
@@ -103,6 +108,7 @@ final class AdbInputProbe {
                 public void ready(Wire p) {
                   service.ready(p);
                   try {
+                    if (args.containsKey("adbSmokeHidDisabled")) service.setHidEnabled(p.id, false);
                     service.consent.request(p.id, "ADB smoke desktop");
                     DeviceConsent.Request request = service.consent.peek();
                     if (request == null) throw new AssertionError("fixture consent missing");
@@ -313,7 +319,7 @@ final class AdbInputProbe {
                                         "targetFocused",
                                         target[0].hasFocus(),
                                         "windowFocused",
-                                        activity.hasWindowFocus())));
+                                        target[0].hasWindowFocus())));
                           } catch (Exception error) {
                             failure[0] = error.toString();
                             done.countDown();
@@ -392,6 +398,7 @@ final class AdbInputProbe {
       return "PASS: encrypted ADB bootstrap, desktop helper launch, verified live shell heartbeat"
           + " and remote input";
     } finally {
+      test.runOnMainSync(inputWindow[0]::dismiss);
       if (peer != null) peer.close();
       service.shell.close();
       service.consent = original;

@@ -59,6 +59,19 @@ import SwiftUI
             try require(!DeviceTile(model: model, device: targetMaster).isLayoutMaster, "incoming remote master changes must clear the previous badge")
             try require(DeviceTile(model: model, device: model.devices.first { $0.id == "A" }!).isLayoutMaster, "incoming remote master changes must move the badge")
             try require(!model.layoutMasterSaving, "master selection must release its busy state")
+            let settings = SettingsView(model: model, active: true)
+            try require(settings.settingsValues["masterId"] == nil, "saving unrelated settings must never overwrite the shared master")
+            let selection = model.masterDeviceSelection
+            try require(selection.wrappedValue == "A", "settings picker must read the same live master as layout")
+            selection.wrappedValue = "local"
+            for _ in 0..<100 {
+                if model.masterID == "local" { break }
+                try await Task.sleep(nanoseconds: 10_000_000)
+            }
+            try require(model.masterID == "local" && selection.wrappedValue == "local", "settings selection must immediately update the shared master")
+            try require(DeviceTile(model: model, device: model.devices.first { $0.id == "local" }!).isLayoutMaster, "settings selection must move the layout badge")
+            model.state["masterId"] = "D"
+            try require(selection.wrappedValue == "D", "remote master updates must reach settings even while unrelated drafts exist")
             model.state["layout"] = ["positions": [String: Any]()]
             try require(model.layoutPositions.isEmpty, "an intentionally empty shared layout must not recreate a local star")
             model.state["masterId"] = "D"
@@ -87,8 +100,8 @@ import SwiftUI
         let cells = [SharedLayoutCell(x: 0, y: 0), SharedLayoutCell(x: 1, y: 0), SharedLayoutCell(x: 2, y: 0), SharedLayoutCell(x: 1, y: -1), SharedLayoutCell(x: 2, y: 1)]
         let layout = SharedLayoutGeometry(size: CGSize(width: 840, height: 520), cells: cells)
         let limits = [SharedLayoutCell(x: -32, y: -32), SharedLayoutCell(x: 32, y: 32)]
-        let extent = SharedLayoutGeometry(size: CGSize(width: 400, height: 250), cells: limits)
-        for cell in limits { let point = extent.point(cell); try require(point.x >= 200 && point.x <= extent.contentSize.width - 200 && point.y >= 125 && point.y <= extent.contentSize.height - 125, "grid-limit devices must reach viewport center without moving group cells") }
+        let boundaryExtent = SharedLayoutGeometry(size: CGSize(width: 400, height: 250), cells: limits)
+        for cell in limits { let point = boundaryExtent.point(cell); try require(point.x >= 200 && point.x <= boundaryExtent.contentSize.width - 200 && point.y >= 125 && point.y <= boundaryExtent.contentSize.height - 125, "grid-limit devices must reach viewport center without moving group cells") }
         for cell in cells { try require(layout.cell(layout.point(cell)) == cell, "every chain and branch cell must round-trip through drag coordinates") }
         try require(layout.point(cells[2]).x > layout.point(cells[1]).x && layout.point(cells[1]).x > layout.point(cells[0]).x, "multi-level neighbours must occupy distinct consecutive positions")
         try require(cells[2].adjacent("bottom") == cells[4], "relative placement must work from any non-local device")

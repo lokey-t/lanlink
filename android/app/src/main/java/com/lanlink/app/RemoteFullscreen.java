@@ -45,6 +45,7 @@ final class RemoteFullscreen implements AutoCloseable {
   private final boolean supportedPads;
   private final int[] boxPadding = new int[4];
   private int orientation, oldFlags, oldSystemUi, oldStatusColor, oldNavColor;
+  private Runnable exitAction;
   private boolean active, menuVisible, closed, oldFollowCursor, oldClipToOutline;
   private boolean leftEnabled, rightEnabled, pinchEnabled;
   private boolean transitioning;
@@ -408,8 +409,11 @@ final class RemoteFullscreen implements AutoCloseable {
     connection.setVisibility(menuVisible ? View.GONE : View.VISIBLE);
   }
 
+  void setExitAction(Runnable action) { exitAction = action; }
+
   void exit() {
     if (!active) return;
+    if (exitAction != null && !closed) { exitAction.run(); return; }
     active = false;
     menuVisible = false;
     endPresentationTransition();
@@ -455,8 +459,9 @@ final class RemoteFullscreen implements AutoCloseable {
   }
 
   public void close() {
-    exit();
+    if (closed) return;
     closed = true;
+    exit();
     endPresentationTransition();
     pointer.close();
     leftPad.close(); rightPad.close();
