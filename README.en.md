@@ -33,7 +33,7 @@ The Windows installer creates Start menu and desktop shortcuts and registers an 
 
 Updates default to the stable channel. In Settings, you can choose the stable or beta channel, disable automatic checks, or check manually. Windows x64, macOS arm64, and Android each have a separate incremental update package. Unsupported base versions, missing patches and verification failures fall back to the platform's full update. Exit the desktop app after download to install; Android uses the system installer. Older clients without an updater require a manual first upgrade. See [update publishing instructions](docs/updates.md).
 
-v0.92.1 fixes returning the mouse after crossing screens over Bluetooth HID and removes Premium features from desktop Settings. The HID channel is available under Group Device Permissions. See [release notes](RELEASE_NOTES.md).
+v0.92.1 fixes returning the mouse after crossing screens over Bluetooth HID. The HID channel is available under Group Device Permissions. See [release notes](RELEASE_NOTES.md).
 
 On Android, Settings → About brings together version information, update controls, and log export. On systems that support predictive back, the back gesture previews the parent settings page.
 

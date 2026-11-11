@@ -3,13 +3,11 @@
 ## 更新日志
 
 - 修复 Windows 与 macOS 组内蓝牙 HID 跨屏后鼠标无法返回的问题。回程使用被控端的实际光标位置，光标回报中断时自动恢复本机操作。
-- 移除桌面设置中的「高价功能」入口。可从「本组设备权限」打开 HID 通道。
 - 相比上一公开正式版 v0.91.1，本版新增组内蓝牙 HID 通道，修复增量更新，并优化 Android 界面与横屏触控板。Windows x64、macOS arm64、Android 各有独立增量包，基于 v0.91.1。
 
 ## Changes
 
 - Fixed the mouse getting stuck after crossing screens over Bluetooth HID between grouped Windows and macOS devices. The return edge follows the target cursor, and the source releases capture if cursor feedback stops.
-- Removed Premium features from desktop Settings. The HID channel is available under Group Device Permissions.
 - Since the previous public stable release, this version adds group Bluetooth HID, fixes incremental updates, and improves the Android interface and landscape touchpad. Windows x64, macOS arm64, and Android each have a separate delta based on v0.91.1.
 
 ## 下载 / Downloads

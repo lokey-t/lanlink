@@ -11,10 +11,8 @@ Historical entries describe their version at the time. For current behavior, per
 ## 0.92.1 · 修复 HID 跨屏返回 / HID cross-screen return fix
 
 - 修复 Windows 与 macOS 组内蓝牙 HID 跨屏后鼠标无法返回的问题。回程使用被控端的实际光标位置，光标回报中断时自动恢复本机操作。
-- 移除桌面设置中的「高价功能」入口。可从「本组设备权限」打开 HID 通道。
 
 - Fixed the mouse getting stuck after crossing screens over Bluetooth HID between grouped Windows and macOS devices. The return edge follows the target cursor, and the source releases capture if cursor feedback stops.
-- Removed Premium features from desktop Settings. The HID channel is available under Group Device Permissions.
 
 ## 0.92.0 · HID 键鼠与分平台增量更新 / HID input and per-platform updates
 
