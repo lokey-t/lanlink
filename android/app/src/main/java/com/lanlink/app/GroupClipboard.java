@@ -20,7 +20,13 @@ final class GroupClipboard {
   boolean shortcuts(){return prefs().getBoolean("clipboard_shortcuts",false) && (!upload() || !download());}
   void setting(String key,boolean value){prefs().edit().putBoolean("clipboard_"+key,value).apply();}
   private boolean allowed(String id){return service.allowed("clipboard") && !service.group.excluded(id) && service.canShareClipboard(id);}
-  synchronized void prune(){long cutoff=System.currentTimeMillis()-TTL;records.values().removeIf(r->r.optLong("at")<=cutoff || !allowed(r.optString("source")));ArrayList<JSONObject> list=sorted();for(int i=LIMIT;i<list.size();i++)records.remove(list.get(i).optString("id"));}
+  synchronized void prune() {
+    long cutoff = System.currentTimeMillis() - TTL;
+    records.values().removeIf(record -> record.optLong("at") <= cutoff || !allowed(record.optString("source")));
+    if (records.size() <= LIMIT) return;
+    ArrayList<JSONObject> list = sorted();
+    for (int i = LIMIT; i < list.size(); i++) records.remove(list.get(i).optString("id"));
+  }
   private ArrayList<JSONObject> sorted(){ArrayList<JSONObject> list=new ArrayList<>(records.values());list.sort((a,b)->{int time=Long.compare(b.optLong("at"),a.optLong("at"));return time!=0?time:b.optString("id").compareTo(a.optString("id"));});return list;}
   synchronized JSONArray history(){prune();return new JSONArray(sorted());}
   private JSONObject valid(JSONObject r)throws Exception{

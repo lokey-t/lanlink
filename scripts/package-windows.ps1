@@ -22,7 +22,9 @@ if ($VideoRuntime) {
     Copy-Item -LiteralPath (Join-Path $video 'LICENSE.txt') -Destination (Join-Path $output 'runtime/FFMPEG-LICENSE.txt')
     if (Test-Path -LiteralPath (Join-Path $root 'vendor/ffmpeg')) { Copy-Item -LiteralPath (Join-Path $root 'vendor/ffmpeg') -Destination (Join-Path $output 'runtime/ffmpeg-notices') -Recurse }
 }
-foreach ($name in @('src','vendor','docs','node_modules')) { Copy-Item -LiteralPath (Join-Path $root $name) -Destination $output -Recurse }
+foreach ($name in @('src','vendor','docs')) { Copy-Item -LiteralPath (Join-Path $root $name) -Destination $output -Recurse }
+& node (Join-Path $root 'scripts/package-node-modules.js') $output 'win32_x64'
+if ($LASTEXITCODE -ne 0) { throw 'Runtime dependency packaging failed' }
 New-Item -ItemType Directory -Force (Join-Path $output 'native/quic') | Out-Null
 $hidProject = Join-Path $root 'native/windows/Hid/LanLinkHid.csproj'
 $hidBuild = Join-Path $root '.tools/windows-hid-build'

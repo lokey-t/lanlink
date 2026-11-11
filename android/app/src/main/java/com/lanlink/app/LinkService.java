@@ -587,11 +587,13 @@ public class LinkService extends Service implements Wire.Listener {
       } catch (Exception ignored) { qualityBuild = "unknown"; }
     }
     android.util.DisplayMetrics m = displayMetrics();
+    boolean inputReady = shell != null && shell.ready();
+    boolean privilegedScreen = privilegedScreenReady();
+    JSONObject recovery = backgroundRecovery == null ? null : backgroundRecovery.recovery();
     return obj(
         "backgroundSessionId", backgroundRecovery == null ? "" : backgroundRecovery.sessionId,
         "backgroundPolicy", backgroundRecovery == null ? JSONObject.NULL : backgroundRecovery.policy(),
-        "backgroundRecovery", backgroundRecovery == null || backgroundRecovery.recovery() == null
-            ? JSONObject.NULL : backgroundRecovery.recovery(),
+        "backgroundRecovery", recovery == null ? JSONObject.NULL : recovery,
         "qualityProbe",1,"qualityBuild",qualityBuild,
         "staging",1,"quic",quic.enabled?1:0,"bulk",1,"rtcVideo",1,"dualLink",
         true,
@@ -599,15 +601,14 @@ public class LinkService extends Service implements Wire.Listener {
         true,
         "hidSettings", 1,
         "bluetoothControl", 1,
-        "networkInputReady", shell != null && shell.ready(),
-        "input",
-        shell != null && shell.ready(),
+        "networkInputReady", inputReady,
+        "input", inputReady,
         "host",
         false,
         "screen",
-        projection != null || privilegedScreenReady(),
+        projection != null || privilegedScreen,
         "videoH264Only",
-        rootEnabled() || privilegedScreenReady(),
+        rootEnabled() || privilegedScreen,
         "clipboard",
         true,
         "shutdown",
@@ -618,9 +619,9 @@ public class LinkService extends Service implements Wire.Listener {
         m.heightPixels,
         "motionV2", quic!=null&&quic.nativeEngine!=null&&quic.nativeEngine.binaryMotion?2:0,
         "inputMode",
-        shell != null && shell.ready() ? "adb/root" : "unavailable",
+        inputReady ? "adb/root" : "unavailable",
         "inputWarning",
-        shell != null && shell.ready() ? "" : "请在电脑端启用 ADB 键鼠授权，或启动 Root 助手");
+        inputReady ? "" : "请在电脑端启用 ADB 键鼠授权，或启动 Root 助手");
   }
 
   android.util.DisplayMetrics displayMetrics() {
@@ -629,8 +630,9 @@ public class LinkService extends Service implements Wire.Listener {
     return metrics;
   }
 
-  private JSONObject identity() {
-    JSONObject caps = capabilities();
+  private JSONObject identity() { return identity(capabilities()); }
+
+  private JSONObject identity(JSONObject caps) {
     if (group != null)
       try {
         caps.put("memberKey", group.own().getString("key"));
@@ -1810,10 +1812,11 @@ public class LinkService extends Service implements Wire.Listener {
       }
     }
     try {
-      String currentCapabilities = capabilities().toString();
+      JSONObject caps = capabilities();
+      String currentCapabilities = caps.toString();
       if (!currentCapabilities.equals(lastCapabilities)) {
         lastCapabilities = currentCapabilities;
-        JSONObject changed = identity().put("type", "identity").put("platform", "android");
+        JSONObject changed = identity(caps).put("type", "identity").put("platform", "android");
         for (Wire peer : peers.values())
           try {
             peer.send(changed);

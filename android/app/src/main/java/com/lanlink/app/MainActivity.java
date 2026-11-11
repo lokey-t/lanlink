@@ -34,7 +34,6 @@ public class MainActivity extends Activity {
   private LinearLayout root, layout, devices, detail, noticeBox, navigation;
   private TextView status, mode;
   private GroupLayoutPanel groupLayoutPanel;
-  private final Map<String, Switch> permissionSwitches = new HashMap<>();
   private final Set<Dialog> sheets = new HashSet<>();
   private String page = "devices", selected = "local", noticeSignature = "";
   private String centerSelection="",centerSignature="",savingStage;
@@ -105,7 +104,7 @@ public class MainActivity extends Activity {
     } else dismissPopupPage();
     PredictiveDialog dialog = new PredictiveDialog(this, Ui.dialogTheme());
     popupDialog = dialog;
-    groupLayoutPanel = null; permissionSwitches.clear();
+    groupLayoutPanel = null;
     LinearLayout outer = ui.column(); outer.setBackgroundColor(Ui.BG);
     ScrollView scroll = new ScrollView(this); scroll.setFillViewport(true);
     layout = ui.column();
@@ -666,7 +665,6 @@ public class MainActivity extends Activity {
     renderedPage = page;
     centerFunctions = null;
     groupLayoutPanel = null;
-    permissionSwitches.clear();
     signature = "";
     noticeSignature = "";
     root = ui.column();
@@ -1300,20 +1298,7 @@ public class MainActivity extends Activity {
     SharedPreferences preferences = getSharedPreferences("identity", MODE_PRIVATE);
     Dialog dialog = new Dialog(this, Ui.dialogTheme());
     sheets.add(dialog);
-    LinearLayout panel = ui.column();
-    panel.setBackgroundColor(Ui.BG);
-
-    LinearLayout header = ui.row();
-    header.setPadding(ui.dp(16), ui.dp(8), ui.dp(22), ui.dp(8));
-    View back = ui.iconButton("back", Language.t("关闭"), dialog::dismiss);
-    back.setBackground(ui.touch(Color.TRANSPARENT, 24));
-    header.addView(back, new LinearLayout.LayoutParams(ui.dp(48), ui.dp(48)));
-    header.addView(ui.title(Language.t("关于"), 24));
-    panel.addView(header);
-
-    ScrollView scroll = new ScrollView(this);
-    LinearLayout body = ui.column();
-    body.setPadding(ui.dp(22), ui.dp(16), ui.dp(22), ui.dp(24));
+    LinearLayout body = informationDialogBody(dialog, "关于", "关闭");
     LinearLayout brand = ui.column();
     brand.setGravity(Gravity.CENTER_HORIZONTAL);
     ImageView icon = new ImageView(this);
@@ -1392,13 +1377,7 @@ public class MainActivity extends Activity {
         Language.t("收集组内设备的运行日志并另存为文本文件"), null, this::exportLogs));
     body.addView(diagnostics);
 
-    scroll.addView(body);
-    panel.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
-    dialog.setContentView(panel);
     dialog.show();
-    Window window = dialog.getWindow();
-    window.setLayout(-1, -1);
-    applyInsets(panel, window);
   }
 
   private void showDeveloperOptions(SharedPreferences preferences, View entry) {
@@ -1407,19 +1386,7 @@ public class MainActivity extends Activity {
     sheets.add(dialog);
     dialog.setOnDismissListener(ignored -> sheets.remove(dialog));
 
-    LinearLayout panel = ui.column();
-    panel.setBackgroundColor(Ui.BG);
-    LinearLayout header = ui.row();
-    header.setPadding(ui.dp(16), ui.dp(8), ui.dp(22), ui.dp(8));
-    View back = ui.iconButton("back", Language.t("返回"), dialog::dismiss);
-    back.setBackground(ui.touch(Color.TRANSPARENT, 24));
-    header.addView(back, new LinearLayout.LayoutParams(ui.dp(48), ui.dp(48)));
-    header.addView(ui.title(Language.t("开发者选项"), 24));
-    panel.addView(header);
-
-    ScrollView scroll = new ScrollView(this);
-    LinearLayout body = ui.column();
-    body.setPadding(ui.dp(22), ui.dp(16), ui.dp(22), ui.dp(24));
+    LinearLayout body = informationDialogBody(dialog, "开发者选项", "返回");
     LinearLayout card = ui.card();
     card.addView(ui.button(Language.t("关闭开发者选项"), false, () -> {
       preferences.edit().putBoolean("developer_options", false).apply();
@@ -1427,13 +1394,33 @@ public class MainActivity extends Activity {
       dialog.dismiss();
     }));
     body.addView(card);
+    dialog.show();
+  }
+
+  private LinearLayout informationDialogBody(Dialog dialog, String title, String backLabel) {
+    LinearLayout panel = ui.column();
+    panel.setBackgroundColor(Ui.BG);
+
+    LinearLayout header = ui.row();
+    header.setPadding(ui.dp(16), ui.dp(8), ui.dp(22), ui.dp(8));
+    View back = ui.iconButton("back", Language.t(backLabel), dialog::dismiss);
+    back.setBackground(ui.touch(Color.TRANSPARENT, 24));
+    header.addView(back, new LinearLayout.LayoutParams(ui.dp(48), ui.dp(48)));
+    header.addView(ui.title(Language.t(title), 24));
+    panel.addView(header);
+
+    ScrollView scroll = new ScrollView(this);
+    LinearLayout body = ui.column();
+    body.setPadding(ui.dp(22), ui.dp(16), ui.dp(22), ui.dp(24));
     scroll.addView(body);
     panel.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
     dialog.setContentView(panel);
-    dialog.show();
-    Window window = dialog.getWindow();
-    window.setLayout(-1, -1);
-    applyInsets(panel, window);
+    dialog.setOnShowListener(ignored -> {
+      Window window = dialog.getWindow();
+      window.setLayout(-1, -1);
+      applyInsets(panel, window);
+    });
+    return body;
   }
 
   private void renderUpdateChannel(LinearLayout slot) {
@@ -1866,42 +1853,6 @@ public class MainActivity extends Activity {
     box.addView(ui.button(Language.t("连接与故障排查"), false, this::showAdvanced));
     ui.gap(box, 10);
     box.addView(ui.button(Language.t("关闭说明"), false, ((Dialog) box.getTag())::dismiss));
-  }
-
-  private void addPermission(
-      LinearLayout card, String key, String icon, String title, String description) {
-    LinearLayout row = ui.item(icon, title, description, null, null);
-    if (key.equals("screen")) {
-      row.setBackground(ui.touch(Color.TRANSPARENT, 14));
-      row.setOnClickListener(v -> requestScreen());
-    }
-    Switch toggle = new Switch(this);
-    toggle.setContentDescription(title);
-    toggle.setButtonTintList(null);
-    toggle.setThumbTintList(
-        new android.content.res.ColorStateList(
-            new int[][] {new int[] {android.R.attr.state_checked}, new int[] {}},
-            new int[] {Ui.PURPLE, Ui.THUMB}));
-        toggle.setTrackTintList(
-            new android.content.res.ColorStateList(
-                new int[][] {new int[] {android.R.attr.state_checked}, new int[] {}},
-                new int[] {Ui.LILAC, Ui.LINE}));
-    toggle.setChecked(
-        getSharedPreferences("identity", MODE_PRIVATE).getBoolean("allow_" + key, java.util.Arrays.asList(DeviceConsent.KEYS).contains(key)));
-    toggle.setOnCheckedChangeListener(
-        (v, on) -> {
-          LinkService s = LinkService.instance;
-          if (s == null) {
-            toast(Language.t("服务正在启动，请稍后重试"));
-            return;
-          }
-          s.setAllowed(key, on);
-          if (on && key.equals("screen")) requestScreen();
-          if (on && key.equals("input") && !s.capabilities().optBoolean("input")) showInputSetup();
-        });
-    row.addView(toggle);
-    card.addView(row);
-    permissionSwitches.put(key, toggle);
   }
 
   private String platformIcon(String platform) {
@@ -2984,7 +2935,6 @@ public class MainActivity extends Activity {
   private void update() {
     if (ui == null) return;
     if (page.equals("layout") && groupLayoutPanel != null) groupLayoutPanel.refresh();
-    if(page.equals("center")&&!centerSignature.equals(centerKey()))refreshCenter();
     LinkService s = LinkService.instance;
     if (page.equals("settings") && !settingsSignature.equals(settingsState(s))) {
       renderPage();
@@ -3003,24 +2953,6 @@ public class MainActivity extends Activity {
     if (s != null) {
       if (s.backgroundRecovery != null) s.backgroundRecovery.foreground(resumed);
       s.uiVisible = resumed && pairDialog == null && viewer == null;
-      for (Map.Entry<String, Switch> e : permissionSwitches.entrySet()) {
-        boolean on = s.allowed(e.getKey());
-        if (e.getValue().isChecked()
-            != on) { // Rebuild only when a grant changed elsewhere; never fire a permission action
-          // during refresh.
-          e.getValue().setOnCheckedChangeListener(null);
-          e.getValue().setChecked(on);
-          final String key = e.getKey();
-          e.getValue()
-              .setOnCheckedChangeListener(
-                  (v, value) -> {
-                    s.setAllowed(key, value);
-                    if (value && key.equals("screen")) requestScreen();
-                    if (value && key.equals("input") && !s.capabilities().optBoolean("input"))
-                      showInputSetup();
-                  });
-        }
-      }
     }
     updateDevices(s);
     refreshPermissionNotice(s);

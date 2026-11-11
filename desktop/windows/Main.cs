@@ -292,16 +292,26 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
         footer.Text=Locale.T("键鼠控制：")+(active==""?Locale.T("本机"):inputName+" · "+Locale.T(Json.Text(inputTarget,"active")=="bluetooth"?"蓝牙":"网络"));
         if (Json.Flag(Json.Get(State, "capabilities"), "simulated")) footer.Text += Locale.T("  ·  模拟模式");
         var transfer = Json.Get(State, "transfer"); if (transfer != null) footer.Text += Locale.T("  ·  正在接收 ") + Json.Text(transfer, "name");
-        string sig = new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(new object[] { Json.Get(State, "peers"), Json.Get(State, "knownDevices"), Json.Get(State, "edges"), Json.Get(State, "layout"), Json.Get(State, "layoutDevices"), Json.Get(State, "name"), Json.Get(State, "dwell"), Json.Get(State, "master"), Json.Get(State,"masterId"), Json.Get(State,"masterDevices"), active });
+        var peers = Json.Get(State, "peers") as IEnumerable ?? new object[0];
+        var peerCards = peers.Cast<object>().Select(peer => new {
+          id = Json.Text(peer,"id"), name = Json.Text(peer,"name"), platform = Json.Text(peer,"platform"),
+          transport = Json.Text(peer,"transport"), access = Json.Get(peer,"access"),
+          width = Json.Number(Json.Get(peer,"capabilities"),"width",1920),
+          height = Json.Number(Json.Get(peer,"capabilities"),"height",1080)
+        }).ToArray();
+        string sig = new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(new object[] { Json.Get(State, "id"), peerCards, Json.Get(State, "knownDevices"), Json.Get(State, "edges"), Json.Get(State, "layout"), Json.Get(State, "layoutDevices"), Json.Get(State, "name"), Json.Get(State, "dwell"), Json.Get(State, "master"), Json.Get(State,"masterId"), Json.Get(State,"masterDevices"), active });
         if(qualityPage!=null&&qualityPage.Visibility==Visibility.Visible)await qualityPage.Refresh();
         if(stagingPage!=null&&stagingPage.Visibility==Visibility.Visible)await stagingPage.Refresh();if(!testing){CheckShareInbox();if(fileDragEdges!=null)fileDragEdges.Update(State);}
         if (sig == signature) return; signature = sig;if(settingsPage!=null && settingsPage.Visibility==Visibility.Visible && !settingsDirty && !savingSettings && immediateSettingsPending==0)LoadSettingsDraft();
         devices.Clear(); edges.Clear(); foreach (var item in Json.Map(Json.Get(State, "edges"))) edges[item.Key] = Convert.ToString(item.Value);
         devices.Add(new Device { Id = Json.Text(State, "id"), Name = Json.Text(State, "name"), Platform = "win32", Online = true, Local = true });
         foreach (var item in Json.Map(Json.Get(State, "knownDevices"))) devices.Add(new Device { Id = item.Key, Name = Json.Text(item.Value, "name"), Platform = Json.Text(item.Value, "platform") });
-        foreach (var item in Json.Get(State, "peers") as IEnumerable ?? new object[0]) {
-          string id = Json.Text(item, "id"); var d = devices.FirstOrDefault(x => x.Id == id);
-          if (d == null) { d = new Device { Id = id }; devices.Add(d); } d.Name = Json.Text(item, "name"); if (d.Name == "") d.Name = Locale.T("已配对设备"); d.Platform = Json.Text(item, "platform"); d.Online = true; d.Transport = Json.Text(item, "transport"); d.Access=Json.Get(item,"access"); d.Width = Json.Number(Json.Get(item, "capabilities"), "width", 1920); d.Height = Json.Number(Json.Get(item, "capabilities"), "height", 1080);
+        foreach (var peer in peerCards) {
+          var d = devices.FirstOrDefault(x => x.Id == peer.id);
+          if (d == null) { d = new Device { Id = peer.id }; devices.Add(d); }
+          d.Name = peer.name == "" ? Locale.T("已配对设备") : peer.name;
+          d.Platform = peer.platform; d.Online = true; d.Transport = peer.transport;
+          d.Access = peer.access; d.Width = peer.width; d.Height = peer.height;
         }
         var members = Json.Get(State, "layoutDevices") as IEnumerable;
         if (members != null) {
@@ -612,6 +622,117 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
       var content = new Border { CornerRadius = new CornerRadius(16), Background = Brush("#F9FBFE"), Margin = new Thickness(12, 0, 12, 12), Child = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto } };
       WindowShell.Wrap(window, content, false); return window;
     }
+    async Task OpenInputTransport() {
+      var panel=Column();
+      var window=Dialog(Locale.T("键鼠通道"), panel);
+      var instructions=LText("打开蓝牙配对后，在目标设备的系统设置中连接本机。一次只配对一台设备，再刷新列表。",13);
+      instructions.TextWrapping=TextWrapping.Wrap;panel.Children.Add(instructions);
+      var adapter=Text("",13);panel.Children.Add(adapter);
+      var actions=new WrapPanel();panel.Children.Add(actions);
+      var targets=new ComboBox();var hosts=new ComboBox();var modes=new ComboBox();
+      var name=new TextBox();
+      var confirm=new CheckBox {Content=UiLocale.Content("我已确认配对的设备就是所选目标")};
+      var runtime=Text("",13);
+      foreach(var pair in new[]{new[]{"auto_bt_first","自动（蓝牙优先）"},new[]{"bluetooth_only","仅蓝牙"},new[]{"network_only","仅网络"}})
+        modes.Items.Add(new ComboBoxItem {Tag=pair[0],Content=Locale.T(pair[1])});
+      panel.Children.Add(LText("设备",13));panel.Children.Add(targets);
+      panel.Children.Add(name);
+      panel.Children.Add(LText("偏好",13));panel.Children.Add(modes);
+      var hostLabel=LText("蓝牙目标",13);panel.Children.Add(hostLabel);panel.Children.Add(hosts);
+      var automaticInfo=LText("组内蓝牙跟随当前主设备。首次连接请在手机上允许附近设备权限，并按系统提示确认配对。",12);
+      automaticInfo.TextWrapping=TextWrapping.Wrap;panel.Children.Add(automaticInfo);
+      panel.Children.Add(confirm);panel.Children.Add(runtime);
+      var buttons=new WrapPanel();panel.Children.Add(buttons);
+      panel.Children.Add(LText("蓝牙控制时按 Ctrl + Alt + F12 返回本机。",12));
+      object selected=null;
+      object snapshot=null;
+      bool loading=false;
+      Func<ComboBox,string> value=box=>{
+        var item=box.SelectedItem as ComboBoxItem;
+        return item==null?"":(string)item.Tag;
+      };
+      Func<string,string> ready=state=>Locale.T(state=="ready"?"已就绪":state=="pairing_required"?"需配对":state=="connecting"?"等待连接":state=="degraded"?"尚未确认":"未就绪");
+      Button control=null,remove=null,save=null;
+      Action updateHost=()=>{
+        confirm.Visibility=!Json.Flag(selected,"automaticGroup")&&value(hosts)!=""&&value(hosts)!=Json.Text(selected,"host")?Visibility.Visible:Visibility.Collapsed;
+        confirm.IsChecked=false;
+      };
+      Action select=()=>{
+        if(loading)return;
+        string id=value(targets);
+        selected=(Json.Get(snapshot,"targets") as IEnumerable??new object[0]).Cast<object>().FirstOrDefault(row=>Json.Text(row,"id")==id);
+        bool external=Json.Flag(selected,"external");
+        bool automatic=Json.Flag(selected,"automaticGroup");
+        hosts.Visibility=hostLabel.Visibility=automatic?Visibility.Collapsed:Visibility.Visible;
+        automaticInfo.Visibility=automatic?Visibility.Visible:Visibility.Collapsed;
+        string binding=Json.Text(selected,"host");
+        string mode=Json.Text(selected,"preference");
+        if(mode=="")mode="auto_bt_first";
+        modes.SelectedItem=modes.Items.Cast<ComboBoxItem>().First(row=>(string)row.Tag==mode);
+        hosts.Items.Clear();
+        hosts.Items.Add(new ComboBoxItem {Content=Locale.T("未绑定"),Tag=""});
+        foreach(var item in Json.Get(snapshot,"hosts") as IEnumerable??new object[0]) {
+          string hostId=Json.Text(item,"id");
+          if(hostId.Length<8||!Json.Flag(item,"reportSubscribed"))continue;
+          hosts.Items.Add(new ComboBoxItem {Content=Locale.T("已订阅设备")+" · "+hostId.Substring(0,8),Tag=hostId});
+        }
+        if(!hosts.Items.Cast<ComboBoxItem>().Any(row=>(string)row.Tag==binding))
+          hosts.Items.Add(new ComboBoxItem {Content=Locale.T("已绑定 · 当前离线"),Tag=binding});
+        hosts.SelectedItem=hosts.Items.Cast<ComboBoxItem>().First(row=>(string)row.Tag==binding);
+        name.Visibility=external||id=="external"?Visibility.Visible:Visibility.Collapsed;
+        name.Text=external?Json.Text(selected,"name"):"";
+        var readiness=Json.Get(selected,"readiness");
+        string active=Json.Text(selected,"active");
+        bool standby=Json.Flag(Json.Get(selected,"bluetooth"),"standby");
+        runtime.Text=selected==null?"":Locale.T("蓝牙")+" · "+(standby?Locale.T("已连接 · 待命"):ready(Json.Text(readiness,"bluetooth")))+
+          "    "+Locale.T("网络")+" · "+ready(Json.Text(readiness,"network"))+"    "+Locale.T("当前通道")+" · "+
+          Locale.T(active=="bluetooth"?"蓝牙":active=="network"?"网络":"无");
+        if(Json.Text(selected,"authorization")=="denied")runtime.Text+="\n"+Locale.T("目标设备未允许键鼠控制");
+        control.Visibility=remove.Visibility=external?Visibility.Visible:Visibility.Collapsed;
+        save.IsEnabled=id!="";
+        updateHost();
+      };
+      Action<object> display=result=>{
+        snapshot=result;
+        string id=value(targets);
+        var info=Json.Get(result,"adapter");
+        adapter.Text=Locale.T(Json.Flag(info,"hidServiceReady")?"蓝牙服务已启动":"蓝牙服务未就绪");
+        string reason=Json.Text(info,"reason");
+        if(reason!="")adapter.Text+=" · "+reason;
+        loading=true;
+        targets.Items.Clear();
+        targets.Items.Add(new ComboBoxItem {Content=Locale.T("请选择设备"),Tag=""});
+        foreach(var row in Json.Get(result,"targets") as IEnumerable??new object[0])
+          targets.Items.Add(new ComboBoxItem {Content=Json.Text(row,"name"),Tag=Json.Text(row,"id")});
+        targets.Items.Add(new ComboBoxItem {Content=Locale.T("添加本机外部设备"),Tag="external"});
+        targets.SelectedItem=targets.Items.Cast<ComboBoxItem>().FirstOrDefault(row=>(string)row.Tag==id)??targets.Items[0];
+        loading=false;
+        select();
+      };
+      actions.Children.Add(LButton("开启蓝牙配对",()=>Run(async()=>display(await Client.Call("input-transport-start")))));
+      actions.Children.Add(LButton("刷新",()=>Run(async()=>display(await Client.Call("input-transport-status")))));
+      save=LButton("保存",()=>Run(async()=>{
+        string id=value(targets),host=value(hosts);
+        var args=new Dictionary<string,object>{{"preference",value(modes)},{"name",name.Text},{"confirmed",confirm.IsChecked==true}};
+        if(id=="external")args["external"]=true;else args["id"]=id;
+        if(!Json.Flag(selected,"automaticGroup")&&host!=Json.Text(selected,"host"))args["host"]=host;
+        display(await Client.Call("input-transport-save",args));
+      }));
+      control=LButton("开始控制",()=>Run(async()=>{
+        string id=value(targets);window.Close();
+        await Client.Call("control",new{id,capture=true,newSession=true});
+      }));
+      remove=LButton("解除绑定",()=>Run(async()=>{
+        string id=value(targets);
+        display(await Client.Call("input-transport-save",new{id,remove=true}));
+      }));
+      buttons.Children.Add(save);buttons.Children.Add(control);buttons.Children.Add(remove);
+      buttons.Children.Add(LButton("完成",()=>window.Close()));
+      targets.SelectionChanged+=delegate{select();};
+      hosts.SelectionChanged+=delegate{updateHost();};
+      display(await Client.Call("input-transport-status"));
+      window.Show();
+    }
     void OpenPremiumFeatures() {
       var panel = Column();
       var window = Dialog(Locale.T("高价功能"), panel);
@@ -840,7 +961,8 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
       try {
         if (enabled) File.WriteAllText(DeveloperOptionsPath, "");
         else File.Delete(DeveloperOptionsPath);
-      } catch (Exception error) when (error is IOException || error is UnauthorizedAccessException) {
+      } catch (Exception error) {
+        if (!(error is IOException) && !(error is UnauthorizedAccessException)) throw;
         Notify(Locale.T("无法保存开发者选项，请重试。"));
         return false;
       }
@@ -856,6 +978,7 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
         StackPanel body;
         developerOptionsPage = SimplePage("开发者选项", out body);
         var options = new StackPanel();
+        options.Children.Add(LButton("键鼠通道", () => Run(OpenInputTransport)));
         options.Children.Add(LButton("关闭开发者选项", () => {
           if (SetDeveloperOptionsEnabled(false)) ShowInformation();
         }));
@@ -880,7 +1003,7 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
     }
     public void ShowDevicePermissions() {
       Navigate(permissionsNavigation);
-      if (devicePermissionsPage == null) { devicePermissionsPage = new DevicePermissionsPage(this, ShowDevices); ((Grid)pageSurface.Child).Children.Add(devicePermissionsPage); }
+      if (devicePermissionsPage == null) { devicePermissionsPage = new DevicePermissionsPage(this); ((Grid)pageSurface.Child).Children.Add(devicePermissionsPage); }
       devicePage.Visibility = Visibility.Collapsed;
       if(settingsPage != null) settingsPage.Visibility = Visibility.Collapsed;
       if(adbPage != null) adbPage.Visibility = Visibility.Collapsed;

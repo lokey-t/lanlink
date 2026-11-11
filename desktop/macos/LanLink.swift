@@ -49,9 +49,14 @@ struct ClipboardQuickButton: View {
     var upload:Bool; var action:()->Void
     var body:some View { Button(action:action){ClipboardSyncGlyph(upload:upload).stroke(style:StrokeStyle(lineWidth:1.5,lineCap:.round,lineJoin:.round)).frame(width:22,height:22).foregroundStyle(Palette.accent).frame(width:42,height:42).background(Palette.card,in:Circle()).overlay(Circle().stroke(Palette.line,lineWidth:1))}.buttonStyle(.plain).help(L(upload ? "上传文字剪贴板":"下载文字剪贴板")).accessibilityLabel(L(upload ? "上传文字剪贴板":"下载文字剪贴板")) }
 }
-struct Device: Identifiable {
+struct Device: Identifiable, Equatable {
     var id: String; var name: String; var platform: String; var online = false; var local = false; var transport = ""; var access:[String:Any] = [:]
     var symbol: String { platform == "android" ? "iphone" : "desktopcomputer" }
+    static func == (left: Device, right: Device) -> Bool {
+        left.id == right.id && left.name == right.name && left.platform == right.platform &&
+        left.online == right.online && left.local == right.local && left.transport == right.transport &&
+        (left.access as NSDictionary).isEqual(to: right.access)
+    }
 }
 
 // No WebView: AppKit windows, SwiftUI controls and inherited process pipes.
@@ -527,10 +532,13 @@ struct Device: Identifiable {
                 if result["phase"] as? String == "failed" { notice = message }
                 else { showSuccessToast(L(message) + " " + (result["version"] as? String ?? "")) }
             }
-            state = next; applyTheme(); applyLanguage(); var all = [Device(id: state["id"] as? String ?? "local", name: state["name"] as? String ?? "本机", platform: "darwin", online: true, local: true)]
+            if !(state as NSDictionary).isEqual(to: next) { state = next }
+            applyTheme(); applyLanguage(); var all = [Device(id: state["id"] as? String ?? "local", name: state["name"] as? String ?? "本机", platform: "darwin", online: true, local: true)]
             checkPermissionsAfterUpdate()
             showFirstDevicePermissionGuideIfNeeded(wasFirstDevice: (state["groupMemberCount"] as? Int ?? 1) > 1 || !(state["knownDevices"] as? [String: Any] ?? [:]).isEmpty)
-            refreshRequests(); startupEnabled = Self.startupRegistered
+            refreshRequests()
+            let registered = Self.startupRegistered
+            if startupEnabled != registered { startupEnabled = registered }
             for (id, info) in state["knownDevices"] as? [String: [String: Any]] ?? [:] { all.append(Device(id: id, name: info["name"] as? String ?? "已配对设备", platform: info["platform"] as? String ?? "")) }
             for info in state["peers"] as? [[String: Any]] ?? [] {
                 guard let id = info["id"] as? String else { continue }; all.removeAll { $0.id == id }
@@ -549,9 +557,12 @@ struct Device: Identifiable {
             }
             refreshStageReceive(state["stageIncoming"] as? [[String:Any]] ?? []);if sidebarPage=="staging" { await refreshStaging() };if fileDragEdges==nil { fileDragEdges=FileDragEdges(self) };fileDragEdges?.update()
             guard generation == serviceGeneration, !Task.isCancelled else { return }
-            devices = all.sorted { if $0.local != $1.local { return $0.local }; return $0.name < $1.name }
-            if let at = state["shutdownAt"] as? Double, at > 0 { shutdownNotice = "收到关机请求，\(max(0, Int((at / 1000 - Date().timeIntervalSince1970).rounded(.up)))) 秒后执行；点击本机设备可取消" } else { shutdownNotice = "" }
-            if let remoteID, state["active"] as? String != remoteID { controlling = false }
+            all.sort { if $0.local != $1.local { return $0.local }; return $0.name < $1.name }
+            if devices != all { devices = all }
+            var shutdownMessage = ""
+            if let at = state["shutdownAt"] as? Double, at > 0 { shutdownMessage = "收到关机请求，\(max(0, Int((at / 1000 - Date().timeIntervalSince1970).rounded(.up)))) 秒后执行；点击本机设备可取消" }
+            if shutdownNotice != shutdownMessage { shutdownNotice = shutdownMessage }
+            if controlling, let remoteID, state["active"] as? String != remoteID { controlling = false }
         } catch { if generation == serviceGeneration { notice = error.localizedDescription } }
     }
     func place(_ id: String, at cell: SharedLayoutCell) {
@@ -1308,7 +1319,7 @@ struct Home: View {
             if model.sidebarPage=="clipboard"{ClipboardHistoryView(model:model)}
             if model.sidebarPage == "information" { InformationView(model: model) }
             if model.sidebarPage == "developer", model.developerOptionsEnabled {
-                DeveloperOptionsView {
+                DeveloperOptionsView(model:model) {
                     model.setDeveloperOptionsEnabled(false)
                     navigate("information")
                 }
@@ -1376,18 +1387,22 @@ struct BuildInformationView: View {
     }
 }
 struct DeveloperOptionsView: View {
+    @ObservedObject var model: Model
+    @State private var showingInputTransport = false
     let disable: () -> Void
     var body: some View {
         VStack(alignment:.leading,spacing:24) {
             Text(L("开发者选项")).font(.title2)
             ScrollView {
                 VStack(alignment:.leading,spacing:16) {
+                    Button(L("键鼠通道")) { showingInputTransport = true }
                     Button(L("关闭开发者选项"), action:disable)
                 }.padding(24).frame(maxWidth:.infinity,alignment:.leading)
                     .background(Palette.card,in:RoundedRectangle(cornerRadius:20))
             }
         }.frame(maxWidth:.infinity,maxHeight:.infinity,alignment:.topLeading)
             .buttonStyle(FlatButtonStyle())
+            .sheet(isPresented:$showingInputTransport) { InputTransportView(model:model) }
     }
 }
 struct InformationView: View {
@@ -1463,14 +1478,13 @@ struct DevicePermissionsView: View {
     @ObservedObject var model: Model
     @State private var devices: [[String: Any]] = []
     @State private var message = "正在读取组内权限…"
-    @State private var showingInputTransport = false
     func refreshDevices() async {
         do { let result = try await model.call("group-permissions"); guard !Task.isCancelled else { return }; devices = result["devices"] as? [[String:Any]] ?? []; message = "悬停查看含义 · 左键或右键打开菜单" }
         catch { message = error.localizedDescription }
     }
     var body: some View {
         VStack(alignment:.leading,spacing:18) {
-            HStack { Text(L("本组设备权限")).font(.title2); Spacer(); Button(L("键鼠通道")) { showingInputTransport = true }; Button(L("刷新")) { Task { await refreshDevices() } } }
+            HStack { Text(L("本组设备权限")).font(.title2); Spacer(); Button(L("刷新")) { Task { await refreshDevices() } } }
             Text(Model.displayMessage(message)).font(.caption).foregroundStyle(Palette.muted)
             HStack(spacing:18) { ForEach(["ready","unready","disabled"],id: \.self) { state in Label(L(permissionStateTitle(state)),systemImage:"circle.fill").font(.caption).foregroundStyle(permissionColor(state)) } }
             ScrollView([.horizontal,.vertical]) {
@@ -1487,7 +1501,7 @@ struct DevicePermissionsView: View {
                 }.padding(1)
             }
             Text(L("本机行：功能总开关；其他设备行：本机使用该设备的权限。")).font(.caption).foregroundStyle(Palette.muted)
-        }.sheet(isPresented:$showingInputTransport) { InputTransportView(model:model) }
+        }
         .frame(maxWidth:.infinity,maxHeight:.infinity).buttonStyle(FlatButtonStyle()).task { while !Task.isCancelled { await refreshDevices(); do { try await Task.sleep(nanoseconds:4_000_000_000) } catch { break } } }
     }
 }
