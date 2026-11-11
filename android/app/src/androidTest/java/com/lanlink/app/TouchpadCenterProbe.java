@@ -183,10 +183,8 @@ final class TouchpadCenterProbe {
           "icon centered vertically " + label);
       check(Math.abs((badge.getTop() + title.getBottom()) / 2f - tile.getHeight() / 2f) <= 2 * density,
           "icon and label centered together " + label);
-      int[] location = new int[2];
-      tile.getLocationOnScreen(location);
-      if (y != -1) check(y == location[1] && height == tile.getHeight(), "three tiles align");
-      y = location[1];
+      if (y != -1) check(y == tile.getTop() && height == tile.getHeight(), "three tiles align");
+      y = tile.getTop();
       height = tile.getHeight();
       Bitmap bitmap = Bitmap.createBitmap(badge.getWidth(), badge.getHeight(), Bitmap.Config.ARGB_8888);
       try {
@@ -227,6 +225,42 @@ final class TouchpadCenterProbe {
           "pressed pad slightly strengthens its fill without hiding the stream");
     } finally {
       pad.close();
+      image.recycle();
+    }
+  }
+
+  private boolean drawsIntroHint(TouchpadView pad) {
+    Bitmap image = Bitmap.createBitmap(pad.getWidth(), pad.getHeight(), Bitmap.Config.ARGB_8888);
+    try {
+      pad.draw(new Canvas(image));
+      int background = image.getPixel(0, 0);
+      int y = image.getHeight() / 2;
+      for (int x = image.getWidth() / 4; x < 3 * image.getWidth() / 4; x++)
+        if (image.getPixel(x, y) != background) return true;
+      return false;
+    } finally {
+      image.recycle();
+    }
+  }
+
+  private void checkContactGlow(TouchpadView pad) {
+    Bitmap image = Bitmap.createBitmap(pad.getWidth(), pad.getHeight(), Bitmap.Config.ARGB_8888);
+    Canvas canvas = new Canvas(image);
+    int x = pad.getWidth() / 4, y = pad.getHeight() / 2;
+    long now = SystemClock.uptimeMillis();
+    MotionEvent down = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, x, y, 0);
+    try {
+      pad.onTouchEvent(down);
+      pad.draw(canvas);
+      check(image.getPixel(x, y) != image.getPixel(image.getWidth() - 1, 0),
+          "contact glow is localized to the finger");
+      pad.cancelGesture();
+      pad.draw(canvas);
+      check(image.getPixel(x, y) == image.getPixel(image.getWidth() - 1, 0),
+          "cancel clears the glow and does not bring back the hint");
+    } finally {
+      pad.cancelGesture();
+      down.recycle();
       image.recycle();
     }
   }
@@ -274,14 +308,29 @@ final class TouchpadCenterProbe {
         try { session[0] = (TouchpadDialog) field(activity, "viewer"); }
         catch (Exception failure) { throw new RuntimeException(failure); }
       });
+      long enteredAt = SystemClock.uptimeMillis();
       await(() -> ONLINE.equals(service.active) && acquired.get() > 0, "input-only control acquired");
       test.waitForIdleSync();
       capture("touchpad-session");
+      int[] fullWidth = {0};
       test.runOnMainSync(() -> {
         try {
           TouchpadView pad = (TouchpadView) field(session[0], "pad");
           check(pad.isEnabled() && pad.getHeight() > 120, "full-screen pad enabled after claim");
-          check(find(session[0].getWindow().getDecorView(), "打开远程键盘") != null, "native keyboard entry");
+          check(drawsIntroHint(pad), "first ten seconds show the touch area hint");
+          View decor = session[0].getWindow().getDecorView();
+          check(decor.getWidth() > decor.getHeight(), "touchpad opens in landscape");
+          check(find(decor, "原生触控板测试电脑") == null, "device name stays off the touch surface");
+          View back = find(decor, "返回"), keyboard = find(decor, "键盘");
+          View left = find(decor, "左键"), right = find(decor, "右键");
+          check(back != null && keyboard != null && left != null && right != null, "four side controls");
+          check(back.getParent() == left.getParent() && keyboard.getParent() == right.getParent(),
+              "mouse buttons share rails with their upper controls");
+          check(back.getTop() == 0 && back.getBottom() == left.getTop() && left.getHeight() > back.getHeight()
+              && keyboard.getTop() == 0 && keyboard.getBottom() == right.getTop()
+              && right.getHeight() > keyboard.getHeight(), "short upper keys and long lower keys meet");
+          check(left.performClick() && right.performClick(), "both mouse keys accept clicks");
+          fullWidth[0] = pad.getWidth();
           long now = SystemClock.uptimeMillis();
           MotionEvent down = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, 50, 50, 0);
           MotionEvent move = MotionEvent.obtain(now, now + 30, MotionEvent.ACTION_MOVE, 110, 80, 0);
@@ -298,6 +347,18 @@ final class TouchpadCenterProbe {
         }
         return false;
       }, "touch gesture reaches native relative input protocol");
+      await(() -> {
+        int edges = 0;
+        for (JSONObject request : requests) {
+          JSONObject args = request.optJSONObject("args");
+          if (!request.optString("method").equals("input") || args == null
+              || !args.optString("kind").equals("button")) continue;
+          int mouseButton = args.optInt("button", -1);
+          if (mouseButton == 0 || mouseButton == 2)
+            edges |= 1 << (mouseButton + (args.optBoolean("down") ? 0 : 1));
+        }
+        return edges == 15;
+      }, "both side keys send balanced mouse down/up events");
       for (JSONObject request : requests) {
         String method = request.optString("method");
         JSONObject args = request.optJSONObject("args");
@@ -306,10 +367,39 @@ final class TouchpadCenterProbe {
         check(!method.equals("screen") && !method.toLowerCase(java.util.Locale.ROOT).contains("video"),
             "touchpad creates no video stream");
       }
+      test.runOnMainSync(() -> {
+        View back = find(session[0].getWindow().getDecorView(), "返回");
+        check(back.performClick(), "back opens touchpad menu");
+      });
+      capture("touchpad-menu");
+      test.runOnMainSync(() -> {
+        try {
+          TouchpadView pad = (TouchpadView) field(session[0], "pad");
+          View decor = session[0].getWindow().getDecorView();
+          check(pad.getWidth() < fullWidth[0] && !pad.isEnabled(), "menu shrinks and pauses the pad");
+          check(ONLINE.equals(service.active), "menu keeps the control lease");
+          check(find(decor, "设置") != null && find(decor, "切换设备") != null
+              && find(decor, "退出触控板") != null, "menu shows settings, device switch and exit");
+          check(find(decor, "继续全屏").performClick(), "resume expands the touchpad");
+          check(pad.isEnabled(), "resume restores input");
+        } catch (Exception failure) { throw new RuntimeException(failure); }
+      });
+      Thread.sleep(Math.max(0, enteredAt + 10_050 - SystemClock.uptimeMillis()));
+      test.runOnMainSync(() -> {
+        try {
+          TouchpadView pad = (TouchpadView) field(session[0], "pad");
+          check(!drawsIntroHint(pad), "touch area hint is gone after ten seconds");
+          checkContactGlow(pad);
+        } catch (Exception failure) { throw new RuntimeException(failure); }
+      });
+      capture("touchpad-idle");
       test.runOnMainSync(session[0]::dismiss);
       await(() -> released.get() > 0 && !ONLINE.equals(service.active), "dismiss releases the native control lease");
       // Reopen, drop the actual encrypted connection, then exercise the visible recovery action.
-      test.runOnMainSync(() -> { session[0] = new TouchpadDialog(activity, service, phone); session[0].show(); });
+      test.runOnMainSync(() -> {
+        session[0] = new TouchpadDialog(activity, service, phone, target -> {});
+        session[0].show();
+      });
       await(() -> ONLINE.equals(service.active) && acquired.get() > 1, "second touchpad session acquired");
       phone.close();desktop.close();
       Thread.sleep(850);test.waitForIdleSync();capture("touchpad-offline");
@@ -319,12 +409,15 @@ final class TouchpadCenterProbe {
         check(back.performClick() && !session[0].isShowing(), "offline return action closes the stale session");
       });
       connectFixture();
-      test.runOnMainSync(() -> { session[0] = new TouchpadDialog(activity, service, phone); session[0].show(); });
+      test.runOnMainSync(() -> {
+        session[0] = new TouchpadDialog(activity, service, phone, target -> {});
+        session[0].show();
+      });
       await(() -> ONLINE.equals(service.active) && acquired.get() > 2, "fresh connection works after returning to list");
       test.runOnMainSync(session[0]::dismiss);
       return "PASS touchpad center: three aligned outlined tiles, capability/offline/permission filtering, "
-          + "input-only loopback claim, native relative input, keyboard entry, clean release, offline recovery and new-connection reuse; "
-          + "screenshots: ui-check/control-center-touchpad.png, ui-check/touchpad-session.png";
+          + "landscape rails, native mouse input, ten-second hint, contact glow, side menu, clean release, offline recovery and new-connection reuse; "
+          + "screenshots: ui-check/control-center-touchpad.png, ui-check/touchpad-session.png, ui-check/touchpad-menu.png";
     } finally {
       if (session[0] != null) test.runOnMainSync(session[0]::dismiss);
       if (phone != null) service.peers.remove(ONLINE, phone);

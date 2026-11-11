@@ -2413,7 +2413,7 @@ public class MainActivity extends Activity {
       return;
     }
     if (viewer != null) viewer.dismiss();
-    TouchpadDialog session = new TouchpadDialog(this, service, peer);
+    TouchpadDialog session = new TouchpadDialog(this, service, peer, this::openTouchpad);
     viewer = session;
     session.setOnDismissListener(ignored -> {
       if (viewer == session) viewer = null;

@@ -4826,6 +4826,27 @@
     "右键": {
       "en": "Right click"
     },
+    "左键": {
+      "en": "Left click"
+    },
+    "触控区域": {
+      "en": "Touch area"
+    },
+    "正在拖动": {
+      "en": "Dragging"
+    },
+    "切换设备": {
+      "en": "Switch device"
+    },
+    "触感反馈": {
+      "en": "Haptic feedback"
+    },
+    "暂无其他在线设备": {
+      "en": "No other devices online"
+    },
+    "退出触控板": {
+      "en": "Exit touchpad"
+    },
     "同组设备可使用你已开启的功能": {
       "en": "Group devices can use the features you enabled"
     },

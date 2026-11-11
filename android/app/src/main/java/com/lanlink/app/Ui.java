@@ -385,6 +385,16 @@ final class Ui {
             for (int x = 6; x <= 18; x += 4) line(c, x, y, x + .3f, y);
           line(c, 7, 16, 17, 16);
           break;
+        case "mouse-left":
+        case "mouse-right":
+          boolean left = name.equals("mouse-left");
+          p.setStyle(Paint.Style.FILL);
+          c.drawRoundRect(left ? 5 : 13, 3, left ? 11 : 19, 11, 2, 2, p);
+          p.setStyle(Paint.Style.STROKE);
+          rect(c, 4, 2, 20, 22, 7);
+          line(c, 12, 3, 12, 11);
+          line(c, 5, 11, 19, 11);
+          break;
         case "eye":
           Path eye = new Path();
           eye.moveTo(2, 12);

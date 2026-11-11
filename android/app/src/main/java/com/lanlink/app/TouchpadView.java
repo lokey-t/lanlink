@@ -27,6 +27,11 @@ final class TouchpadView extends View implements AutoCloseable {
   int primaryId = -1, maxFingers;
   boolean multi, drag, moved, touching, compactDark;
   float surfaceOpacity = 1f;
+  private RadialGradient contactGlow;
+  private float glowRadius;
+  private final float[] contactPoints = new float[4];
+  private int contactCount;
+  private boolean introHintVisible;
   volatile boolean closed;
   final Runnable hold =
       () -> {
@@ -66,6 +71,19 @@ final class TouchpadView extends View implements AutoCloseable {
   /** Compact inset surface used by the full-screen controller's side pads. */
   void setCompactDark(boolean compact) {
     compactDark = compact;
+    invalidate();
+  }
+
+  void setStandaloneDark() {
+    glowRadius = 82 * getResources().getDisplayMetrics().density;
+    contactGlow = new RadialGradient(0, 0, glowRadius,
+        new int[] {0x42e5e5ef, 0x1ee5e5ef, 0x06e5e5ef, 0x00e5e5ef},
+        new float[] {0f, .32f, .68f, 1f}, Shader.TileMode.CLAMP);
+    invalidate();
+  }
+
+  void setIntroHintVisible(boolean visible) {
+    introHintVisible = visible;
     invalidate();
   }
 
@@ -119,9 +137,20 @@ final class TouchpadView extends View implements AutoCloseable {
     event(Wire.obj("kind", "button", "button", b, "down", down));
   }
 
+  void clickButton(int button) {
+    if (button == 0 && drag) return;
+    button(button, true);
+    button(button, false);
+    haptics.tap(button == 2);
+  }
+
   protected void onDraw(Canvas canvas) {
     super.onDraw(canvas);
     float density = getResources().getDisplayMetrics().density;
+    if (contactGlow != null) {
+      drawStandaloneSurface(canvas);
+      return;
+    }
     float inset = density, radius = (compactDark ? 26 : 24) * density;
     paint.setStyle(Paint.Style.FILL);
     paint.setColor(compactDark ? touching ? 0xff343b50 : 0xff252c3c : touching ? Ui.LILAC : Ui.BG);
@@ -150,6 +179,40 @@ final class TouchpadView extends View implements AutoCloseable {
       canvas.drawText(drag ? "正在拖动" : "触控板", getWidth() / 2f, getHeight() / 2f - 5 * density, paint);
       paint.setTextSize(11 * density);
       canvas.drawText("轻点单击 · 双指滚动 · 长按拖动", getWidth() / 2f, getHeight() / 2f + 20 * density, paint);
+    }
+  }
+
+  private void drawStandaloneSurface(Canvas canvas) {
+    canvas.drawColor(0xff121214);
+    paint.setStyle(Paint.Style.FILL);
+    if (touching) {
+      paint.setColor(Color.WHITE);
+      paint.setShader(contactGlow);
+      for (int i = 0; i < contactCount; i++) {
+        canvas.save();
+        canvas.translate(contactPoints[2 * i], contactPoints[2 * i + 1]);
+        canvas.drawCircle(0, 0, glowRadius, paint);
+        canvas.restore();
+      }
+      paint.setShader(null);
+    }
+    if (introHintVisible) {
+      paint.setTextAlign(Paint.Align.CENTER);
+      paint.setTextSize(14 * getResources().getDisplayMetrics().scaledDensity);
+      paint.setColor(0xff929298);
+      canvas.drawText(Language.t("触控区域"), getWidth() / 2f,
+          (getHeight() - paint.ascent() - paint.descent()) / 2f, paint);
+    }
+  }
+
+  private void updateGlowPoints(MotionEvent event) {
+    int lifted = event.getActionMasked() == MotionEvent.ACTION_POINTER_UP ? event.getActionIndex() : -1;
+    contactCount = 0;
+    for (int i = 0; i < event.getPointerCount() && 2 * contactCount < contactPoints.length; i++) {
+      if (i == lifted) continue;
+      contactPoints[2 * contactCount] = event.getX(i);
+      contactPoints[2 * contactCount + 1] = event.getY(i);
+      contactCount++;
     }
   }
 
@@ -263,9 +326,7 @@ final class TouchpadView extends View implements AutoCloseable {
         drag = false;
         haptics.dragEnd();
       } else if (!moved && maxFingers <= 2 && e.getEventTime() - downAt < 400) {
-        button(multi ? 2 : 0, true);
-        button(multi ? 2 : 0, false);
-        haptics.tap(multi);
+        clickButton(multi ? 2 : 0);
         performClick();
       }
       haptics.reset();
@@ -273,6 +334,7 @@ final class TouchpadView extends View implements AutoCloseable {
       starts.clear();
       intercept(false);
     }
+    if (contactGlow != null && touching) updateGlowPoints(e);
     invalidate();
     return true;
   }
