@@ -359,7 +359,8 @@ export class InputTransport {
     const appAllowed = permission?.appEnabled === true && permission?.peerAllowed === true;
     const external = record.external === true;
     const peer = this.service.peers.get(id);
-    const bluetooth = (external || appAllowed && peer?.info?.capabilities?.bluetoothControl === 1) && this.ready(id);
+    const canTrackCursor = external || peer?.info?.capabilities?.hidCursorSession === 1;
+    const bluetooth = canTrackCursor && (external || appAllowed) && this.ready(id);
     const network = !external && appAllowed && permission?.supported !== false && permission?.systemGranted === true;
     const capability = this.adapter?.peripheralSupported;
     const active = this.service.active === id ? this.service.activeSession?.transport || 'network' : 'none';
@@ -369,7 +370,7 @@ export class InputTransport {
       authorization: external || appAllowed ? 'allowed' : 'denied',
       capabilities: { bluetooth: capability === true ? 'supported' : capability === false ? 'unsupported' : 'unknown', network: external || permission?.supported === false ? 'unsupported' : permission ? 'supported' : 'unknown' },
       readiness: {
-        bluetooth: bluetooth ? 'ready' : !this.adapter?.hidServiceReady ? 'unavailable' : !this.binding(id) ? 'pairing_required' : host?.reportSubscribed ? 'degraded' : 'connecting',
+        bluetooth: bluetooth ? 'ready' : !canTrackCursor || !this.adapter?.hidServiceReady ? 'unavailable' : !this.binding(id) ? 'pairing_required' : host?.reportSubscribed ? 'degraded' : 'connecting',
         network: network ? 'ready' : 'unavailable',
       },
       bluetooth: {

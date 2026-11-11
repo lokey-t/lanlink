@@ -63,7 +63,7 @@ export class Service extends EventEmitter {
   }
   log(message) { this.logs.unshift({ time: Date.now(), message: String(message).slice(0, 300) }); this.logs.length = Math.min(this.logs.length, runtimeLogLimit); this.emit('change'); }
   trackTask(task) { this.messageTasks.add(task); const done = () => this.messageTasks.delete(task); task.then(done, done); return task; }
-  identity() { return { id: this.config.id, name: this.config.name, platform: process.platform, masterSelection:masterSelection(this),layout:layoutSelection(this),capabilities: { ...this.native.capabilities,qualityProbe:1,qualityBuild,staging:1,quic:this.quic.enabled?1:0,motionV2:this.quic.native?.binaryMotion?2:0,bulk:1,rtcVideo:1, controlPrepare: true, bluetoothControl: 1, hidSettings: 1, autoHidMaster: ['darwin','win32'].includes(process.platform) ? 1 : 0, autoHidTarget:this.native.capabilities.hidDirectPairing === true ? 1 : 0, dualLink: true, memberKey: this.group.own.key } }; }
+  identity() { return { id: this.config.id, name: this.config.name, platform: process.platform, masterSelection:masterSelection(this),layout:layoutSelection(this),capabilities: { ...this.native.capabilities,qualityProbe:1,qualityBuild,staging:1,quic:this.quic.enabled?1:0,motionV2:this.quic.native?.binaryMotion?2:0,bulk:1,rtcVideo:1, controlPrepare: true, bluetoothControl: 1, hidCursorSession: 1, hidSettings: 1, autoHidMaster: ['darwin','win32'].includes(process.platform) ? 1 : 0, autoHidTarget:this.native.capabilities.hidDirectPairing === true ? 1 : 0, dualLink: true, memberKey: this.group.own.key } }; }
   async start() {
     this.updater=new Updater(this);
     await this.updater.loadResult();
@@ -257,6 +257,26 @@ export class Service extends EventEmitter {
       await stream; return;
     }
     if (m.type === 'edge-glow') { this.inboundEdge(peer,m);return; }
+    if (m.type === 'cursor') {
+      const session = this.activeSession;
+      if (this.active !== peer.remote.id || session?.transport !== 'bluetooth' || !session.committed ||
+          session.edgeSession !== m.edgeSession ||
+          ![m.x, m.y].every(value => Number.isFinite(value) && value >= 0 && value <= 1) ||
+          ![m.width, m.height].every(value => Number.isFinite(value) && value > 1)) return;
+      this.position = { x:m.x, y:m.y };
+      session.cursorAt = performance.now();
+      const { width, height } = m;
+      session.cursorBounds = { width, height };
+      if (!session.cursorArmed && m.x * width > 1 && m.x * width < width - 2 &&
+          m.y * height > 1 && m.y * height < height - 2) {
+        session.cursorArmed = true;
+        this.edge.waitingForLeave = false;
+      }
+      const intent = this.controlIntent;
+      if (intent?.fromSession === session && intent.edgeTrigger && !intent.committed &&
+          !this.positionTouches(intent.edge, width, height)) this.cancelPendingEdge();
+      return;
+    }
     if(m.type==='identity')queueMicrotask(()=>this.quic.connect(peer).catch(()=>{}));
     if (m.type === 'identity') {
       peer.info={name:String(m.name).slice(0,80),platform:String(m.platform).slice(0,30),capabilities:m.capabilities||{}};this.androidRecovery.identity(peer);
@@ -481,11 +501,16 @@ export class Service extends EventEmitter {
       this.edge.waitForLeave();this.log('系统接管输入，已结束本次控制并返回本机');this.emit('change');return;
     }
     if (e.type === 'input-restored') { this.inputDesktopBlocked = false; this.edge.waitForLeave(); this.emit('change'); return; }
-    if (e.type === 'cursor' && this.owner && Date.now() - (this.cursorSentAt || 0) >= 32) {
-      const peer = this.peers.get(this.owner.id);
-      if (peer && !peer.closed && this.owner.until > Date.now() && this.config.permissions.input && this.consent.allowed(this.owner.id,'input') && e.width > 1 && e.height > 1) {
-        this.cursorSentAt = Date.now();
-        peer.send({ type: 'cursor', x: Math.max(0, Math.min(1, e.x / (e.width - 1))), y: Math.max(0, Math.min(1, e.y / (e.height - 1))) });
+    if (e.type === 'cursor' && this.owner) {
+      const owner = this.owner;
+      const peer = this.peers.get(owner.id);
+      const now = performance.now();
+      const bluetooth = owner.transport === 'bluetooth';
+      if ((!bluetooth || owner.pointer && !e.synthetic) && now - (owner.cursorSentAt ?? -Infinity) >= 32 &&
+          peer && !peer.closed && owner.until > Date.now() && this.config.permissions.input && this.consent.allowed(owner.id,'input') && e.width > 1 && e.height > 1) {
+        owner.cursorSentAt = now;
+        peer.send({ type:'cursor', x:Math.max(0, Math.min(1, e.x / (e.width - 1))), y:Math.max(0, Math.min(1, e.y / (e.height - 1))),
+          ...(bluetooth ? {edgeSession:owner.edgeSession, width:e.width, height:e.height} : {}) });
       }
       return;
     }
@@ -540,7 +565,7 @@ export class Service extends EventEmitter {
     return true;
   }
   remoteEdge(phase,edge,progress){
-    const session=this.activeSession,p=this.peers.get(this.active);if(!session?.committed || !this.capture || !p || p.closed)return null;
+    const session=this.activeSession,p=this.peers.get(this.active);if(!session?.committed || session.transport==='bluetooth' || !this.capture || !p || p.closed)return null;
     if(phase==='cancel' && !session.remoteGlow)return null;
     if(phase==='countdown' && session.remoteGlow && Date.now()-(session.glowAt||0)<50 && progress<1)return null;
     const message={type:'edge-glow',phase,edge,progress,session:session.edgeSession,seq:session.glowSeq=(session.glowSeq||0)+1};
@@ -558,9 +583,20 @@ export class Service extends EventEmitter {
   checkReturnEdge() {
     if (!this.active || !this.capture || this.switching || this.returning) return;
     if(masterSelection(this) && !this.isEdgeMaster())return this.returnLocal().catch(e=>this.log(e.message));
-    if (this.activeSession?.transport === 'bluetooth') return;
+    const session = this.activeSession;
+    if (session?.transport === 'bluetooth') {
+      if (session.external) return;
+      const now = performance.now();
+      if (now - (session.cursorAt ?? session.cursorStartedAt) > 2000) return this.returnLocal().catch(e=>this.log(e.message));
+      if (!session.cursorArmed || now - session.cursorAt > 250) {
+        this.edge.candidate = null;
+        this.edge.progress = null;
+        return;
+      }
+    }
     const p = this.peers.get(this.active); if (!p) return;
-    const width = p.info?.capabilities?.width || 1920, height = p.info?.capabilities?.height || 1080;
+    const width = session?.cursorBounds?.width || p.info?.capabilities?.width || 1920;
+    const height = session?.cursorBounds?.height || p.info?.capabilities?.height || 1080;
     const opposite = { left: 'right', right: 'left', top: 'bottom', bottom: 'top' }[this.enteredEdge];
     const shared=layoutSelection(this).revision>0;
     const targets=shared?reachableLayoutEdges(this,this.active):{[opposite]:this.config.id};
@@ -597,9 +633,10 @@ export class Service extends EventEmitter {
     const p = external ? null : this.getPeer(id);
     const preference = this.inputTransport?.preference(id);
     const host = this.inputTransport?.host(id);
-    const bluetooth = !forceNetwork && capture && !screen && this.inputTransport?.ready(id) && (external || p.info?.capabilities?.bluetoothControl === 1);
+    const bluetooth = !forceNetwork && capture && !screen && this.inputTransport?.ready(id) && (external || p.info?.capabilities?.hidCursorSession === 1);
     const transport = selectTransport(preference, bluetooth, !external);
     if (transport === 'none') {
+      if (!external && capture && !screen && p.info?.capabilities?.hidCursorSession !== 1) throw Error('请升级目标设备后重试');
       const readiness = this.inputTransport?.describe(id)?.readiness?.bluetooth;
       const host = this.inputTransport?.host(id);
       const detail = readiness === 'pairing_required' ? '尚未与电脑完成蓝牙配对'
@@ -662,7 +699,9 @@ export class Service extends EventEmitter {
       if (capture && transport === 'network') await p.request('input', { kind: 'move', ...this.position });
       check(); if (capture) await this.native.call('mode', { remote: true, ...(transport === 'bluetooth' ? { inputTransport:transport } : {}) }); check();
       if (transport === 'network') for(const code of intent.carriedKeys||[]){await p.request('input',{kind:'key',code,down:true});this.keys.add(code);check();}
-      intent.committed=true;this.edge.reset(); this.log('控制已切换到 ' + (p?.info?.name || this.inputTransport?.record(id).name || id));
+      intent.committed=true;this.edge.reset();
+      if (transport === 'bluetooth' && !external) intent.cursorStartedAt = performance.now();
+      this.log('控制已切换到 ' + (p?.info?.name || this.inputTransport?.record(id).name || id));
       if (capture && !handoff) {this.edgeFeedback=null;this.edgeTransition = { id: randomUUID(), edge, at: Date.now() };if(this.config.edgeGlow!==false)this.emit('edge-feedback',{phase:'depart',edge,hideAway:!!this.config.edgeGlowHideAway});}
     } catch (e) {
       this.cancelEdgeFeedback();

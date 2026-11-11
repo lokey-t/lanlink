@@ -1813,138 +1813,6 @@ struct HidTargetGuide: View {
         }.padding(22).frame(width:460).buttonStyle(FlatButtonStyle())
     }
 }
-struct PremiumFeaturesView: View {
-    @ObservedObject var model: Model
-    @Environment(\.dismiss) private var dismiss
-    @State private var showingHid = false
-    @State private var devices: [[String:Any]] = []
-    @State private var selected: Device?
-    @State private var bluetoothName = ""
-    @State private var localBluetoothName = ""
-    @State private var busy = false
-    @State private var error = ""
-
-    private func refresh() async {
-        do {
-            let result = try await model.call("group-hid-status")
-            if !Task.isCancelled { devices = result["devices"] as? [[String:Any]] ?? [] }
-        } catch {
-            if !Task.isCancelled && self.error.isEmpty { self.error = Model.displayMessage(error.localizedDescription) }
-        }
-    }
-
-    private func perform(_ action: @escaping () async throws -> Void) {
-        guard !busy else { return }
-        busy = true
-        error = ""
-        Task {
-            defer { busy = false }
-            do { try await action(); await refresh() }
-            catch { self.error = Model.displayMessage(error.localizedDescription) }
-        }
-    }
-
-    private func row(_ data: [String:Any]) -> some View {
-        let device = Device(id:data.masterChoiceID, name:data["name"] as? String ?? L("设备"), platform:data["platform"] as? String ?? "")
-        let enabled = data["enabled"] as? Bool == true
-        let connected = data["incoming"] as? Bool == true || data["outgoing"] as? Bool == true
-        let toggleLabel = L(enabled ? "停用蓝牙键鼠" : "启用蓝牙键鼠")
-        return HStack(spacing:8) {
-            Button {
-                perform { _ = try await model.call("group-hid-toggle", ["id":device.id, "enabled":!enabled]) }
-            } label: {
-                Image(systemName:device.symbol).foregroundStyle(enabled ? Palette.accent : Color.gray)
-                    .frame(width:36,height:36)
-            }.buttonStyle(.plain).help(toggleLabel).accessibilityLabel(toggleLabel)
-            Button {
-                bluetoothName = ""
-                localBluetoothName = ""
-                error = ""
-                selected = device
-            } label: {
-                HStack {
-                    Text(device.name).lineLimit(1)
-                    Spacer()
-                    Text(L(connected ? "已连接" : data["incoming"] as? Bool == nil ? "状态未知" : "未连接"))
-                        .foregroundStyle(connected ? Color.green : Palette.muted)
-                }.frame(maxWidth:.infinity,alignment:.leading).contentShape(Rectangle())
-            }.buttonStyle(.plain)
-        }.padding(12).background(Palette.card,in:RoundedRectangle(cornerRadius:16))
-            .overlay(RoundedRectangle(cornerRadius:16).stroke(Palette.line))
-    }
-
-    var body: some View {
-        VStack(alignment:.leading,spacing:16) {
-            HStack {
-                if showingHid { Button(L("返回")) { showingHid = false; error = "" } }
-                Text(L(showingHid ? "蓝牙 HID 键鼠" : "高价功能")).font(.title2)
-                Spacer()
-                Button(L("完成")) { dismiss() }
-            }
-            if showingHid {
-                Text(L("点设备名称查看配对引导。点左侧图标切换蓝牙键鼠，停用后保留蓝牙连接并使用网络。"))
-                    .font(.caption).foregroundStyle(Palette.muted)
-                if devices.isEmpty { Text(L("暂无组内设备")).foregroundStyle(Palette.muted) }
-                ScrollView {
-                    VStack(spacing:8) { ForEach(devices,id: \.masterChoiceID) { row($0) } }.padding(1)
-                }.frame(maxHeight:340)
-                if selected == nil && !error.isEmpty { Text(error).font(.caption).foregroundStyle(.red) }
-            } else {
-                Button { showingHid = true } label: {
-                    HStack { Label(L("蓝牙 HID 键鼠"),systemImage:"keyboard"); Spacer(); Image(systemName:"chevron.right") }
-                }
-            }
-        }.padding(22).frame(width:490).buttonStyle(FlatButtonStyle())
-        .disabled(busy)
-        .task(id:showingHid) {
-            guard showingHid else { return }
-            while !Task.isCancelled {
-                if !busy { await refresh() }
-                do { try await Task.sleep(for:.seconds(2)) } catch { break }
-            }
-        }
-        .sheet(item:$selected) { device in
-            VStack(alignment:.leading,spacing:14) {
-                Text(device.name).font(.title2)
-                Text(L("请先让对方设备准备蓝牙配对，再打开本机的系统蓝牙设置，找到下方名称并连接。"))
-                if !bluetoothName.isEmpty { Text(bluetoothName).font(.headline).textSelection(.enabled) }
-                if !localBluetoothName.isEmpty {
-                    Text(LF("请在对方的系统蓝牙设置中连接 {0}。", localBluetoothName))
-                }
-                Button(L("让本机可被连接")) {
-                    perform {
-                        let result = try await model.call("group-hid-prepare", ["id":device.id])
-                        localBluetoothName = result["name"] as? String ?? ""
-                    }
-                }
-                if !error.isEmpty { Text(error).font(.caption).foregroundStyle(.red) }
-                HStack {
-                    Button(L("取消")) { selected = nil; error = "" }
-                    Spacer()
-                    if bluetoothName.isEmpty {
-                        Button(L("开启蓝牙配对")) {
-                            perform {
-                                let result = try await model.call("group-hid-pair", ["id":device.id])
-                                bluetoothName = result["name"] as? String ?? device.name
-                            }
-                        }
-                    } else {
-                        Button(L("打开蓝牙设置")) {
-                            if let url = URL(string:"x-apple.systempreferences:com.apple.BluetoothSettings") { NSWorkspace.shared.open(url) }
-                        }
-                        Button(L("已连接，确认")) {
-                            perform {
-                                let result = try await model.call("group-hid-pair", ["id":device.id,"confirm":true])
-                                guard result["connected"] as? Bool == true else { throw model.failure("蓝牙键鼠尚未就绪") }
-                                selected = nil
-                            }
-                        }
-                    }
-                }
-            }.padding(22).frame(width:490).buttonStyle(FlatButtonStyle()).disabled(busy)
-        }
-    }
-}
 struct InputTransportView: View {
     @ObservedObject var model: Model
     @Environment(\.dismiss) private var dismiss
@@ -2351,7 +2219,6 @@ struct SettingsView: View {
     @State var dirty = false; @State var saving = false; @State var status = "修改后点击保存；切换页面会保留草稿"
     @State var logs = false;@State var switchMode="dwell";@State var edgeHotkey="ctrl-alt";@State var dwell=100.0
     @State private var exportingLogs = false
-    @State private var showingPremium = false
 
     @MainActor private func exportLogs() async {
         exportingLogs = true
@@ -2485,11 +2352,6 @@ struct SettingsView: View {
                     if !(model.clipboardSettings["upload"] as? Bool ?? true) || !(model.clipboardSettings["download"] as? Bool ?? true){Toggle(L("在首页显示快捷同步剪贴板按钮"),isOn:Binding(get:{model.clipboardSettings["shortcuts"] as? Bool ?? false},set:{model.perform("settings",["clipboardShortcuts":$0])}))}
                     Text(L("开关立即保存，成功后生效。关闭上传后停止后续自动上传；已经共享的内容仍按有效期保留。同步保留单独设置的设备授权限制。")).font(.caption).foregroundStyle(.secondary)
                 }.padding(22).background(Palette.card,in:RoundedRectangle(cornerRadius:18))
-                VStack(alignment:.leading,spacing:16) {
-                    Button { showingPremium = true } label: {
-                        HStack { Text(L("高价功能")).font(.headline); Spacer(); Image(systemName:"chevron.right") }
-                    }
-                }.padding(22).background(Palette.card,in:RoundedRectangle(cornerRadius:18))
                 VStack(alignment:.leading,spacing:16){
                     Text(L("其他")).font(.headline)
 
@@ -2501,7 +2363,6 @@ struct SettingsView: View {
         }
         Text(Model.displayMessage(status)).font(.caption).foregroundStyle(.secondary)
     }.buttonStyle(FlatButtonStyle()).toggleStyle(.switch)
-        .sheet(isPresented:$showingPremium) { PremiumFeaturesView(model:model) }
         .onAppear { load() }.onChange(of: active) { _, shown in if shown && !dirty && !saving { load() } }
         .onChange(of: model.state["groupId"] as? String) { _, _ in if !dirty && !saving { load() } }
     }

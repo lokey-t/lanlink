@@ -13,27 +13,27 @@ LanLink brings the computers and Android phones on your local network into one w
 
 No account is required, and everyday collaboration works without cloud services or internet access. Devices join a group through a temporary numeric code or QR code, then exchange data over encrypted direct connections. Desktop clients use native windows and ship with their runtime.
 
-> **Current version: 0.92.0.** This README describes the current working tree; it does not imply that every platform has passed physical-device acceptance testing. See [validation status](#validation) for the recorded scope. The repository does not yet include a project-wide license; see [licensing and third-party components](#license).
+> **Current version: 0.92.1.** This README describes the current working tree; it does not imply that every platform has passed physical-device acceptance testing. See [validation status](#validation) for the recorded scope. The repository does not yet include a project-wide license; see [licensing and third-party components](#license).
 
 
 <a id="downloads"></a>
 ## v0.92 downloads and updates
 
-The release version is **0.92.0**, tagged `v0.92.0`. Links below target this release; select the attachment for your device.
+The release version is **0.92.1**, tagged `v0.92.1`. Links below target this release; select the attachment for your device.
 
 | Device / installation | GitHub download | Gitee release |
 | --- | --- | --- |
-| Windows 10/11 x64 · portable | [LanLink-0.92.0-windows-x64.zip](https://github.com/lokey-t/lanlink/releases/download/v0.92.0/LanLink-0.92.0-windows-x64.zip) | [Release](https://gitee.com/lokey-t/lanlink/releases/tag/v0.92.0) |
-| Windows 10/11 x64 · installer | [LanLink-0.92.0-windows-x64-setup.exe](https://github.com/lokey-t/lanlink/releases/download/v0.92.0/LanLink-0.92.0-windows-x64-setup.exe) | [Release](https://gitee.com/lokey-t/lanlink/releases/tag/v0.92.0) |
-| macOS 14+ · Apple Silicon DMG | [LanLink-0.92.0-macos-arm64.dmg](https://github.com/lokey-t/lanlink/releases/download/v0.92.0/LanLink-0.92.0-macos-arm64.dmg) | [Release](https://gitee.com/lokey-t/lanlink/releases/tag/v0.92.0) |
-| macOS 14+ · Apple Silicon ZIP | [LanLink-0.92.0-macos-arm64.zip](https://github.com/lokey-t/lanlink/releases/download/v0.92.0/LanLink-0.92.0-macos-arm64.zip) | [Release](https://gitee.com/lokey-t/lanlink/releases/tag/v0.92.0) |
-| Android 10+ · production-signed | [LanLink-0.92.0-android.apk](https://github.com/lokey-t/lanlink/releases/download/v0.92.0/LanLink-0.92.0-android.apk) | [Release](https://gitee.com/lokey-t/lanlink/releases/tag/v0.92.0) |
+| Windows 10/11 x64 · portable | [LanLink-0.92.1-windows-x64.zip](https://github.com/lokey-t/lanlink/releases/download/v0.92.1/LanLink-0.92.1-windows-x64.zip) | [Release](https://gitee.com/lokey-t/lanlink/releases/tag/v0.92.1) |
+| Windows 10/11 x64 · installer | [LanLink-0.92.1-windows-x64-setup.exe](https://github.com/lokey-t/lanlink/releases/download/v0.92.1/LanLink-0.92.1-windows-x64-setup.exe) | [Release](https://gitee.com/lokey-t/lanlink/releases/tag/v0.92.1) |
+| macOS 14+ · Apple Silicon DMG | [LanLink-0.92.1-macos-arm64.dmg](https://github.com/lokey-t/lanlink/releases/download/v0.92.1/LanLink-0.92.1-macos-arm64.dmg) | [Release](https://gitee.com/lokey-t/lanlink/releases/tag/v0.92.1) |
+| macOS 14+ · Apple Silicon ZIP | [LanLink-0.92.1-macos-arm64.zip](https://github.com/lokey-t/lanlink/releases/download/v0.92.1/LanLink-0.92.1-macos-arm64.zip) | [Release](https://gitee.com/lokey-t/lanlink/releases/tag/v0.92.1) |
+| Android 10+ · production-signed | [LanLink-0.92.1-android.apk](https://github.com/lokey-t/lanlink/releases/download/v0.92.1/LanLink-0.92.1-android.apk) | [Release](https://gitee.com/lokey-t/lanlink/releases/tag/v0.92.1) |
 
 The Windows installer creates Start menu and desktop shortcuts and registers an uninstall entry; the portable edition needs no installation. On macOS, drag the app from the DMG into Applications. Current Mac builds are ad-hoc signed and not notarized. Android requires system installation confirmation and the same APK signing key as the installed app.
 
 Updates default to the stable channel. In Settings, you can choose the stable or beta channel, disable automatic checks, or check manually. Windows x64, macOS arm64, and Android each have a separate incremental update package. Unsupported base versions, missing patches and verification failures fall back to the platform's full update. Exit the desktop app after download to install; Android uses the system installer. Older clients without an updater require a manual first upgrade. See [update publishing instructions](docs/updates.md).
 
-This release adds Bluetooth HID keyboard and mouse sharing between Windows and macOS devices in a group, improves the Android interface and landscape touchpad, and fixes incremental updates. See [release notes](RELEASE_NOTES.md).
+v0.92.1 fixes returning the mouse after crossing screens over Bluetooth HID and removes Premium features from desktop Settings. The HID channel is available under Group Device Permissions. See [release notes](RELEASE_NOTES.md).
 
 On Android, Settings → About brings together version information, update controls, and log export. On systems that support predictive back, the back gesture previews the parent settings page.
 
@@ -167,7 +167,7 @@ npm run icons
 npm start
 ```
 
-Output: `dist/LanLink-0.92.0-windows-x64/` and a `.zip` with the same name. `-VideoRuntime` is optional, but without FFmpeg the desktop is limited to the JPEG fallback and cannot view phone screens that provide H.264 only. Build the native QUIC library before running the packaging script.
+Output: `dist/LanLink-0.92.1-windows-x64/` and a `.zip` with the same name. `-VideoRuntime` is optional, but without FFmpeg the desktop is limited to the JPEG fallback and cannot view phone screens that provide H.264 only. Build the native QUIC library before running the packaging script.
 
 </details>
 
@@ -183,7 +183,7 @@ npm start
 
 The script builds the Swift UI, system bridge, and Rust QUIC library. By default, it also builds and bundles FFmpeg from a pinned source release. Set `LANLINK_FFMPEG_DIST` to use an existing video runtime directory containing `bin/ffmpeg` and `LICENSE.txt`.
 
-Apple Silicon output: `dist/LanLink-0.92.0-macos-arm64/LanLink.app` and `dist/LanLink-0.92.0-macos-arm64.zip`. The Intel path uses `macos-x64` and still needs validation. The current script uses ad-hoc signing, without Apple Developer signing or notarization.
+Apple Silicon output: `dist/LanLink-0.92.1-macos-arm64/LanLink.app` and `dist/LanLink-0.92.1-macos-arm64.zip`. The Intel path uses `macos-x64` and still needs validation. The current script uses ad-hoc signing, without Apple Developer signing or notarization.
 
 </details>
 

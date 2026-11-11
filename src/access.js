@@ -27,7 +27,7 @@ export class Access {
     if(!keys.length)throw Error('请选择需要的权限');
     const keyboardMouse = capture && keys.length === 1 && keys[0] === 'input';
     const preference = this.service.inputTransport?.preference(id);
-    const hasHid = keyboardMouse && peer.info?.capabilities?.bluetoothControl === 1 &&
+    const hasHid = keyboardMouse && peer.info?.capabilities?.hidCursorSession === 1 &&
       preference !== 'network_only' && this.service.inputTransport?.ready(id);
     let report = hasHid ? await this.read(peer) : null;
     const bluetooth = hasHid && report.inputTransport?.bluetoothEnabled !== false;

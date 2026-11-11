@@ -428,6 +428,63 @@ test('Bluetooth carries both mouse and keyboard without network injection and pr
   await assert.rejects(a.switchTo(id), /CONSENT/);
 });
 
+test('Bluetooth cross-screen control returns on the live target cursor and ignores stale sessions', async t => {
+  const {a,b,id} = await bluetoothFixture(t);
+  clearInterval(a.edgeTimer);
+  await a.settings({edges:{right:id},dwell:0});
+  a.edge.cooldown = 0;
+  await a.nativeEvent({type:'cursor',x:1919,y:540,width:1920,height:1080});
+  a.edge.cooldown = 0;
+  const session = a.activeSession;
+  assert.equal(session.transport, 'bluetooth');
+  const sample = async x => {
+    const previous = session.cursorAt;
+    b.owner.cursorSentAt = -Infinity;
+    await b.nativeEvent({type:'cursor', x, y:300, width:1200, height:800});
+    await until(()=>session.cursorAt !== previous);
+  };
+
+  await sample(0);
+  await a.checkReturnEdge();
+  assert.equal(a.active, id, 'the cursor may already be at the return edge on arrival');
+  await sample(600);
+  assert.equal(session.cursorArmed, true);
+  await a.message(a.getPeer(id), {
+    type:'cursor', edgeSession:randomUUID(), x:0, y:.5, width:1200, height:800,
+  });
+  await a.checkReturnEdge();
+  assert.equal(a.active, id, 'a sample from an ended lease must not move the active cursor');
+
+  await sample(0);
+  await a.checkReturnEdge();
+  assert.equal(a.active, null);
+  assert.equal(b.owner, null);
+  assert.ok(a.native.calls.some(call=>call.method==='mode' && call.args.remote === false));
+  assert.ok(a.native.calls.some(call=>call.method==='warp' && call.args.x === .985));
+  assert.deepEqual(a.native.calls.filter(call=>call.method==='hid-send').at(-1).args.reports,
+    [[1,[0,0,0,0]],[2,[0,0,0,0,0,0,0,0]]]);
+});
+
+test('Bluetooth cross-screen control releases capture if target cursor feedback stops', async t => {
+  const {a,b,id} = await bluetoothFixture(t);
+  clearInterval(a.edgeTimer);
+  await a.switchTo(id);
+  a.activeSession.cursorStartedAt = performance.now() - 2100;
+  await a.checkReturnEdge();
+  assert.equal(a.active, null);
+  assert.equal(b.owner, null);
+});
+
+test('Bluetooth cross-screen control uses the network with a target that cannot report cursor feedback', async t => {
+  const {a,b,id} = await bluetoothFixture(t);
+  delete a.getPeer(id).info.capabilities.hidCursorSession;
+  await a.switchTo(id);
+  assert.equal(a.activeSession.transport, 'network');
+  assert.equal(b.owner.transport, 'network');
+  await a.inputTransport.save(id,{preference:'bluetooth_only'});
+  await assert.rejects(a.switchTo(id), /请升级目标设备/);
+});
+
 test('Bluetooth loss releases the old session before authorized network fallback and respects only modes', async t => {
   const {a,b,id,disconnect} = await bluetoothFixture(t);
   await a.inputTransport.save(id,{preference:'network_only'});
