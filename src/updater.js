@@ -9,8 +9,10 @@ import {promisify} from 'node:util';
 import {gunzip} from 'node:zlib';
 import {newer,materialize} from './update-package.js';
 import {buildInfo} from './build-info.js';
+import {commitConfig} from './identity.js';
 export const releaseFeeds=['https://api.github.com/repos/lokey-t/lanlink/releases/latest','https://gitee.com/api/v5/repos/lokey-t/lanlink/releases/latest'];
 const packageLimit = 512 * 1024 * 1024;
+const checkInterval = 6 * 3600000;
 async function fetchHttps(address, signal) {
  let url = new URL(address);
  for (let redirects = 0; redirects < 6; redirects++) {
@@ -59,7 +61,8 @@ export async function release(channel='stable', target=process.platform+'-'+proc
   for await (const entry of channelReleases(feed, channel, 8000)) {
    const assets = Array.isArray(entry.assets) ? entry.assets : [];
    const asset = assets.find(a => a.name === 'lanlink-update.json');
-   const candidate = {version:entry.tag_name.replace(/^v/, ''), assets, page:releasePage(feed, entry.tag_name)};
+   const notes = typeof entry.body === 'string' ? entry.body.trim() : '';
+   const candidate = {version:entry.tag_name.replace(/^v/, ''), assets, notes, page:releasePage(feed, entry.tag_name)};
    versions.push(candidate);
    if (!asset) continue;
    try {
@@ -82,9 +85,11 @@ export async function release(channel='stable', target=process.platform+'-'+proc
   const mirrors = candidates.filter(mirror => mirror.version === candidate.version);
   if (!validDescriptor(full) || (candidate.version !== highest.version && !newer(candidate.version,installed))) continue;
   const source = mirrors.find(mirror => listedAsset(mirror,full.name));
-  if (source) return {manifest:candidate.manifest,version:candidate.version,releases:mirrors,page:source.page};
+  if (source) return {manifest:candidate.manifest,version:candidate.version,releases:mirrors,page:source.page,
+   notes:source.notes || mirrors.find(mirror => mirror.notes)?.notes || ''};
  }
- return {version:highest.version,releases:[],page:highest.page};
+ return {version:highest.version,releases:[],page:highest.page,
+  notes:candidates.find(candidate => candidate.version === highest.version && candidate.notes)?.notes || ''};
 }
 export async function assetBytes(releases, descriptor, {file, onProgress = () => {}} = {}) {
  if (!validDescriptor(descriptor)) throw new UpdateError(missingPackage);
@@ -169,21 +174,42 @@ export class Updater{
  state(){
   const channel=this.channel();
   const status=this.status.phase==='ready'||this.checkedChannel===channel?this.status:{phase:'idle'};
-  return {...status,result:this.result,updateChannel:channel,autoCheckUpdates:this.service.config.autoCheckUpdates!==false};
+  const autoCheckUpdates=this.service.config.autoCheckUpdates!==false;
+  const offer=status.phase==='available'||status.phase==='unavailable';
+  const reminder=this.service.config.updateReminders?.[channel]?.[status.version] ?? 0;
+  const failed=this.result?.phase==='failed'&&this.result.version===status.version;
+  const prompt=offer && reminder!==-1 && (this.manualCheck || (autoCheckUpdates && !failed && reminder<=Date.now()));
+  return {...status,result:this.result,updateChannel:channel,autoCheckUpdates,prompt};
  }
- start(){this.timer=setInterval(()=>this.automatic(),6*3600000);this.timer.unref();this.automatic();}
- automatic(){if(this.service.config.autoCheckUpdates!==false)this.check().catch(()=>{});}
+ async deferPrompt({channel,version,choice}) {
+  if (!['stable','beta'].includes(channel) || typeof version!=='string' || !/^\d+\.\d+\.\d+$/.test(version) ||
+      !['later','skip'].includes(choice)) throw Error('无效的更新提醒');
+  const until=choice==='skip' ? -1 : Date.now()+checkInterval;
+  await commitConfig(this.service.dir,this.service.config,config=>({
+   updateReminders:{...config.updateReminders,[channel]:{...config.updateReminders?.[channel],[version]:until}}
+  }));
+  if (this.checkedChannel===channel && this.status.version===version) this.manualCheck=false;
+  return this.state();
+ }
+ start(){this.timer=setInterval(()=>this.automatic(),checkInterval);this.timer.unref();this.automatic();}
+ automatic(){if(this.service.config.autoCheckUpdates!==false)this.check(false).catch(()=>{});}
  close(){clearInterval(this.timer);}
  canChangeChannel(){return !this.installing&&this.status.phase!=='ready';}
- beginInstall(){
+ beginInstall({channel,version}={}){
+  if (version!==undefined && (channel!==this.channel() || this.state().phase!=='available' || this.status.version!==version))
+   throw new UpdateError('更新信息已变化，请重新检查更新');
   if (!this.busy && this.status.phase !== 'ready') void this.install().catch(() => {});
   return this.state();
  }
- async check(){
-  if(this.busy||this.status.phase==='ready')return this.state();
+ async check(manual=true){
+  if(this.busy||this.status.phase==='ready'){
+   if(manual && this.status.phase==='checking' && this.checkedChannel===this.channel()) this.manualCheck=true;
+   return this.state();
+  }
   this.busy=true;
   const channel=this.channel();
   this.checkedChannel=channel;
+  this.manualCheck=manual;
   this.status={phase:'checking'};
   try{
    const selected=await release(channel,this.target);
@@ -191,9 +217,9 @@ export class Updater{
    if(!newer(selected.version,buildInfo.version)) {
     this.status={phase:'current',message:newer(buildInfo.version,selected.version)?'当前版本高于所选通道的发行版':'已是最新版本'};
    } else if(!selected.manifest) {
-    this.status={phase:'unavailable',version:selected.version,message:missingPackage,downloadPage:selected.page};
+    this.status={phase:'unavailable',version:selected.version,notes:selected.notes,message:missingPackage,downloadPage:selected.page};
    } else {
-    this.status={phase:'available',version:selected.version};
+    this.status={phase:'available',version:selected.version,notes:selected.notes};
    }
   }catch(error){
    this.service.log?.(error.message);
@@ -201,7 +227,7 @@ export class Updater{
   }finally{this.busy=false;}
   return this.state();
  }
- async install(){if(this.status.phase==='ready')return this.state();if(this.busy)throw Error('Update already running');if(this.state().phase!=='available')await this.check();if(this.state().phase!=='available')return this.state();this.busy=this.installing=true;let work;try{
+ async install(){if(this.status.phase==='ready')return this.state();if(this.busy)throw Error('Update already running');if(this.state().phase!=='available')await this.check(false);if(this.state().phase!=='available')return this.state();this.busy=this.installing=true;let work;try{
  const root=path.resolve(fileURLToPath(new URL('..',import.meta.url))),mac=process.platform==='darwin',install=mac?path.resolve(root,'../..'):root;
  if(!mac&&process.platform!=='win32')throw Error('Unsupported update platform');
  // Source checkouts must never be replaced by the updater.
@@ -266,8 +292,9 @@ export async function prepareUpdate({root,stage,target,version,manifest,releases
   return JSON.parse(await decompress(file ? await readFile(file) : bytes, {maxOutputLength:1024*1024*1024}));
  }
  const spec = manifest.targets[target];
- const delta = manifest.delta;
- if (delta && delta.size < spec.full.size && (!spec.deltaFrom || spec.deltaFrom === version)) {
+ const delta = spec.delta ?? manifest.delta;
+ const matchingBase = spec.deltaFrom === version || (!spec.delta && !spec.deltaFrom);
+ if (validDescriptor(delta) && delta.size < spec.full.size && matchingBase) {
   try {
    const bundle = await unpack('delta', delta);
    const patch = bundle.targets?.[target];

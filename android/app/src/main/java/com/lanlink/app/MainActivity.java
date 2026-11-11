@@ -4,7 +4,6 @@ import static com.lanlink.app.Wire.obj;
 
 import android.Manifest;
 import android.app.*;
-import android.bluetooth.BluetoothAdapter;
 import android.content.*;
 import android.graphics.*;
 import android.media.projection.MediaProjectionManager;
@@ -122,8 +121,6 @@ public class MainActivity extends Activity {
     });
     outer.addView(scroll, new LinearLayout.LayoutParams(-1, -1));
     if ("layout".equals(target)) groupLayoutPage();
-    else if ("premium".equals(target)) premiumFeaturesPage();
-    else if ("hid".equals(target)) bluetoothHidPage();
     else devicePermissionsPage();
     dialog.setContentView(outer);
     dialog.setOnDismissListener(ignored -> {
@@ -262,14 +259,32 @@ public class MainActivity extends Activity {
     Dialog dialog = new PredictiveDialog(this, Ui.dialogTheme());
     pairDialog = dialog;
     LinearLayout outer = ui.column();
-    outer.setBackgroundColor(Ui.BG);
     ScrollView scroll = new ScrollView(this);
     scroll.setFillViewport(true);
     LinearLayout box = ui.column();
     box.setPadding(ui.dp(24), ui.dp(18), ui.dp(24), ui.dp(28));
     scroll.addView(box);
     outer.addView(scroll, new LinearLayout.LayoutParams(-1, -1));
-    dialog.setContentView(outer);
+    FrameLayout content = new FrameLayout(this);
+    content.setBackgroundColor(Ui.BG);
+    content.addView(outer, new FrameLayout.LayoutParams(-1, -1));
+    FrameLayout joiningOverlay = new FrameLayout(this);
+    joiningOverlay.setBackgroundColor(0x66000000);
+    joiningOverlay.setClickable(true);
+    joiningOverlay.setVisibility(View.GONE);
+    content.addView(joiningOverlay, new FrameLayout.LayoutParams(-1, -1));
+    LinearLayout joiningCard = ui.card();
+    joiningCard.setGravity(Gravity.CENTER_HORIZONTAL);
+    joiningOverlay.addView(joiningCard, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
+    ProgressBar joiningProgress = new ProgressBar(this);
+    joiningProgress.setIndeterminate(true);
+    joiningProgress.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(Ui.PURPLE));
+    joiningCard.addView(joiningProgress, new LinearLayout.LayoutParams(ui.dp(36), ui.dp(36)));
+    ui.gap(joiningCard, 12);
+    TextView joiningStatus = ui.text(Language.t("正在查找设备并配对…"), 14, Ui.MUTED);
+    joiningStatus.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+    joiningCard.addView(joiningStatus);
+    dialog.setContentView(content);
     box.addView(
         ui.iconButton(
             "back",
@@ -388,7 +403,7 @@ public class MainActivity extends Activity {
         new int[][] {{58, 48}, {120, 47}, {88, 88}, {48, 123}, {121, 126}, {91, 151}})
       canvas.drawRoundRect(block[0], block[1], block[0] + 22, block[1] + 22, 6, 6, paint);
     qr.setImageBitmap(skeleton);
-    Button reveal = ui.button(Language.t("查看二维码"), false, () -> {});
+    Button reveal = ui.button(Language.t("隐藏二维码"), false, () -> {});
     LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(-1, -2);
     rp.gravity = Gravity.CENTER_HORIZONTAL;
     reveal.setTextSize(12);
@@ -419,7 +434,7 @@ public class MainActivity extends Activity {
     TextView countdown = ui.text(Language.t("正在生成配对码…"), 12, Ui.MUTED);
     countdown.setGravity(Gravity.END);
     codeColumn.addView(countdown);
-    boolean[] showing = {false};
+    boolean[] showing = {true};
     String[] lastQr = {""};
     Runnable refreshCode =
         new Runnable() {
@@ -454,6 +469,7 @@ public class MainActivity extends Activity {
                   for (int x = 0; x < 320; x++)
                     bitmap.setPixel(x, y, matrix.get(x, y) ? Color.BLACK : Color.WHITE);
                 qr.setImageBitmap(bitmap);
+                qr.setContentDescription(Language.t("本机配对二维码"));
                 lastQr[0] = id;
               }
             } catch (Exception e) {
@@ -461,6 +477,7 @@ public class MainActivity extends Activity {
               progress.setProgress(0);
               countdown.setText(e.getMessage());
               qr.setImageBitmap(skeleton);
+              qr.setContentDescription(Language.t("二维码尚未显示"));
               lastQr[0] = "";
             }
             main.postDelayed(this, 500);
@@ -471,7 +488,7 @@ public class MainActivity extends Activity {
           showing[0] = !showing[0];
           lastQr[0] = "";
           qr.setImageBitmap(skeleton);
-          qr.setContentDescription(showing[0] ? Language.t("本机配对二维码") : Language.t("二维码尚未显示"));
+          qr.setContentDescription(Language.t("二维码尚未显示"));
           reveal.setText(showing[0] ? Language.t("隐藏二维码") : Language.t("查看二维码"));
           main.removeCallbacks(refreshCode);
           refreshCode.run();
@@ -508,6 +525,8 @@ public class MainActivity extends Activity {
           Runnable unlock =
               () -> {
                 pairJoining = false;
+                joiningOverlay.setVisibility(View.GONE);
+                outer.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_AUTO);
                 submit.setEnabled(true);
                 scan.setEnabled(true);
                 photo.setEnabled(true);
@@ -518,7 +537,13 @@ public class MainActivity extends Activity {
           Runnable connect =
               () -> {
                 dialog.setCancelable(false);
-                message.setText(Language.t("正在查找设备并配对…"));
+                android.view.inputmethod.InputMethodManager keyboard =
+                    getSystemService(android.view.inputmethod.InputMethodManager.class);
+                if (keyboard != null) keyboard.hideSoftInputFromWindow(entry.getWindowToken(), 0);
+                entry.clearFocus();
+                message.setText("");
+                outer.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+                joiningOverlay.setVisibility(View.VISIBLE);
                 actions.execute(
                     () -> {
                       try {
@@ -558,9 +583,10 @@ public class MainActivity extends Activity {
     dialog.setOnDismissListener(
         d -> {
           main.removeCallbacks(refreshCode);
+          if (pairDialog != dialog) return;
+          pairDialog = null;
           if (LinkService.instance != null && LinkService.instance.pairing != null)
             LinkService.instance.pairing.hide();
-          if (pairDialog == dialog) pairDialog = null;
         });
     View pairingBack = box.getChildAt(0);
     TextView pairingTitle = (TextView)box.getChildAt(2), pairingSubtitle = (TextView)box.getChildAt(4);
@@ -603,7 +629,7 @@ public class MainActivity extends Activity {
       w.setLayout(-1, -1);
       w.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
       w.setBackgroundDrawableResource(android.R.color.transparent);
-      applyInsets(outer, w);
+      applyInsets(content, w);
     }
     refreshCode.run();
   }
@@ -1118,11 +1144,6 @@ public class MainActivity extends Activity {
               renderPage();
             }));
     ui.line(options);
-    options.addView(ui.item("keyboard", Language.t("高价功能"), null, null, () -> {
-      page = "premium";
-      renderPage();
-    }));
-    ui.line(options);
     options.addView(ui.item("link", Language.t("使用说明"), Language.t("配对、授权与常见问题"), null, this::showUsage));
     ui.line(options);
     options.addView(ui.item("settings", Language.t("后台运行与自启动"), Language.t("设置省电白名单，减少后台连接中断"), null, () -> showBackgroundGuide(null)));
@@ -1136,167 +1157,9 @@ public class MainActivity extends Activity {
     layout.addView(about);
   }
 
-  private static final int HID_PERMISSION = 71;
-  private String pendingHidPairing;
-
-  private void premiumFeaturesPage() {
-    heading(Language.t("高价功能"), Language.t("蓝牙 HID 键鼠"));
-    LinearLayout card = ui.card();
-    card.addView(ui.item("keyboard", Language.t("蓝牙 HID 键鼠"), null, null, () -> {
-      page = "hid";
-      renderPage();
-    }));
-    layout.addView(card);
-  }
-
-  private void bluetoothHidPage() {
-    layout.addView(ui.button(Language.t("返回"), false, () -> { page = "premium"; renderPage(); }));
-    ui.gap(layout, 12);
-    heading(Language.t("蓝牙 HID 键鼠"),
-        Language.t("点设备名称查看配对引导。点左侧图标切换蓝牙键鼠，停用后保留蓝牙连接并使用网络。"));
-    LinearLayout list = ui.column();
-    layout.addView(list);
-    list.post(new Runnable() {
-      private String signature = "";
-
-      @Override public void run() {
-        if (!list.isAttachedToWindow() || !"hid".equals(page)) return;
-        LinkService service = LinkService.instance;
-        if (service == null) { list.postDelayed(this, 2000); return; }
-        JSONObject devices = service.authorizationDevices();
-        Map<String, Boolean> incoming = new HashMap<>();
-        Runnable poll = this;
-        service.jobs.execute(() -> {
-          Iterator<String> ids = devices.keys();
-          while (ids.hasNext()) {
-            String id = ids.next();
-            Wire peer = service.peers.get(id);
-            JSONObject caps = peer == null ? null : peer.info.optJSONObject("capabilities");
-            if (caps == null || caps.optInt("hidSettings") != 1) continue;
-            try {
-              JSONObject status = peer.requestDirect("hid-link-status", obj(), 1200);
-              incoming.put(id, service.peers.get(id) == peer && status.optBoolean("connected"));
-            } catch (Exception ignored) {}
-          }
-          main.post(() -> {
-            if (!list.isAttachedToWindow() || !"hid".equals(page)) return;
-            List<String> ordered = new ArrayList<>();
-            devices.keys().forEachRemaining(ordered::add);
-            ordered.sort(Comparator.comparing(id -> devices.optJSONObject(id).optString("name")));
-            StringBuilder key = new StringBuilder(devices.toString()).append(incoming);
-            for (String id : ordered) key.append(service.hidEnabled(id)).append(service.phoneHid.connected(id));
-            if (!key.toString().equals(signature)) {
-              signature = key.toString();
-              list.removeAllViews();
-              if (ordered.isEmpty()) list.addView(ui.text(Language.t("暂无组内设备"), 14, Ui.MUTED));
-              for (String id : ordered) {
-                JSONObject device = devices.optJSONObject(id);
-                LinearLayout card = ui.card();
-                LinearLayout row = ui.row();
-                boolean enabled = service.hidEnabled(id);
-                boolean connected = Boolean.TRUE.equals(incoming.get(id)) || service.phoneHid.connected(id);
-                String glyph = platformIcon(device.optString("platform"));
-                FrameLayout toggle = new FrameLayout(MainActivity.this);
-                toggle.setFocusable(true);
-                setHidToggle(toggle, glyph, enabled);
-                toggle.setOnClickListener(v -> {
-                  service.setHidEnabled(id, !service.hidEnabled(id));
-                  setHidToggle(toggle, glyph, service.hidEnabled(id));
-                });
-                row.addView(toggle, new LinearLayout.LayoutParams(ui.dp(44), ui.dp(44)));
-                String name = device.optString("name", Language.t("设备"));
-                LinearLayout entry = ui.row();
-                entry.setPadding(ui.dp(10), 0, 0, 0);
-                entry.setBackground(ui.touch(Color.TRANSPARENT, 12));
-                entry.setFocusable(true);
-                entry.setOnClickListener(v -> showHidPairingGuide(id, name));
-                TextView title = ui.text(name, 14, Ui.INK);
-                title.setMaxLines(1);
-                title.setEllipsize(android.text.TextUtils.TruncateAt.END);
-                entry.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
-                entry.addView(ui.text(Language.t(connected ? "已连接" : incoming.containsKey(id) ? "未连接" : "状态未知"), 12, connected ? Ui.PURPLE : Ui.MUTED));
-                row.addView(entry, new LinearLayout.LayoutParams(0, ui.dp(44), 1));
-                card.addView(row);
-                list.addView(card);
-                ui.gap(list, 10);
-              }
-            }
-            list.postDelayed(poll, 2000);
-          });
-        });
-      }
-    });
-  }
-
-  private void setHidToggle(FrameLayout toggle, String glyph, boolean enabled) {
-    toggle.setContentDescription(Language.t(enabled ? "停用蓝牙键鼠" : "启用蓝牙键鼠"));
-    toggle.setBackground(ui.touch(enabled ? Ui.LILAC : Ui.BG, 24));
-    toggle.removeAllViews();
-    toggle.addView(ui.icon(glyph, enabled ? Ui.PURPLE : Ui.MUTED),
-        new FrameLayout.LayoutParams(ui.dp(24), ui.dp(24), Gravity.CENTER));
-  }
-
-  private void showHidPairingGuide(String id, String name) {
-    LinearLayout content = ui.column();
-    content.setPadding(ui.dp(22), ui.dp(10), ui.dp(22), ui.dp(16));
-    TextView hint = ui.text(Language.t("请先让对方设备准备蓝牙配对，再打开本机的系统蓝牙设置，找到下方名称并连接。"), 14, Ui.MUTED);
-    content.addView(hint);
-    ui.gap(content, 12);
-    AlertDialog guide = new AlertDialog.Builder(this).setTitle(name).setView(content)
-        .setNegativeButton(Language.t("取消"), null).create();
-    Button confirm = ui.button(Language.t("已连接，确认"), true, () -> run(() -> {
-      JSONObject result = link().peer(id).request("hid-pair-confirm", obj());
-      if (!result.optBoolean("connected")) throw new IOException("蓝牙键鼠尚未就绪");
-      main.post(guide::dismiss);
-    }));
-    Button settings = ui.button(Language.t("打开蓝牙设置"), false,
-        () -> startActivity(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS)));
-    Button start = ui.button(Language.t("开启蓝牙配对"), true, () -> {});
-    start.setOnClickListener(v -> run(() -> {
-      Wire peer = link().peer(id);
-      JSONObject caps = peer.info.optJSONObject("capabilities");
-      if (caps == null || caps.optInt("hidSettings") != 1) throw new IOException("请升级目标设备后重试");
-      JSONObject result = peer.request("hid-pair-start", obj());
-      main.post(() -> {
-        if (!guide.isShowing()) return;
-        hint.setText(Language.t("请在本机的系统蓝牙设置中连接 {0}。").replace("{0}", result.optString("name", name)));
-        start.setVisibility(View.GONE);
-        settings.setVisibility(View.VISIBLE);
-        confirm.setVisibility(View.VISIBLE);
-      });
-    }));
-    settings.setVisibility(View.GONE);
-    confirm.setVisibility(View.GONE);
-    content.addView(start);
-    content.addView(settings);
-    content.addView(confirm);
-    content.addView(ui.button(Language.t("让本机可被连接"), false, () -> preparePhoneHid(id)));
-    guide.show();
-  }
-
-  private void preparePhoneHid(String id) {
-    LinkService service = LinkService.instance;
-    Wire peer = service == null ? null : service.peers.get(id);
-    if (peer == null) { showOperationError("设备不在线"); return; }
-    if (Build.VERSION.SDK_INT < 28 || "android".equals(peer.info.optString("platform"))) {
-      showOperationError("本机不支持蓝牙 HID 配对");
-      return;
-    }
-    if (!service.phoneHid.permitted()) {
-      pendingHidPairing = id;
-      requestPermissions(PhoneHid.permissions(), HID_PERMISSION);
-      return;
-    }
-    service.phoneHid.preparePairing(peer);
-    Intent discoverable = new Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE)
-        .putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 120);
-    startActivity(discoverable);
-    toast(Language.t("请在对方设备打开蓝牙 HID 键鼠配对引导"));
-  }
-
   void showAbout() {
     SharedPreferences preferences = getSharedPreferences("identity", MODE_PRIVATE);
-    Dialog dialog = new Dialog(this, Ui.dialogTheme());
+    Dialog dialog = new PredictiveDialog(this);
     sheets.add(dialog);
     LinearLayout body = informationDialogBody(dialog, "关于", "关闭");
     LinearLayout brand = ui.column();
@@ -1350,8 +1213,10 @@ public class MainActivity extends Activity {
     autoUpdate.setTextSize(15);
     autoUpdate.setMinHeight(ui.dp(60));
     autoUpdate.setChecked(preferences.getBoolean("auto_check_updates", true));
-    autoUpdate.setOnCheckedChangeListener((button, enabled) ->
-        preferences.edit().putBoolean("auto_check_updates", enabled).apply());
+    autoUpdate.setOnCheckedChangeListener((button, enabled) -> {
+      preferences.edit().putBoolean("auto_check_updates", enabled).apply();
+      appUpdater.automatic();
+    });
     LinearLayout.LayoutParams switchLayout = new LinearLayout.LayoutParams(0, -2, 1);
     switchLayout.setMarginStart(ui.dp(14));
     autoRow.addView(autoUpdate, switchLayout);
@@ -1436,7 +1301,7 @@ public class MainActivity extends Activity {
     ProgressBar progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
     progress.setMax(1000);
     View check = ui.item("refresh", Language.t("检查更新"), null, null, () -> appUpdater.check(true));
-    View download = ui.item("download", Language.t("下载全量更新"), null, null, appUpdater::download);
+    View download = ui.item("download", Language.t("下载更新"), null, null, appUpdater::download);
     View install = ui.item("download", Language.t("立即安装"), null, null, appUpdater::install);
     View website = ui.item("download", Language.t("打开官网下载区"), null, null, appUpdater::openWebsite);
     View release = ui.item("download", Language.t("查看此版本发布页"), null, null, appUpdater::openWebsite);
@@ -1840,8 +1705,7 @@ public class MainActivity extends Activity {
     ui.gap(box, 8);
     box.addView(
         ui.text(
-            Language.t("非 Root 模式由电脑完成 ADB 键鼠授权；查看手机屏幕时再按提示允许系统投屏。Root 模式需手机已 Root，并在 Root 管理器允许 LanLink，使用实时")
-                + Language.t(" H.264 串流。"),
+            Language.t("非 Root 模式需通过电脑完成 ADB 授权，助手就绪后即可使用键鼠控制和 H.264 屏幕串流。Root 模式需手机已 Root，并在 Root 管理器中允许 LanLink 使用 Root 权限。"),
             13,
             Ui.MUTED));
     ui.gap(box, 18);
@@ -2087,14 +1951,30 @@ public class MainActivity extends Activity {
     ui.gap(box, 18);
     ScrollView scroll = new ScrollView(this);
     scroll.addView(box);
-    d.setContentView(scroll);
+    scroll.setClickable(true);
+    FrameLayout sheetRoot = new FrameLayout(this);
+    sheetRoot.setOnClickListener(v -> d.cancel());
+    FrameLayout.LayoutParams sheetSize = new FrameLayout.LayoutParams(-1, -2,
+        Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+    sheetSize.setMargins(ui.dp(12), ui.dp(24), ui.dp(12), 0);
+    sheetRoot.addView(scroll, sheetSize);
+    sheetRoot.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+      int availableWidth = v.getWidth() - v.getPaddingLeft() - v.getPaddingRight()
+          - sheetSize.leftMargin - sheetSize.rightMargin;
+      int width = Math.max(1, Math.min(ui.dp(720), availableWidth));
+      if (sheetSize.width != width) {
+        sheetSize.width = width;
+        scroll.setLayoutParams(sheetSize);
+      }
+    });
+    d.setContentView(sheetRoot);
     d.show();
     Window w = d.getWindow();
     if (w != null) {
       w.setBackgroundDrawableResource(android.R.color.transparent);
-      w.setLayout(-1, -2);
-      w.setGravity(Gravity.BOTTOM);
+      w.setLayout(-1, -1);
       w.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+      applyInsets(sheetRoot, w);
       if (Build.VERSION.SDK_INT >= 31
           && getSystemService(WindowManager.class).isCrossWindowBlurEnabled()) {
         w.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND);
@@ -2103,7 +1983,6 @@ public class MainActivity extends Activity {
         w.setAttributes(attrs);
       }
     }
-    fitFloatingDialog(d, box, 720, 0);
     return box;
   }
 
@@ -2633,8 +2512,7 @@ public class MainActivity extends Activity {
       LinearLayout labels = ui.column();
       TextView controlledText=ui.title(Language.t("● 正在被控制 / 共享屏幕"),14);controlledText.setTextColor(Ui.PURPLE);labels.addView(controlledText);
       ui.gap(labels, 5);
-      String channelName = channel.equals("bluetooth") ? Language.t("蓝牙") : Language.t("网络");
-      TextView deviceName=ui.text(channel.isEmpty() ? controlled : controlled + " · " + channelName,12,Ui.MUTED);
+      TextView deviceName=ui.text(channel.isEmpty() ? controlled : controlled + " · " + Language.t("网络"),12,Ui.MUTED);
       deviceName.setSingleLine(true);
       deviceName.setEllipsize(android.text.TextUtils.TruncateAt.END);
       labels.addView(deviceName);
@@ -3047,16 +2925,6 @@ public class MainActivity extends Activity {
     }
   }
 
-  @Override public void onRequestPermissionsResult(int request, String[] permissions, int[] grants) {
-    super.onRequestPermissionsResult(request, permissions, grants);
-    if (request == HID_PERMISSION) {
-      String id = pendingHidPairing;
-      pendingHidPairing = null;
-      if (id != null && LinkService.instance != null && LinkService.instance.phoneHid.permitted())
-        preparePhoneHid(id);
-    }
-  }
-
   protected void onResume() {
     super.onResume();
     resumed = true;
@@ -3066,7 +2934,6 @@ public class MainActivity extends Activity {
     if (LinkService.instance != null){
       LinkService.instance.uiVisible=true;
       LinkService.instance.groupClipboard.poll();
-      LinkService.instance.phoneHid.resume();
     }
     if (LinkService.instance != null && LinkService.instance.backgroundRecovery != null)
       LinkService.instance.backgroundRecovery.sample(true);

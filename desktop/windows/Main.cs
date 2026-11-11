@@ -77,6 +77,14 @@ namespace LanLink.Desktop {
     public static string DisplayErrorOrEmpty(string message) { return string.IsNullOrWhiteSpace(message)?"":DisplayError(message); }
     public static string DisplayError(string message) { return Locale.T(UiText.ErrorMessage(message)); }
     public void Notify(string message) {
+      Notify(message, message);
+    }
+    void Notify(string message, string diagnostic) {
+      LanLink.Desktop.Client.RecordDiagnostic("Windows", diagnostic);
+      if (message == "本次鼠标操作已结束") {
+        Toast(DisplayError(message), 4, ToastKind.Failure);
+        return;
+      }
       message = DisplayErrorOrEmpty(message); persistentNotice = message; UpdateNotificationBanner();
       if (settingsStatus != null && settingsPage.Visibility == Visibility.Visible) settingsStatus.Text = message;
     }
@@ -106,7 +114,11 @@ namespace LanLink.Desktop {
       UpdateNotificationBanner();
     }
     public void NotifyTransient(string message) { Toast(DisplayErrorOrEmpty(message)); }
-    internal void NotifyWarning(string message) { Toast(DisplayErrorOrEmpty(message),4,true); }
+    internal void NotifyInfo(string message) { Toast(DisplayErrorOrEmpty(message), kind:ToastKind.Info); }
+    internal void NotifyWarning(string message) {
+      LanLink.Desktop.Client.RecordDiagnostic("Windows", message);
+      Toast(DisplayErrorOrEmpty(message),4,ToastKind.Warning);
+    }
     public string SettingsResult(object result,string success) {
       if(string.IsNullOrWhiteSpace(Json.Text(result,"warning")))return success;
       string message=string.IsNullOrWhiteSpace(Json.Text(result,"message"))?Locale.T("设置已保存，部分运行状态未能恢复，请重启设备服务。"):DisplayError(Json.Text(result,"message"));
@@ -141,7 +153,7 @@ namespace LanLink.Desktop {
       } catch(Exception ex) { serviceUnavailable = true; restartServiceButton.Visibility = Visibility.Visible; Notify(Locale.T("设备服务未能恢复：") + DisplayError(ex.Message) + Locale.T(" 请再次重试。")); }
       finally { restartingService = false; restartServiceButton.IsEnabled = true; }
     }
-    public async void Run(Func<Task> action) { try { await action(); } catch (Exception ex) { Notify(ex.Message); } }
+    public async void Run(Func<Task> action) { try { await action(); } catch (Exception ex) { Notify(ex.Message, ex.ToString()); } }
     public MainWindow() {
       Client = new Client();
       Theme.Initialize(DataDir);
@@ -258,20 +270,77 @@ namespace LanLink.Desktop {
       tray.DoubleClick += delegate { Show(); WindowState = WindowState.Normal; Activate(); };
     }
     public async Task Quit(int code) { if (quitting) return; quitting = true; poll.Stop(); if (tray != null) tray.Dispose(); await Client.Stop(); Application.Current.Shutdown(code); }
-    string updateNoticeVersion="";
+    Window updateOffer;
+    string updateOfferKey="";
+    bool respondingToUpdate;
     double shownUpdateResult;
     Action<object> renderUpdate;
+    void OpenUpdatePage(string page) {
+      Uri destination;
+      if(Uri.TryCreate(page,UriKind.Absolute,out destination)&&destination.Scheme==Uri.UriSchemeHttps&&
+        (destination.Host=="lanlink.sites.show"||((destination.Host=="github.com"||destination.Host=="gitee.com")&&destination.AbsolutePath.StartsWith("/lokey-t/lanlink/releases/tag/",StringComparison.Ordinal))))
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(destination.AbsoluteUri){UseShellExecute=true});
+    }
+    void ShowUpdateOffer(object info) {
+      string channel=Json.Text(info,"updateChannel"), version=Json.Text(info,"version");
+      string key=channel+"/"+version;
+      if(respondingToUpdate)return;
+      bool prompt=Json.Flag(info,"prompt");
+      if(updateOffer!=null){
+        if(prompt&&updateOfferKey==key)return;
+        updateOfferKey="";
+        updateOffer.Close();
+      }
+      if(!prompt||!IsVisible||WindowState==WindowState.Minimized||!IsEnabled)return;
+      string title=Locale.T("发现新版本")+" "+version+" · "+Locale.T(channel=="beta"?"测试版":"正式版");
+      var panel=Column();
+      var heading=Text(title,22);heading.Margin=new Thickness(0,0,0,16);panel.Children.Add(heading);
+      string notes=Json.Text(info,"notes");
+      var details=Text(notes==""?Locale.T("此版本暂无更新说明"):notes,14,"#71819A");
+      details.TextWrapping=TextWrapping.Wrap;
+      panel.Children.Add(new ScrollViewer{Content=details,MaxHeight=280,VerticalScrollBarVisibility=ScrollBarVisibility.Auto});
+      bool available=Json.Text(info,"phase")=="available";
+      if(!available){
+        var hint=Text(Locale.T("点击现在更新可打开此版本发布页。"),13,"#71819A");
+        hint.Margin=new Thickness(0,12,0,0);hint.TextWrapping=TextWrapping.Wrap;panel.Children.Add(hint);
+      }
+      var buttons=new WrapPanel{HorizontalAlignment=HorizontalAlignment.Right,Margin=new Thickness(0,20,0,0)};
+      panel.Children.Add(buttons);
+      var window=Dialog(title,panel,540);
+      window.ShowInTaskbar=false;
+      updateOffer=window;
+      updateOfferKey=key;
+      Func<string,Task> respond=async choice=>{
+        respondingToUpdate=true;
+        if(updateOffer==window)window.Close();
+        try{
+          if(choice=="install"&&available){
+            Settings();
+            renderUpdate(await Client.Call("update-install",new{channel,version}));
+          }else{
+            await Client.Call("update-reminder",new{channel,version,choice=choice=="install"?"later":choice});
+            if(choice=="install")OpenUpdatePage(Json.Text(info,"downloadPage"));
+          }
+        }finally{respondingToUpdate=false;}
+      };
+      window.Closed+=delegate {
+        updateOffer=null;
+        if(updateOfferKey==key&&!respondingToUpdate&&!quitting)Run(()=>respond("later"));
+      };
+      buttons.Children.Add(LButton("本版本不再提示",()=>Run(()=>respond("skip"))));
+      buttons.Children.Add(LButton("稍后提醒我",()=>Run(()=>respond("later"))));
+      var install=LButton("现在更新",()=>Run(()=>respond("install")));
+      install.Style=(Style)FindResource("Primary");install.IsDefault=true;
+      buttons.Children.Add(install);
+      window.Show();
+    }
     async Task Refresh() {
       if (busy || quitting || dragging || serviceUnavailable) return; busy = true;
       try {
         State = await Client.Call("state"); Theme.Set(Json.Text(State,"theme")); Locale.Set(Json.Text(State,"language"));
         var updateInfo=Json.Get(State,"update");
         var updateResult=Json.Get(updateInfo,"result");
-        if(Json.Text(updateInfo,"phase")=="available"&&Json.Text(updateInfo,"version")!=updateNoticeVersion){
-          updateNoticeVersion=Json.Text(updateInfo,"version");
-          if(Json.Text(updateResult,"phase")!="failed"||Json.Text(updateResult,"version")!=updateNoticeVersion)
-            Notify(Locale.T("发现新版本")+" "+updateNoticeVersion+" · "+Locale.T("请在设置中下载更新"));
-        }
+        ShowUpdateOffer(updateInfo);
         double resultAt=Json.Number(updateResult,"at",0);
         if(resultAt>0&&resultAt!=shownUpdateResult){
           shownUpdateResult=resultAt;
@@ -495,7 +564,7 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
     public void CancelFeature(string id) { if(pendingFeatureId==id){pendingFeatureId=null;pendingFeature=null;} }
     public async Task ResumeFeature(string id) {if(pendingFeatureId==id && pendingFeature!=null)await pendingFeature();}
     async Task PrepareFeature(Device device,string[] keys,Func<Task> action) {
-      if(pendingFeatureId!=null && pendingFeatureId!=device.Id){NotifyTransient(Locale.T("请先完成或取消当前设备的连接请求"));return;}
+      if(pendingFeatureId!=null && pendingFeatureId!=device.Id){NotifyInfo(Locale.T("请先完成或取消当前设备的连接请求"));return;}
       pendingFeatureId=device.Id;pendingFeature=()=>PrepareFeature(device,keys,action);
       try {
         var result=await Client.Call("feature-prepare",new {id=device.Id,permissions=keys,capture=keys.SequenceEqual(new[]{"input"})});
@@ -545,7 +614,12 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
     async Task OpenRemote(Device device) {
       int version = ++remoteOpenVersion;
       var remote = Application.Current.Windows.OfType<RemoteWindow>().FirstOrDefault();
-      if (remote != null && remote.DeviceId == device.Id) { if (remote.WindowState == WindowState.Minimized) remote.WindowState = WindowState.Normal; remote.Activate(); return; }
+      if (remote != null && remote.DeviceId == device.Id) {
+        if (remote.WindowState == WindowState.Minimized) remote.WindowState = WindowState.Normal;
+        remote.Activate();
+        await remote.RetryFailedControl();
+        return;
+      }
       if (remote != null) { remote.Close(); RemoteClosing(remote.Completion); }
       await remoteCleanup;
       if (version != remoteOpenVersion || quitting) return;
@@ -639,7 +713,7 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
       panel.Children.Add(name);
       panel.Children.Add(LText("偏好",13));panel.Children.Add(modes);
       var hostLabel=LText("蓝牙目标",13);panel.Children.Add(hostLabel);panel.Children.Add(hosts);
-      var automaticInfo=LText("组内蓝牙跟随当前主设备。首次连接请在手机上允许附近设备权限，并按系统提示确认配对。",12);
+      var automaticInfo=LText("组内蓝牙跟随当前主设备。首次连接时请按系统提示确认配对。",12);
       automaticInfo.TextWrapping=TextWrapping.Wrap;panel.Children.Add(automaticInfo);
       panel.Children.Add(confirm);panel.Children.Add(runtime);
       var buttons=new WrapPanel();panel.Children.Add(buttons);
@@ -948,7 +1022,12 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
         if(list.Children.Count==0)list.Children.Add(LText("本组暂无安卓设备，请在我的设备中添加手机。",14,"#7B879D"));
       });
       var actions = new StackPanel { Orientation=Orientation.Horizontal, Margin=new Thickness(0,16,0,0) };
-      var help=Button("",()=>ShowAdb(null));var helpText=LText("帮助其他组的设备ADB授权",12,"#7B879D");helpText.TextDecorations=TextDecorations.Underline;help.Content=helpText;help.Background=Brushes.Transparent;help.BorderThickness=new Thickness(0);help.Padding=new Thickness(4);help.HorizontalAlignment=HorizontalAlignment.Right;help.Margin=new Thickness(0,12,0,0);adbHub.RowDefinitions.Add(new RowDefinition{Height=GridLength.Auto});Grid.SetRow(help,2);adbHub.Children.Add(help);
+      var help = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0,12,0,0) };
+      help.Children.Add(AdbHelpLink("帮助其他组的设备ADB授权", () => ShowAdb(null)));
+      help.Children.Add(AdbHelpLink("无法连接", ShowManualAdbGuide));
+      adbHub.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+      Grid.SetRow(help, 2);
+      adbHub.Children.Add(help);
       actions.Children.Add(LButton("刷新状态",()=>Run(async()=>{await Refresh();ShowAdbHub();}))); body.Children.Add(actions);
     }
     void OpenMyDevice() {
@@ -979,6 +1058,7 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
         developerOptionsPage = SimplePage("开发者选项", out body);
         var options = new StackPanel();
         options.Children.Add(LButton("键鼠通道", () => Run(OpenInputTransport)));
+        options.Children.Add(LButton("错误报告", ShowErrorReport));
         options.Children.Add(LButton("关闭开发者选项", () => {
           if (SetDeveloperOptionsEnabled(false)) ShowInformation();
         }));
@@ -986,6 +1066,45 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
         ((Grid)pageSurface.Child).Children.Add(developerOptionsPage);
       }
       developerOptionsPage.Visibility = Visibility.Visible;
+    }
+    void ShowErrorReport() {
+      var panel=Column();
+      var report=new TextBox {
+        IsReadOnly=true, Height=340, TextWrapping=TextWrapping.Wrap,
+        VerticalContentAlignment=VerticalAlignment.Top, VerticalScrollBarVisibility=ScrollBarVisibility.Auto
+      };
+      Action refresh=delegate {
+        var sections=new List<string>();
+        string errors=LanLink.Desktop.Client.DiagnosticReport();
+        string startupFile=System.IO.Path.Combine(DataDir,"startup-error.txt");
+        try {
+          if(File.Exists(startupFile))
+            sections.Add(Locale.T("上次启动异常")+Environment.NewLine+File.ReadAllText(startupFile));
+        } catch(Exception ex) { sections.Add(ex.ToString()); }
+        if(errors!="") sections.Add(errors);
+        var update=Json.Get(State,"update");
+        if(Json.Text(update,"phase")=="error")
+          sections.Add(Locale.T("检查更新")+Environment.NewLine+Json.Text(update,"message"));
+        var logs=(Json.Get(State,"logs") as IEnumerable ?? new object[0]).Cast<object>().Reverse()
+          .Select(item=>FormatLogTime(Json.Number(item,"time",0))+"  "+Json.Text(item,"message")).ToArray();
+        if(logs.Length>0) sections.Add(Locale.T("运行日志")+Environment.NewLine+string.Join(Environment.NewLine,logs));
+        report.Text=sections.Count==0?Locale.T("暂无运行记录"):string.Join(Environment.NewLine+Environment.NewLine,sections);
+        report.ScrollToEnd();
+      };
+      panel.Children.Add(report);
+      var actions=new StackPanel{Orientation=Orientation.Horizontal};
+      actions.Children.Add(LButton("刷新",()=>Run(async()=>{
+        try { if(Client.IsRunning) await Refresh(); }
+        finally { refresh(); }
+      })));
+      var copy=LButton("复制",()=>Run(()=>{Clipboard.SetText(report.Text);return Task.FromResult(0);}));
+      copy.Margin=new Thickness(8,0,0,0);
+      actions.Children.Add(copy);panel.Children.Add(actions);
+      refresh();
+      Dialog(Locale.T("错误报告"),panel,680).ShowDialog();
+    }
+    static string FormatLogTime(double milliseconds) {
+      return new DateTime(1970,1,1,0,0,0,DateTimeKind.Utc).AddMilliseconds(milliseconds).ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
     }
     void ShowInformation() {
       Navigate(informationNavigation);HideContent();var pages=(Grid)pageSurface.Child;if(informationPage!=null)pages.Children.Remove(informationPage);
@@ -1055,7 +1174,7 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
       var panel=new StackPanel();panel.Children.Add(LText("收到文件",19));
       var detail=Text(Json.Text(rows[0],"sourceName")+" · "+String.Join("、",rows.Select(r=>Json.Text(r,"name"))),14,"#64748B");detail.TextWrapping=TextWrapping.Wrap;detail.MaxHeight=100;detail.Margin=new Thickness(0,12,0,18);panel.Children.Add(detail);
       var actions=new StackPanel{Orientation=Orientation.Horizontal};panel.Children.Add(actions);
-      var window=new Window{Title=Locale.T("收到文件"),Resources=Resources,FontFamily=FontFamily,Content=new Border{Child=panel,Padding=new Thickness(22),Background=Brush("#FFFFFF"),BorderBrush=Brush("#DFE5F1"),BorderThickness=new Thickness(1)},Width=370,SizeToContent=SizeToContent.Height,WindowStyle=WindowStyle.None,ResizeMode=ResizeMode.NoResize,ShowInTaskbar=false,ShowActivated=false,Topmost=true};
+      var window=new Window{Title=Locale.T("收到文件"),Resources=Resources,FontFamily=FontFamily,Content=new Border{Child=panel,Padding=new Thickness(22),Background=Brush("#FFFFFF"),BorderBrush=Brush("#DFE5F1"),BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(20)},Width=370,SizeToContent=SizeToContent.Height,WindowStyle=WindowStyle.None,AllowsTransparency=true,Background=Brushes.Transparent,ResizeMode=ResizeMode.NoResize,ShowInTaskbar=false,ShowActivated=false,Topmost=true};
       Action<bool> decide=accepted=>Run(async()=>{foreach(string token in rows.Select(r=>Json.Text(r,"token")).Distinct())await Client.Call("stage-preview-decide",new{token=token,accepted=accepted});await Refresh();});
       actions.Children.Add(LButton("接受",()=>decide(true)));var decline=LButton("拒绝",()=>decide(false));decline.Margin=new Thickness(12,0,0,0);actions.Children.Add(decline);
       window.SizeChanged+=delegate{var area=SystemParameters.WorkArea;window.Left=area.Right-window.Width-18;window.Top=area.Bottom-window.ActualHeight-18;};stageReceiveWindow=window;window.Show();
@@ -1089,6 +1208,7 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
         window.Show(); window.Activate();
       }
       RefreshPermissionGuide();
+      RefreshHidGuide();
       var notice = Json.Get(State, "permissionNotice");
       if (notice != null && !Json.Flag(notice,"explicit") && permissionWindow == null) {
         var panel = Column(); panel.Children.Add(LText("协作权限", 22)); var intro = Text(Json.Text(notice, "name") + Locale.T(" 请求协作，请开启缺少的权限。"), 13, "#70809C"); intro.TextWrapping = TextWrapping.Wrap; panel.Children.Add(intro);
@@ -1151,7 +1271,7 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
     void Settings() {
       Navigate(settingsNavigation);
       if (devicePermissionsPage != null) devicePermissionsPage.Visibility = Visibility.Collapsed;
-      if (State == null) { NotifyTransient(Locale.T("正在连接设备服务，请稍后打开设置")); return; }
+      if (State == null) { NotifyInfo(Locale.T("正在连接设备服务，请稍后打开设置")); return; }
       if (settingsPage == null) BuildSettingsPage();
       if ((!settingsDirty || settingsAccount != Json.Text(State, "groupId")) && !savingSettings && immediateSettingsPending==0) LoadSettingsDraft();
       devicePage.Visibility = Visibility.Collapsed; settingsPage.Visibility = Visibility.Visible;
@@ -1168,16 +1288,31 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
     void UpdateClipboardOptions(){if(clipboardUploadButton!=null)clipboardUploadButton.Visibility=clipboardUploadOption.IsChecked==true?Visibility.Collapsed:Visibility.Visible;if(clipboardDownloadButton!=null)clipboardDownloadButton.Visibility=clipboardDownloadOption.IsChecked==true?Visibility.Collapsed:Visibility.Visible;if(clipboardShortcutOption!=null)clipboardShortcutOption.Visibility=clipboardUploadOption.IsChecked==true && clipboardDownloadOption.IsChecked==true?Visibility.Collapsed:Visibility.Visible;}
     async Task ManualClipboard(string action){var result=await Client.Call(action);Toast(Json.Text(result,"message"));await Refresh();}
     Popup clipboardToast;
-    void Toast(string message,double seconds=3,bool warning=false) {
+    enum ToastKind { Info, Success, Warning, Failure }
+    void Toast(string message,double seconds=3,ToastKind kind=ToastKind.Success) {
       if(string.IsNullOrWhiteSpace(message))return;
       if(clipboardToast!=null)clipboardToast.IsOpen=false;
       var label=Text(message,12,"#18243D");
       label.TextWrapping=TextWrapping.Wrap;label.TextTrimming=TextTrimming.None;
       var card=new StackPanel();
-      card.Children.Add(label);
+      var content=new DockPanel();
+      if(kind==ToastKind.Success || kind==ToastKind.Failure) {
+        bool success=kind==ToastKind.Success;
+        var icon=new System.Windows.Shapes.Path {
+          Data=Geometry.Parse(success?"M3,8 L6.5,11.5 L13,4.5":"M4,4 L12,12 M12,4 L4,12"),
+          Stroke=Brush(success?"#238451":"#BC3947"), StrokeThickness=1.8,
+          StrokeStartLineCap=PenLineCap.Round, StrokeEndLineCap=PenLineCap.Round,
+          StrokeLineJoin=PenLineJoin.Round, Width=16, Height=16,
+          Margin=new Thickness(0,0,6,0), VerticalAlignment=VerticalAlignment.Center
+        };
+        DockPanel.SetDock(icon,Dock.Left);
+        content.Children.Add(icon);
+      }
+      content.Children.Add(label);
+      card.Children.Add(content);
       var track=new Grid{Height=2,Margin=new Thickness(0,6,0,0),Background=Brush("#DDE4F2")};
       var remaining=new ScaleTransform(1,1);
-      track.Children.Add(new Border{Background=Brush(warning?"#B47526":"#5873D1"),RenderTransform=remaining});
+      track.Children.Add(new Border{Background=Brush(kind==ToastKind.Warning?"#B47526":"#5873D1"),RenderTransform=remaining});
       card.Children.Add(track);
       var popup=new Popup{AllowsTransparency=true,Placement=PlacementMode.Custom,PlacementTarget=pageSurface,
         CustomPopupPlacementCallback=(size,target,offset)=>new[]{new CustomPopupPlacement(new Point(Math.Max(8,target.Width-size.Width-12),44),PopupPrimaryAxis.Horizontal)},
@@ -1297,23 +1432,26 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
       startupOption.Click+=async delegate{await ChangeStartup(false);};adminStartupOption.Click+=async delegate{await ChangeStartup(true);};basic.Children.Add(startupOption);basic.Children.Add(adminStartupOption);
       var startupHint=LText("登录后在后台运行，不显示主窗口，可从系统托盘打开。管理员模式首次开启需要系统确认。",12,"#8B97AB");startupHint.TextWrapping=TextWrapping.Wrap;basic.Children.Add(startupHint);var updateAuto=new CheckBox{Content=UiLocale.Content("自动检测更新"),IsChecked=Json.Get(State,"autoCheckUpdates")==null||Json.Flag(State,"autoCheckUpdates"),Margin=new Thickness(0,8,0,8)};BindImmediateSetting(updateAuto,"autoCheckUpdates");basic.Children.Add(updateAuto);
       basic.Children.Add(LText("更新通道",13));
-      var updateChannel=new ComboBox{Margin=new Thickness(0,8,0,8)};
-      updateChannel.Items.Add(new ComboBoxItem{Content=UiLocale.Content("正式版")});
-      updateChannel.Items.Add(new ComboBoxItem{Content=UiLocale.Content("测试版")});
+      var updateChannel=new ComboBox{Margin=new Thickness(0,8,0,12),MinWidth=280,HorizontalAlignment=HorizontalAlignment.Left,Style=(Style)FindResource("SoftChoice")};
+      updateChannel.Items.Add(UiLocale.Choice("正式版","stable"));
+      updateChannel.Items.Add(UiLocale.Choice("测试版","beta"));
       updateChannel.SelectedIndex=Json.Text(State,"updateChannel")=="beta"?1:0;
       basic.Children.Add(updateChannel);
       var updateStatus=LText("",12,"#8B97AB");updateStatus.TextWrapping=TextWrapping.Wrap;basic.Children.Add(updateStatus);
       var updateProgress=new ProgressBar{Height=8,Minimum=0,Maximum=100,Visibility=Visibility.Collapsed};
       basic.Children.Add(updateProgress);
-      var updateCheck=LButton("检查更新",()=>Run(async()=>renderUpdate(await Client.Call("update-check"))));basic.Children.Add(updateCheck);
+      var updateCheck=Button("",()=>Run(async()=>renderUpdate(await Client.Call("update-check"))));
+      updateCheck.Content=WindowShell.Label("检查更新","refresh");
+      UiLocale.Bind(updateCheck,System.Windows.Automation.AutomationProperties.NameProperty,"检查更新");
+      updateCheck.Style=(Style)FindResource("Primary");
+      updateCheck.HorizontalAlignment=HorizontalAlignment.Left;
+      updateCheck.Margin=new Thickness(0,8,0,0);
+      basic.Children.Add(updateCheck);
       var updateInstall=LButton("下载并准备更新",()=>Run(async()=>renderUpdate(await Client.Call("update-install"))));basic.Children.Add(updateInstall);
       var updateRestart=LButton("安装并重启",()=>Run(()=>Quit(0)));basic.Children.Add(updateRestart);
       string updatePage="";
       var updateWebsite=LButton("查看此版本发布页",()=>Run(()=>{
-        Uri destination;
-        if(Uri.TryCreate(updatePage,UriKind.Absolute,out destination)&&destination.Scheme==Uri.UriSchemeHttps&&
-          (destination.Host=="lanlink.sites.show"||((destination.Host=="github.com"||destination.Host=="gitee.com")&&destination.AbsolutePath.StartsWith("/lokey-t/lanlink/releases/tag/",StringComparison.Ordinal))))
-          System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(destination.AbsoluteUri){UseShellExecute=true});
+        OpenUpdatePage(updatePage);
         return Task.FromResult(0);
       }));basic.Children.Add(updateWebsite);
       var previousUpdate=LText("",12,"#8B97AB");basic.Children.Add(previousUpdate);
@@ -1351,7 +1489,7 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
         updateWebsite.Visibility=!working&&updatePage!=""?Visibility.Visible:Visibility.Collapsed;
       };
       updateChannel.SelectionChanged+=async delegate {
-        if(!updateChannel.IsEnabled)return;
+        if(!updateChannel.IsEnabled || updateChannel.SelectedIndex<0)return;
         changingUpdateChannel=true;
         updateChannel.IsEnabled=updateCheck.IsEnabled=updateInstall.IsEnabled=false;
         int requested=updateChannel.SelectedIndex;
@@ -1506,6 +1644,7 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
       Json.Map(State)["stageIncoming"]=fixture("old-preview");RefreshStageReceive();var old=stageReceiveWindow;
       await Dispatcher.InvokeAsync(delegate{old.UpdateLayout();},DispatcherPriority.Render);
       if(old==null||!old.IsVisible||old.ShowInTaskbar||!old.Topmost)throw new Exception("Incoming files must have an independent floating notice");
+      if(!old.AllowsTransparency || ((Border)old.Content).CornerRadius.TopLeft<=0)throw new Exception("File notice must have transparent rounded corners");
       if(Math.Abs(old.Top+old.ActualHeight-SystemParameters.WorkArea.Bottom+18)>2)throw new Exception("File notice must be bottom-right");
       RefreshStageReceive();if(old!=stageReceiveWindow)throw new Exception("Polling must preserve the current receive notice");
       SavePreview((FrameworkElement)old.Content,"native-file-receive.png");
@@ -1663,6 +1802,14 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
       Notify(""); ShowDevices(); UpdateLayout(); double pageHeight = pageSurface.ActualHeight;
       NotifyTransient("待传输文件已添加到对方暂存区"); UpdateLayout();
       if(notificationBanner.Visibility!=Visibility.Collapsed || pageSurface.ActualHeight!=pageHeight || clipboardToast==null || !clipboardToast.IsOpen)throw new Exception("Transient feedback must float without resizing pages");
+      Func<DockPanel> toastContent=()=> (DockPanel)((StackPanel)((Border)clipboardToast.Child).Child).Children[0];
+      var successIcon=toastContent().Children[0] as System.Windows.Shapes.Path;
+      if(successIcon==null || successIcon.Stroke!=Brush("#238451"))throw new Exception("Successful Toast must start with a green checkmark");
+      Notify("本次鼠标操作已结束");
+      var failureIcon=toastContent().Children[0] as System.Windows.Shapes.Path;
+      if(notificationBanner.Visibility!=Visibility.Collapsed || !clipboardToast.IsOpen ||
+         failureIcon==null || failureIcon.Stroke!=Brush("#BC3947") || ((TextBlock)toastContent().Children[1]).Text!="本次鼠标操作已结束")
+        throw new Exception("An ended mouse operation must show a red failure Toast without opening the banner");
       Toast("旧反馈",0.05); Toast("新反馈",0.4); await Task.Delay(150);
       if(!clipboardToast.IsOpen)throw new Exception("An old timer dismissed the replacement Toast");
       Notify("需要处理的错误"); await Task.Delay(400); await Dispatcher.InvokeAsync(delegate { UpdateLayout(); }, DispatcherPriority.ApplicationIdle);
@@ -1675,15 +1822,15 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
       Notify("");
       addQuick.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
       var pairing = devicePairing; await Dispatcher.InvokeAsync(delegate { UpdateLayout(); }, DispatcherPriority.Render); await pairing.InitialLoad; pairing.UpdateLayout();
-      if (pairingPage.Visibility != Visibility.Visible || devicePage.Visibility != Visibility.Collapsed || pairing.QRVisible || pairing.CurrentCode == null) throw new Exception("Add device must open its own page with a code and hidden QR");
+      if (pairingPage.Visibility != Visibility.Visible || devicePage.Visibility != Visibility.Collapsed || !pairing.QRVisible || pairing.CurrentCode == null) throw new Exception("Add device must open its own page with a code and visible QR");
       await Dispatcher.InvokeAsync(delegate { pairing.UpdateLayout(); }, DispatcherPriority.Render);
       SavePreview((FrameworkElement)Content, "native-pairing.png");
+      await pairing.ToggleQR(); if (pairing.QRVisible) throw new Exception("Hide QR failed");
       await pairing.ToggleQR(); if (!pairing.QRVisible) throw new Exception("Reveal QR failed");
       pairing.UpdateLayout(); SavePreview((FrameworkElement)Content, "native-pairing-qr.png");
       if (!pairing.JoiningVisible) throw new Exception("Pairing input must be visible without an extra click");
       await pairing.Join(); // Empty input must fail locally, without changing accounts.
       pairing.UpdateLayout(); SavePreview((FrameworkElement)Content, "native-pairing-join.png");
-      await pairing.ToggleQR(); if (pairing.QRVisible) throw new Exception("Hide QR failed");
       await pairing.ObserveConnections(new System.Web.Script.Serialization.JavaScriptSerializer().DeserializeObject("{\"peers\":[{\"id\":\"new-pairing-device\"}]}"));
       if (devicePage.Visibility != Visibility.Visible || pairingPage.Visibility != Visibility.Collapsed) throw new Exception("Authenticated pairing must return to devices automatically");
       var sizeFile=System.IO.Path.Combine(DataDir,"size-fixture.json");var sizeSource=new Window{Width=960,Height=680};WindowSize.Save(sizeSource,sizeFile);var sizeRestored=new Window();WindowSize.Restore(sizeRestored,sizeFile);if(Math.Abs(sizeRestored.Width/sizeRestored.Height-960.0/680)>0.001)throw new Exception("Window size ratio must survive restart");
@@ -1699,6 +1846,10 @@ RefreshRequests();clipboardQuick.Visibility=Json.Flag(Json.Get(State,"clipboardS
       await Dispatcher.InvokeAsync(delegate { phoneRemote.UpdateLayout(); }, DispatcherPriority.Render); await Task.Delay(150);
       if (!phoneRemote.ControlRequested || !phoneRemote.HasRightToolbar || phoneRemote.NavigationKeyCount != 3 || phoneRemote.Width >= phoneRemote.Height || phoneRemote.Height > SystemParameters.WorkArea.Height) throw new Exception("Phone viewer must auto request control, fit screen and offer three navigation keys below the screen");
       if(!phoneRemote.VisibleStatusForTest)throw new Exception("Remote connection failures must be visible with the sidebar collapsed");
+      int attemptsBeforeRetry=LanLink.Desktop.Client.DiagnosticReport().Split(new[]{"[control]"},StringSplitOptions.None).Length;
+      await OpenRemote(new Device{Id=phoneRemote.DeviceId,Platform="android"});
+      int attemptsAfterRetry=LanLink.Desktop.Client.DiagnosticReport().Split(new[]{"[control]"},StringSplitOptions.None).Length;
+      if(attemptsAfterRetry<=attemptsBeforeRetry)throw new Exception("Reopening a failed phone viewer must send a fresh control request");
       if(!phoneRemote.SidebarCollapsed)throw new Exception("First remote opening must hide the sidebar");phoneRemote.VerifyFooter();phoneRemote.ExpandForTest();await phoneRemote.WaitSidebarForTest();phoneRemote.VerifyPhoneSizing();phoneRemote.ShowMetricsPreview();await Task.Delay(260);phoneRemote.UpdateLayout();SavePreview((FrameworkElement)phoneRemote.Content,"native-remote-phone.png");
       await phoneRemote.VerifySidebarAnimation();phoneRemote.CollapseForTest();phoneRemote.Left=SystemParameters.WorkArea.Left+80;phoneRemote.Top=SystemParameters.WorkArea.Top+20;
       var savedRemoteBounds=new Rect(phoneRemote.Left,phoneRemote.Top,phoneRemote.Width,phoneRemote.Height);SavePreview((FrameworkElement)phoneRemote.Content,"native-remote-collapsed.png");phoneRemote.Close();

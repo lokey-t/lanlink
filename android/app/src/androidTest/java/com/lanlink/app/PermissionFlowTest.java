@@ -104,12 +104,13 @@ public final class PermissionFlowTest extends Instrumentation {
     check(pair != null && pair.isShowing(), "pair page opened");
     View page = pair.getWindow().getDecorView();
     capture("pairing");
-    check(find(page, "二维码尚未显示") != null, "QR initially hidden");
+    check(find(page, "本机配对二维码") != null, "QR visible by default");
+    click(page, "隐藏二维码");
+    check(find(page, "二维码尚未显示") != null, "QR can still be hidden");
     click(page, "查看二维码");
     check(find(page, "本机配对二维码") != null, "QR revealed on request");
-    click(page, "隐藏二维码");
     click(page, "手动输入");
-    click(page, LinkService.instance.groupEstablished() ? "解散当前组并加入其他组" : "配对并加入");
+    click(page, LinkService.instance.groupEstablished() ? "配对并合并设备组" : "配对并加入");
     View entry = findEdit(page);
     check(entry != null && ((EditText) entry).getError() != null, "empty code rejected locally");
     capture("join-group");

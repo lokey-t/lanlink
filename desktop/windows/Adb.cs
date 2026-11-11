@@ -7,6 +7,75 @@ using System.Windows.Controls;
 using System.Windows.Media;
 
 namespace LanLink.Desktop {
+  public partial class MainWindow {
+    static Button AdbHelpLink(string label, Action action) {
+      var link = Button("", action);
+      var text = LText(label, 12, "#7B879D");
+      text.TextDecorations = TextDecorations.Underline;
+      link.Content = text;
+      link.Background = Brushes.Transparent;
+      link.BorderThickness = new Thickness(0);
+      link.Padding = new Thickness(4);
+      return link;
+    }
+
+    void ShowManualAdbGuide() {
+      const string detect = "adb devices -l";
+      var panel = Column();
+      var window = Dialog(Locale.T("手动 ADB 授权"), panel, 580);
+
+      AddManualAdbStep(panel, "1. 准备 USB 调试",
+        "在电脑安装 Android SDK Platform-Tools，并将其目录加入 PATH。在手机开发者选项中开启 USB 调试，用数据线连接电脑，并在手机上允许 USB 调试。");
+      AddManualAdbStep(panel, "2. 检查连接",
+        "打开电脑终端并运行下方命令。状态为 device 时可继续，显示 unauthorized 时请解锁手机并确认调试授权。若列表为空，请检查数据线是否支持数据传输。");
+
+      var command = Text(detect, 13);
+      command.FontFamily = new FontFamily("Consolas");
+      command.VerticalAlignment = VerticalAlignment.Center;
+      var copy = LButton("复制命令", () => Clipboard.SetText(detect));
+      copy.Click += delegate { copy.Content = UiLocale.Content("已复制到本机剪贴板"); };
+      var commandRow = new DockPanel { Margin = new Thickness(0,6,0,16) };
+      DockPanel.SetDock(copy, Dock.Right);
+      commandRow.Children.Add(copy);
+      commandRow.Children.Add(new Border {
+        Background = Brush("#F1F5FD"), CornerRadius = new CornerRadius(10),
+        Padding = new Thickness(12,8,12,8), Margin = new Thickness(0,0,10,0), Child = command
+      });
+      panel.Children.Add(commandRow);
+
+      AddManualAdbStep(panel, "3. 启动 LanLink 助手",
+        "在手机 LanLink 打开「设置 → 使用说明 → 连接与故障排查 → 显示 ADB 启动命令」，将手机生成的完整 adb shell 命令粘贴到电脑终端执行。若连接了多台调试设备，请先断开其他设备。下方是命令格式，参数以手机显示为准。");
+      var example = Text("adb shell \"CLASSPATH='APK_PATH' app_process /system/bin com.lanlink.app.ShellAgent PORT SECRET\"", 13);
+      example.FontFamily = new FontFamily("Consolas");
+      example.TextWrapping = TextWrapping.Wrap;
+      example.TextTrimming = TextTrimming.None;
+      panel.Children.Add(new Border {
+        Background = Brush("#F1F5FD"), CornerRadius = new CornerRadius(10),
+        Padding = new Thickness(12,8,12,8), Margin = new Thickness(0,0,0,16), Child = example
+      });
+      AddManualAdbStep(panel, "4. 确认授权",
+        "让命令保持运行，回到「安卓授权」点击「刷新状态」。手机服务重启后，请在手机上重新获取命令。若曾解除 ADB 授权，请先在手机 LanLink 的「ADB 授权」中重新允许。");
+
+      var close = LButton("关闭", window.Close);
+      close.IsCancel = true;
+      close.HorizontalAlignment = HorizontalAlignment.Right;
+      close.Margin = new Thickness(0,12,0,0);
+      close.Style = (Style)FindResource("Primary");
+      panel.Children.Add(close);
+      window.ShowDialog();
+    }
+
+    static void AddManualAdbStep(StackPanel panel, string heading, string instructions) {
+      var title = LText(heading, 15);
+      title.FontWeight = FontWeights.SemiBold;
+      panel.Children.Add(title);
+      var body = LText(instructions, 13, "#657693");
+      body.TextWrapping = TextWrapping.Wrap;
+      body.Margin = new Thickness(0,5,0,12);
+      panel.Children.Add(body);
+    }
+  }
+
   // Local USB setup for a physically selected phone; group membership is unchanged.
   // No shell command is accepted from the UI.
   public sealed class AdbPage : Grid {

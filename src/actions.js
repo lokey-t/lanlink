@@ -25,7 +25,8 @@ export function createActions(service) {
     'quality-export': qualityAction(() => quality.export()),
     'logs-export': () => exportLogs(service),
     'update-check':()=>service.updater.check(),
-    'update-install':()=>service.updater.beginInstall(),
+    'update-reminder':a=>service.updater.deferPrompt(a),
+    'update-install':a=>service.updater.beginInstall(a),
     'stage-list':()=>({files:service.staging.list(),outgoing:service.staging.outgoingList()}),
     'stage-outgoing-list':()=>({files:service.staging.outgoingList()}),
     'stage-outgoing-retry':a=>service.staging.retryOutgoing(a.id),
@@ -77,6 +78,11 @@ export function createActions(service) {
     'adb-connect': async a => { const match=await adb.match(a.id);if(!match.connected)throw Error(match.message);return adb.authorize({id:a.id,serial:match.serial}); },
     'feature-prepare': a => service.access.prepare(a.id,a.permissions,a.capture === true),
     'group-hid-status': () => service.inputTransport.groupHid(),
+    'group-hid-enable': a => service.configure(() => service.inputTransport.setGroupEnabled(a.enabled)),
+    'group-hid-master-open': () => service.inputTransport.openMasterBluetooth(),
+    'group-hid-guide-open': a => service.inputTransport.guideTarget(a.id),
+    'group-hid-guide-finish': a => service.inputTransport.finishGuide(a.requestId, a.cancel === true),
+    'group-hid-guide-connect': a => service.inputTransport.connectGuide(a.requestId),
     'group-hid-toggle': a => service.configure(() => {
       if (!a.id || a.id === service.config.id || service.inputTransport.record(a.id).external || typeof a.enabled !== 'boolean')
         throw Error('请选择有效的组内设备');

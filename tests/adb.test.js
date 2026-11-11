@@ -68,6 +68,19 @@ test('ADB discovery finds the installed SDK and ignores relative executable path
   ]);
 });
 
+test('Windows discovers standalone Platform-Tools without overriding PATH', async () => {
+  const standalone = 'C:\\platform-tools\\adb.exe';
+  const fromPath = 'C:\\Tools\\adb.exe';
+  const env = { SystemDrive: 'C:', PATH: 'C:\\Tools' };
+  const find = (...installed) => findAdb({
+    platform: 'win32', home: 'C:\\Users\\Test', env,
+    exists: async candidate => { if (!installed.includes(candidate)) throw Error('Not installed'); }
+  });
+  assert.equal(await find(standalone), standalone);
+  assert.equal(await find(standalone, fromPath), fromPath);
+  assert.equal(await find(), null);
+});
+
 test('helper command rejects peer supplied shell syntax, paths, tokens and wrong APK', () => {
   const installed = 'package:' + apkPath;
   assert.match(helperCommand(bootstrap, installed), /^CLASSPATH='\/data\/app\//);

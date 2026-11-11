@@ -100,7 +100,7 @@ namespace LanLink.Desktop {
     async Task Check() {
       if(checking || busy || closed)return;checking=true;
       try { var result=await main.Client.Call("adb-guide-status",new { requestId=RequestId });if(closed)return;
-        if(Json.Flag(result,"ended")){main.NotifyTransient(string.IsNullOrWhiteSpace(Json.Text(result,"message"))?Locale.T("连接授权已结束，可在安卓授权页重新发起。"):Json.Text(result,"message"));End();return;}
+        if(Json.Flag(result,"ended")){main.NotifyInfo(string.IsNullOrWhiteSpace(Json.Text(result,"message"))?Locale.T("连接授权已结束，可在安卓授权页重新发起。"):Json.Text(result,"message"));End();return;}
         SetRevoked(Json.Flag(result,"revoked"));
         if(revoked){status.Text=Json.Text(result,"message");return;}
         if(restorePending && !Json.Flag(result,"ready")){await Scan();if(matched){restorePending=false;await Authorize();}return;}

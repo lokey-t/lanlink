@@ -70,6 +70,26 @@
       "es": "Opciones de desarrollador",
       "pt": "Opções do desenvolvedor"
     },
+    "错误报告": {
+      "en": "Error report",
+      "zh-Hant": "錯誤報告",
+      "ja": "エラーレポート",
+      "ko": "오류 보고서",
+      "de": "Fehlerbericht",
+      "fr": "Rapport d’erreurs",
+      "es": "Informe de errores",
+      "pt": "Relatório de erros"
+    },
+    "上次启动异常": {
+      "en": "Last startup exception",
+      "zh-Hant": "上次啟動異常",
+      "ja": "前回の起動時の例外",
+      "ko": "마지막 시작 오류",
+      "de": "Letzter Startfehler",
+      "fr": "Dernière erreur au démarrage",
+      "es": "Último error de inicio",
+      "pt": "Último erro de inicialização"
+    },
     "关闭开发者选项": {
       "en": "Turn Off Developer Options",
       "zh-Hant": "關閉開發者選項",
@@ -180,14 +200,59 @@
     "蓝牙已连接 · 待命": {
       "en": "Bluetooth connected · Standby"
     },
+    "HID通道": {
+      "en": "HID channel"
+    },
+    "启用 HID 通道": {
+      "en": "Enable HID channel"
+    },
+    "HID 通过蓝牙传送键盘和鼠标输入。连接就绪时优先使用蓝牙。": {
+      "en": "HID sends keyboard and mouse input over Bluetooth. LanLink prefers Bluetooth when the link is ready."
+    },
+    "被控设备": {
+      "en": "Controlled devices"
+    },
+    "蓝牙未就绪": {
+      "en": "Bluetooth is not ready"
+    },
+    "开启蓝牙权限": {
+      "en": "Enable Bluetooth permission"
+    },
+    "连接 HID 通道": {
+      "en": "Connect HID channel"
+    },
+    "请先选择组内主控设备": {
+      "en": "Select the group’s primary device first"
+    },
+    "请在主设备设置 HID 通道": {
+      "en": "Set up the HID channel on the primary device"
+    },
+    "请先开启 HID 通道": {
+      "en": "Enable the HID channel first"
+    },
+    "请开启蓝牙，并在系统设置中允许 LanLink 使用蓝牙。": {
+      "en": "Turn on Bluetooth and allow LanLink to use it in System Settings."
+    },
+    "{0} 已收到连接引导": {
+      "en": "Connection instructions opened on {0}"
+    },
+    "无法直接连接蓝牙，请在系统蓝牙设置中连接": {
+      "en": "Direct Bluetooth connection failed. Connect in system Bluetooth settings."
+    },
+    "点击连接后，按系统提示确认与 {0} 的蓝牙配对。": {
+      "en": "Select Connect, then confirm Bluetooth pairing with {0} if prompted."
+    },
+    "正在连接蓝牙": {
+      "en": "Connecting over Bluetooth"
+    },
     "组内蓝牙权限与重连": {
       "en": "Group Bluetooth permissions and reconnect"
     },
     "正在重新连接组内主设备的蓝牙": {
       "en": "Reconnecting to the group’s primary device over Bluetooth"
     },
-    "组内蓝牙跟随当前主设备。首次连接请在手机上允许附近设备权限，并按系统提示确认配对。": {
-      "en": "Group Bluetooth follows the primary device. Allow Nearby devices on your phone and confirm the first pairing if prompted."
+    "组内蓝牙跟随当前主设备。首次连接时请按系统提示确认配对。": {
+      "en": "Group Bluetooth follows the primary device. Follow the system prompts to confirm pairing."
     },
     "本机键鼠监听尚未就绪": {
       "en": "Local keyboard and mouse monitoring is not ready"
@@ -395,6 +460,9 @@
     },
     "下载全量更新": {
       "en": "Download full update"
+    },
+    "下载更新": {
+      "en": "Download update"
     },
     "正在检查更新": {
       "en": "Checking for updates"
@@ -4544,9 +4612,6 @@
     "\n\n保持命令运行。服务重启后需使用新命令。": {
       "en": "\n\nKeep this command running. Use a new command after restarting the service."
     },
-    " H.264 串流。": {
-      "en": " H.264 streaming."
-    },
     " · 已授权": {
       "en": " · Authorized"
     },
@@ -4894,6 +4959,46 @@
     },
     "复制命令": {
       "en": "Copy command"
+    },
+    "无法连接": {
+      "zh-Hant": "無法連線",
+      "en": "Unable to connect"
+    },
+    "手动 ADB 授权": {
+      "zh-Hant": "手動 ADB 授權",
+      "en": "Manual ADB setup"
+    },
+    "1. 准备 USB 调试": {
+      "zh-Hant": "1. 準備 USB 偵錯",
+      "en": "1. Set up USB debugging"
+    },
+    "在电脑安装 Android SDK Platform-Tools，并将其目录加入 PATH。在手机开发者选项中开启 USB 调试，用数据线连接电脑，并在手机上允许 USB 调试。": {
+      "zh-Hant": "在電腦安裝 Android SDK Platform-Tools，並將其目錄加入 PATH。在手機開發人員選項中開啟 USB 偵錯，用傳輸線連接電腦，並在手機上允許 USB 偵錯。",
+      "en": "Install Android SDK Platform-Tools on your computer and add its folder to PATH. Turn on USB debugging in your phone's Developer options, connect the phone with a USB data cable, and approve USB debugging on the phone."
+    },
+    "2. 检查连接": {
+      "zh-Hant": "2. 檢查連線",
+      "en": "2. Check the connection"
+    },
+    "打开电脑终端并运行下方命令。状态为 device 时可继续，显示 unauthorized 时请解锁手机并确认调试授权。若列表为空，请检查数据线是否支持数据传输。": {
+      "zh-Hant": "開啟電腦終端機並執行下方指令。狀態為 device 時可繼續，顯示 unauthorized 時請解鎖手機並確認偵錯授權。若清單為空，請確認傳輸線是否支援資料傳輸。",
+      "en": "Open a terminal and run the command below. Continue if the status is device. If it shows unauthorized, unlock the phone and approve USB debugging. If the list is empty, check that the cable supports data transfer."
+    },
+    "3. 启动 LanLink 助手": {
+      "zh-Hant": "3. 啟動 LanLink 助手",
+      "en": "3. Start the LanLink helper"
+    },
+    "在手机 LanLink 打开「设置 → 使用说明 → 连接与故障排查 → 显示 ADB 启动命令」，将手机生成的完整 adb shell 命令粘贴到电脑终端执行。若连接了多台调试设备，请先断开其他设备。下方是命令格式，参数以手机显示为准。": {
+      "zh-Hant": "在手機 LanLink 開啟「設定 → 使用說明 → 連線與疑難排解 → 顯示 ADB 啟動指令」，將手機產生的完整 adb shell 指令貼到電腦終端機執行。若連接了多台偵錯裝置，請先中斷其他裝置的連線。下方是指令格式，參數以手機顯示為準。",
+      "en": "On the phone, open LanLink and go to Settings → Help → Connection and troubleshooting → Show ADB startup command. Paste the full adb shell command from the phone into your terminal and run it. Disconnect any other debugging devices first. The example below shows the format. Use the values from your phone."
+    },
+    "4. 确认授权": {
+      "zh-Hant": "4. 確認授權",
+      "en": "4. Verify setup"
+    },
+    "让命令保持运行，回到「安卓授权」点击「刷新状态」。手机服务重启后，请在手机上重新获取命令。若曾解除 ADB 授权，请先在手机 LanLink 的「ADB 授权」中重新允许。": {
+      "zh-Hant": "讓指令持續執行，回到「安卓授權」點擊「重新整理狀態」。手機服務重新啟動後，請在手機上重新取得指令。若曾解除 ADB 授權，請先在手機 LanLink 的「ADB 授權」中重新允許。",
+      "en": "Leave the command running, return to Android authorization, and click Refresh status. If the phone's LanLink service restarts, get a fresh command from the phone. If you previously revoked ADB authorization, enable it again under ADB authorization in LanLink on the phone."
     },
     "完成设置": {
       "en": "Finish setup"
@@ -5390,8 +5495,8 @@
     "需要重新配对才能加入": {
       "en": "Pair again to rejoin"
     },
-    "非 Root 模式由电脑完成 ADB 键鼠授权；查看手机屏幕时再按提示允许系统投屏。Root 模式需手机已 Root，并在 Root 管理器允许 LanLink，使用实时": {
-      "en": "Non-Root mode uses a computer for ADB input authorization; allow system screen sharing when prompted. Root mode requires a rooted phone and permission in your Root manager, with live"
+    "非 Root 模式需通过电脑完成 ADB 授权，助手就绪后即可使用键鼠控制和 H.264 屏幕串流。Root 模式需手机已 Root，并在 Root 管理器中允许 LanLink 使用 Root 权限。": {
+      "en": "In non-root mode, authorize ADB from your computer. Once the helper is ready, you can use keyboard and mouse control and H.264 screen streaming. In root mode, your phone must be rooted and you must grant LanLink root access in your root manager."
     },
     "首次控制需要你同意。点击选择允许的功能，同意后记住此设备。": {
       "en": "Your approval is required for first-time control. Choose allowed features and remember this device."
@@ -5929,6 +6034,24 @@
     },
     "发现新版本": {
       "en": "New version available"
+    },
+    "现在更新": {
+      "en": "Update now"
+    },
+    "稍后提醒我": {
+      "en": "Remind me later"
+    },
+    "本版本不再提示": {
+      "en": "Skip this version"
+    },
+    "此版本暂无更新说明": {
+      "en": "No release notes are available for this version."
+    },
+    "点击现在更新可打开此版本发布页。": {
+      "en": "Select Update now to open this version's release page."
+    },
+    "更新信息已变化，请重新检查更新": {
+      "en": "The available update has changed. Check for updates again."
     },
     "已是最新版本": {
       "en": "You are up to date."

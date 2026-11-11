@@ -35,9 +35,11 @@ import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -47,6 +49,7 @@ public final class AppUpdater {
       "https://gitee.com/api/v5/repos/lokey-t/lanlink/releases/latest"};
   private static final String WEBSITE = "https://lanlink.sites.show/#get";
   private static final long MAX_APK = 512L * 1024 * 1024;
+  private static final long CHECK_INTERVAL = 6 * 60 * 60 * 1000L;
   private static final String TAG = "LanLinkUpdater";
 
   enum Phase { IDLE, CHECKING, DOWNLOADING, VERIFYING, READY, INSTALLING, FAILED }
@@ -66,10 +69,13 @@ public final class AppUpdater {
   private MainActivity activity;
   private AlertDialog offer;
   private Runnable observer;
-  private boolean awaitingPermission;
   private Intent confirmation;
   private Release available;
   private boolean showOfferOnResume;
+  private boolean manualOffer;
+  private final long[] lastCheckAttempt = new long[2];
+  private final Runnable checkAgain = this::automatic;
+  private final Runnable remindAgain = this::showOffer;
   private boolean retryDownload;
   private boolean websiteFallback;
   private boolean migrationRequired;
@@ -103,8 +109,8 @@ public final class AppUpdater {
 
   void attach(MainActivity current) {
     activity = current;
-    if (awaitingPermission) {
-      awaitingPermission = false;
+    if (phase == Phase.READY && updates.getBoolean("awaitingInstallPermission", false)) {
+      updates.edit().remove("awaitingInstallPermission").apply();
       if (app.getPackageManager().canRequestPackageInstalls()) install();
       else setStatus(Phase.READY, "尚未允许安装未知应用");
     }
@@ -116,6 +122,8 @@ public final class AppUpdater {
   void detach(MainActivity current) {
     if (activity != current) return;
     activity = null;
+    main.removeCallbacks(checkAgain);
+    main.removeCallbacks(remindAgain);
     if (offer != null) {
       offer.dismiss();
       offer = null;
@@ -155,8 +163,13 @@ public final class AppUpdater {
   }
 
   void automatic() {
-    if (phase == Phase.IDLE && preferences().getBoolean("auto_check_updates", true) &&
-        System.currentTimeMillis() - preferences().getLong(checkTimeKey(beta()), 0) > 21600000) check(false);
+    main.removeCallbacks(checkAgain);
+    if (activity == null || !preferences().getBoolean("auto_check_updates", true)) return;
+    boolean channel = beta();
+    long next = Math.max(lastCheckAttempt[channel ? 1 : 0], preferences().getLong(checkTimeKey(channel), 0)) + CHECK_INTERVAL;
+    long delay = next - System.currentTimeMillis();
+    if (delay <= 0 && canCheck() && offer == null) check(false);
+    else main.postDelayed(checkAgain, delay > 0 ? delay : 60000);
   }
 
   void chooseChannel(Runnable onChanged) {
@@ -182,15 +195,15 @@ public final class AppUpdater {
             }).setNegativeButton(Language.t("取消"), null).show();
   }
 
-  private static HttpURLConnection connect(String address) throws IOException {
+  private static HttpURLConnection connect(String address, int connectTimeout, int readTimeout) throws IOException {
     URL url = new URL(address);
     // Follow HTTPS redirects explicitly so a mirror cannot downgrade a download to HTTP.
     for (int redirects = 0; redirects < 6; redirects++) {
       if (!"https".equals(url.getProtocol())) throw new IOException("HTTPS required");
       HttpURLConnection connection = (HttpURLConnection) url.openConnection();
       connection.setInstanceFollowRedirects(false);
-      connection.setConnectTimeout(10000);
-      connection.setReadTimeout(30000);
+      connection.setConnectTimeout(connectTimeout);
+      connection.setReadTimeout(readTimeout);
       connection.setRequestProperty("User-Agent", "LanLink-Updater");
       try {
         int code = connection.getResponseCode();
@@ -208,7 +221,7 @@ public final class AppUpdater {
   }
 
   private static String metadata(String url, int limit) throws Exception {
-    HttpURLConnection connection = connect(url);
+    HttpURLConnection connection = connect(url, 8000, 8000);
     try (InputStream in = connection.getInputStream(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
       byte[] buffer = new byte[8192];
       for (int n; (n = in.read(buffer)) != -1;) {
@@ -234,22 +247,24 @@ public final class AppUpdater {
     final JSONObject manifest;
     final List<JSONObject> mirrors = new ArrayList<>();
     final String page;
+    String notes = "";
     Release(JSONObject manifest, String feed, String tag) {
       this.manifest = manifest;
       page = "https://" + (feed.contains("gitee.com") ? "gitee.com" : "github.com") +
           "/lokey-t/lanlink/releases/tag/" + tag;
     }
     String version() { return manifest.optString("version"); }
-    JSONObject full() {
+    JSONObject target() {
       JSONObject targets = manifest.optJSONObject("targets");
-      JSONObject android = targets == null ? null : targets.optJSONObject("android");
+      return targets == null ? null : targets.optJSONObject("android");
+    }
+    JSONObject full() {
+      JSONObject android = target();
       return android == null ? null : android.optJSONObject("full");
     }
     boolean hasApk() {
       JSONObject full = full();
-      if (full == null || !full.optString("name").matches("[a-zA-Z0-9][a-zA-Z0-9._-]*\\.apk") ||
-          !full.optString("sha256").matches("[a-f0-9]{64}") || full.optLong("size") <= 0 ||
-          full.optLong("size") > MAX_APK) return false;
+      if (!validAsset(full, ".apk")) return false;
       for (JSONObject mirror : mirrors) {
         JSONArray assets = mirror.optJSONArray("assets");
         if (assets == null) continue;
@@ -263,9 +278,16 @@ public final class AppUpdater {
     }
   }
 
+  private static boolean validAsset(JSONObject spec, String suffix) {
+    return spec != null && spec.optString("name").matches("[a-zA-Z0-9][a-zA-Z0-9._-]*") &&
+        spec.optString("name").endsWith(suffix) && spec.optString("sha256").matches("[a-f0-9]{64}") &&
+        spec.optLong("size") > 0 && spec.optLong("size") <= MAX_APK;
+  }
+
   private Release findRelease(boolean beta) throws Exception {
     Release selected = null;
     Release latestListed = null;
+    Map<String, String> notesByVersion = new HashMap<>();
     boolean failed = false;
     for (String feed : FEEDS) {
       try {
@@ -278,6 +300,11 @@ public final class AppUpdater {
           String version = tag.replaceFirst("^v", "");
           if (entry.optBoolean("draft") || entry.optBoolean("prerelease") != beta ||
               !version.matches("\\d{1,9}\\.\\d{1,9}\\.\\d{1,9}")) continue;
+          Object body = entry.opt("body");
+          if (body instanceof String) {
+            String notes = ((String) body).trim();
+            if (!notes.isEmpty()) notesByVersion.putIfAbsent(version, notes);
+          }
           if (latestListed == null || newer(version, latestListed.version()))
             latestListed = new Release(new JSONObject().put("version", version), feed, tag);
           if (selected != null && version.equals(selected.version())) {
@@ -301,9 +328,10 @@ public final class AppUpdater {
         Log.w(TAG, "Reading release mirror", e);
       }
     }
-    if (selected == null && latestListed != null) return latestListed;
+    if (selected == null) selected = latestListed;
     if (selected == null) throw new UpdateFailure(failed ? "无法连接更新服务器，请稍后重试" :
         beta ? "暂无可用的测试版发行" : "暂无可用的正式版发行");
+    selected.notes = notesByVersion.getOrDefault(selected.version(), "");
     return selected;
   }
 
@@ -311,11 +339,14 @@ public final class AppUpdater {
     if (phase == Phase.READY) {
       return;
     }
-    if (working()) return;
+    if (working() || offer != null) return;
     boolean channel = beta();
+    lastCheckAttempt[channel ? 1 : 0] = System.currentTimeMillis();
+    main.removeCallbacks(remindAgain);
     available = null;
     showOfferOnResume = websiteFallback = retryDownload = migrationRequired = false;
     setStatus(Phase.CHECKING, "正在检查更新");
+    automatic();
     worker.execute(() -> {
       try {
         Release release = findRelease(channel);
@@ -327,16 +358,12 @@ public final class AppUpdater {
             return;
           }
           available = release;
-          if (!release.hasApk()) {
-            websiteFallback = true;
-            setStatus(Phase.FAILED, "此版本暂未提供适用于本机的安装包");
-            return;
-          }
-          if (manual || preferences().getBoolean("auto_check_updates", true)) {
-            showOfferOnResume = true;
-            showOffer();
-          }
-          setStatus(Phase.IDLE, "发现新版本");
+          websiteFallback = !release.hasApk();
+          setStatus(websiteFallback ? Phase.FAILED : Phase.IDLE,
+              websiteFallback ? "此版本暂未提供适用于本机的安装包" : "发现新版本");
+          manualOffer = manual;
+          showOfferOnResume = true;
+          showOffer();
         });
       } catch (Exception e) {
         Log.w(TAG, "Checking for updates", e);
@@ -350,33 +377,65 @@ public final class AppUpdater {
 
   boolean hasOffer() { return phase == Phase.IDLE && available != null; }
 
+  private String reminderKey(Release release) {
+    return (beta() ? "beta_update_reminder_" : "stable_update_reminder_") + release.version();
+  }
+
+  private void deferOffer(String key, boolean skip) {
+    preferences().edit().putLong(key, skip ? -1 : System.currentTimeMillis() + CHECK_INTERVAL).apply();
+    manualOffer = false;
+  }
+
   void showOffer() {
-    if (activity == null || available == null) return;
-    showOfferOnResume = false;
-    if (offer != null) offer.dismiss();
-    offer = new AlertDialog.Builder(activity)
-        .setMessage(Language.t("发现新版本") + " " + available.version())
-        .setPositiveButton(Language.t("下载全量更新"), (d,w) -> download())
-        .setNegativeButton(Language.t("稍后"), null).show();
+    if (!showOfferOnResume || activity == null || available == null || offer != null || working()) return;
+    if (!manualOffer && !preferences().getBoolean("auto_check_updates", true)) return;
+    String key = reminderKey(available);
+    long until = preferences().getLong(key, 0);
+    if (until == -1) return;
+    long delay = until - System.currentTimeMillis();
+    if (!manualOffer && delay > 0) {
+      main.removeCallbacks(remindAgain);
+      main.postDelayed(remindAgain, delay);
+      return;
+    }
+    String title = Language.t("发现新版本") + " " + available.version() + " · " + Language.t(beta() ? "测试版" : "正式版");
+    String notes = available.notes;
+    String details = notes.isEmpty() ? Language.t("此版本暂无更新说明") : notes;
+    if (websiteFallback) details = Language.t("点击现在更新可打开此版本发布页。") + "\n\n" + details;
+    AlertDialog dialog = new AlertDialog.Builder(activity)
+        .setTitle(title)
+        .setMessage(details)
+        .setPositiveButton(Language.t("现在更新"), (d,w) -> {
+          if (websiteFallback) { deferOffer(key, false); openWebsite(); }
+          else download();
+        })
+        .setNegativeButton(Language.t("稍后提醒我"), (d,w) -> deferOffer(key, false))
+        .setNeutralButton(Language.t("本版本不再提示"), (d,w) -> deferOffer(key, true))
+        .setOnCancelListener(d -> deferOffer(key, false))
+        .create();
+    offer = dialog;
+    dialog.setOnDismissListener(d -> {
+      if (offer == dialog) { offer = null; showOffer(); }
+    });
+    dialog.show();
   }
 
   void download() {
     if (working() || available == null) return;
+    showOfferOnResume = false;
+    main.removeCallbacks(remindAgain);
     if (activity != null && observer == null) activity.showAbout();
     Release release = available;
     websiteFallback = retryDownload = migrationRequired = false;
     received = total = 0;
     speed = 0;
-    setStatus(Phase.DOWNLOADING, "正在下载全量包");
+    setStatus(Phase.DOWNLOADING, "正在准备更新");
     worker.execute(() -> {
       File partial = new File(directory, "lanlink-update.part.apk");
       try {
         Files.createDirectories(directory.toPath());
         JSONObject full = release.full();
-        if (directory.getUsableSpace() < full.getLong("size"))
-          throw new UpdateFailure("存储空间不足，释放空间后重试");
-        fetchApk(release, full, partial);
-        PackageInfo candidate = validateApk(partial);
+        PackageInfo candidate = downloadApk(release, full, partial);
         Files.move(partial.toPath(), apk.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
         if (!updates.edit().putLong("versionCode", candidate.getLongVersionCode())
             .putLong("size", full.getLong("size")).putString("sha256", full.getString("sha256"))
@@ -402,10 +461,35 @@ public final class AppUpdater {
     });
   }
 
-  private void fetchApk(Release release, JSONObject spec, File partial) throws Exception {
+  private PackageInfo downloadApk(Release release, JSONObject full, File partial) throws Exception {
+    PackageInfo current = installed();
+    JSONObject target = release.target();
+    JSONObject delta = target.optJSONObject("delta");
+    long size = full.getLong("size");
+    File patch = new File(directory, "lanlink-update.part.gz");
+    Files.deleteIfExists(patch.toPath());
+    Files.deleteIfExists(partial.toPath());
+    if (target.optString("deltaFrom").equals(current.versionName) && validAsset(delta, ".delta.apk.gz") &&
+        delta.getLong("size") < size && directory.getUsableSpace() >= size + delta.getLong("size")) {
+      try {
+        fetchAsset(release, delta, patch, true);
+        ApkDelta.apply(patch, new File(current.applicationInfo.sourceDir), partial, size, full.getString("sha256"));
+        return validateApk(partial, release.version());
+      } catch (Exception e) {
+        Log.w(TAG, "Incremental update failed; trying the full APK", e);
+        Files.deleteIfExists(partial.toPath());
+      } finally {
+        if (patch.exists() && !patch.delete()) Log.w(TAG, "Could not remove APK delta");
+      }
+    }
+    if (directory.getUsableSpace() < size) throw new UpdateFailure("存储空间不足，释放空间后重试");
+    fetchAsset(release, full, partial, false);
+    return validateApk(partial, release.version());
+  }
+
+  private void fetchAsset(Release release, JSONObject spec, File partial, boolean incremental) throws Exception {
     String name = spec.getString("name"), sha = spec.getString("sha256");
     long size = spec.getLong("size");
-    if (!sha.matches("[a-f0-9]{64}") || size <= 0 || size > MAX_APK) throw new IOException("Invalid APK descriptor");
     Exception failure = new UpdateFailure("当前下载源缺少安装包");
     HashSet<String> seen = new HashSet<>();
     for (JSONObject mirror : release.mirrors) {
@@ -417,12 +501,12 @@ public final class AppUpdater {
         if (!seen.add(url)) continue;
         try {
           boolean alternate = seen.size() > 1;
-          report(Phase.DOWNLOADING, alternate, 0, size, 0);
-          HttpURLConnection connection = connect(url);
+          report(Phase.DOWNLOADING, incremental, alternate, 0, size, 0);
+          HttpURLConnection connection = connect(url, 10000, 30000);
           try (InputStream in = connection.getInputStream(); OutputStream out = openPartial(partial)) {
             String actual = copyApk(in, out, size, (count, rate) ->
-                report(Phase.DOWNLOADING, alternate, count, size, rate));
-            report(Phase.VERIFYING, false, size, size, 0);
+                report(Phase.DOWNLOADING, incremental, alternate, count, size, rate));
+            report(Phase.VERIFYING, incremental, false, size, size, 0);
             if (!actual.equals(sha)) throw new UpdateFailure("安装包校验失败，请重试");
             return;
           } finally { connection.disconnect(); }
@@ -465,18 +549,16 @@ public final class AppUpdater {
       }
     }
     if (count != size) throw new UpdateFailure("安装包下载不完整，请重试");
-    StringBuilder digest = new StringBuilder(64);
-    for (byte b : hash.digest()) digest.append(String.format(Locale.ROOT, "%02x", b & 255));
-    return digest.toString();
+    return ApkDelta.hex(hash.digest());
   }
 
-  private void report(Phase phase, boolean alternate, long count, long size, double rate) {
+  private void report(Phase phase, boolean incremental, boolean alternate, long count, long size, double rate) {
     main.post(() -> {
       received = count;
       total = size;
       speed = rate;
       setStatus(phase, phase == Phase.VERIFYING ? "正在校验" :
-          alternate ? "正在下载全量包 · 备用下载源" : "正在下载全量包");
+          alternate ? "正在从备用下载源下载" : incremental ? "正在下载增量包" : "正在下载全量包");
     });
   }
 
@@ -504,13 +586,14 @@ public final class AppUpdater {
     return fallback;
   }
 
-  private PackageInfo validateApk(File file) throws Exception {
+  private PackageInfo validateApk(File file, String expectedVersion) throws Exception {
     PackageInfo candidate = app.getPackageManager().getPackageArchiveInfo(file.getAbsolutePath(),
         PackageManager.GET_SIGNING_CERTIFICATES);
     PackageInfo current = installed();
     if (candidate == null || candidate.signingInfo == null || !current.packageName.equals(candidate.packageName))
       throw new IncompatibleApk("更新包无效");
-    if (candidate.getLongVersionCode() <= current.getLongVersionCode() ||
+    if ((expectedVersion != null && !expectedVersion.equals(candidate.versionName)) ||
+        candidate.getLongVersionCode() <= current.getLongVersionCode() ||
         (candidate.applicationInfo != null && candidate.applicationInfo.minSdkVersion > Build.VERSION.SDK_INT))
       throw new IncompatibleApk("此更新与当前版本或设备不兼容");
     if (!compatibleSigners(current.signingInfo, candidate.signingInfo))
@@ -546,11 +629,12 @@ public final class AppUpdater {
   private void requestPermission() {
     if (activity == null) return;
     try {
-      awaitingPermission = true;
+      if (!updates.edit().putBoolean("awaitingInstallPermission", true).commit())
+        throw new IllegalStateException("Cannot save pending installation permission");
       activity.startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
           Uri.parse("package:" + app.getPackageName())));
     } catch (RuntimeException e) {
-      awaitingPermission = false;
+      updates.edit().remove("awaitingInstallPermission").apply();
       Log.w(TAG, "Opening install authorization", e);
       websiteFallback = true;
       setStatus(Phase.READY, "无法打开安装授权设置");
@@ -561,7 +645,7 @@ public final class AppUpdater {
     PackageInstaller installer = app.getPackageManager().getPackageInstaller();
     int id = -1;
     try {
-      validateApk(apk);
+      validateApk(apk, null);
       int previous = updates.getInt("session", -1);
       if (previous != -1 && installer.getSessionInfo(previous) != null) installer.abandonSession(previous);
       PackageInstaller.SessionParams params = new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL);

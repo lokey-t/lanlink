@@ -32,12 +32,13 @@ final class TouchpadView extends View implements AutoCloseable {
   private final float[] contactPoints = new float[4];
   private int contactCount;
   private boolean introHintVisible;
+  private boolean leftHeld, rightHeld;
   volatile boolean closed;
   final Runnable hold =
       () -> {
         if (touching && !multi && !moved && !closed) {
           drag = true;
-          button(0, true);
+          if (!leftHeld) button(0, true);
           haptics.dragStart();
           invalidate();
         }
@@ -137,8 +138,21 @@ final class TouchpadView extends View implements AutoCloseable {
     event(Wire.obj("kind", "button", "button", b, "down", down));
   }
 
+  void holdButton(int button, boolean down) {
+    if (button == 0) {
+      if (leftHeld == down) return;
+      leftHeld = down;
+      if (drag) return;
+    } else {
+      if (rightHeld == down) return;
+      rightHeld = down;
+    }
+    button(button, down);
+    if (down) haptics.tap(button == 2);
+  }
+
   void clickButton(int button) {
-    if (button == 0 && drag) return;
+    if (button == 0 ? drag || leftHeld : rightHeld) return;
     button(button, true);
     button(button, false);
     haptics.tap(button == 2);
@@ -183,7 +197,7 @@ final class TouchpadView extends View implements AutoCloseable {
   }
 
   private void drawStandaloneSurface(Canvas canvas) {
-    canvas.drawColor(0xff121214);
+    canvas.drawColor(Color.BLACK);
     paint.setStyle(Paint.Style.FILL);
     if (touching) {
       paint.setColor(Color.WHITE);
@@ -258,7 +272,7 @@ final class TouchpadView extends View implements AutoCloseable {
       removeCallbacks(hold);
       haptics.reset();
       if (drag) {
-        button(0, false);
+        if (!leftHeld) button(0, false);
         drag = false;
         moved = true;
         haptics.dragEnd();
@@ -322,7 +336,7 @@ final class TouchpadView extends View implements AutoCloseable {
         }
       }
       if (drag) {
-        button(0, false);
+        if (!leftHeld) button(0, false);
         drag = false;
         haptics.dragEnd();
       } else if (!moved && maxFingers <= 2 && e.getEventTime() - downAt < 400) {
@@ -355,7 +369,7 @@ final class TouchpadView extends View implements AutoCloseable {
       wheel = 0;
     }
     if (drag) {
-      button(0, false);
+      if (!leftHeld) button(0, false);
       drag = false;
     }
     intercept(false);
@@ -379,6 +393,8 @@ final class TouchpadView extends View implements AutoCloseable {
 
   public void close() {
     if (closed) return;
+    holdButton(0, false);
+    holdButton(2, false);
     cancelGesture();
     closed = true;
     worker.shutdown();

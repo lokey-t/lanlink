@@ -1,25 +1,27 @@
-# LanLink v0.91.1
+# LanLink v0.92.0
 
-[简体中文 README](README.md) · [English README](README.en.md)
+## 更新日志
 
-## 中文
+- 新增 Windows 和 macOS 组内蓝牙 HID 键鼠通道。跨屏控制优先使用已就绪的 HID 通道，可在获授权时回退到网络。
+- 修复增量更新错误。Windows x64、macOS arm64 和 Android 各自提供独立增量包，并在补丁不可用时下载对应的全量包。
+- 优化 Android 界面和横屏触控板，修复若干问题。
 
-Windows、macOS 和 Android 的设置中新增「导出日志」。每台设备保留本次运行最近 100 条记录。导出时并行收集本机与在线同组设备的日志，按设备合并为一个 UTF-8 文本文件。文件会标明离线、未响应或版本不支持的设备。
+## Changes
 
-- 新增连接质量分析，可检查组内设备的往返延迟、抖动和探测超时情况。
-- 安卓首页在本机未就绪时显示红色状态和带叉号的手机图标。点击图标即可在首页打开授权教程。
-- 修复结束远程控制后，迟到的旧会话消息可能影响新会话的问题，并修正离线设备的切换路径及拖放暂存行为。
-- Android「设置 → 关于」集中显示版本、更新通道、手动检查和日志导出。设置子页面支持预测式返回预览。
+- Added a Bluetooth HID keyboard and mouse channel for grouped Windows and macOS devices. Cross-screen input prefers a ready HID channel and can fall back to the network when authorized.
+- Fixed incremental updates. Windows x64, macOS arm64, and Android each get a separate delta and fall back to their full package when needed.
+- Improved the Android interface and landscape touchpad, and fixed several issues.
 
-Android 发行包使用正式版证书签名。使用旧证书的 v0.91.0 无法覆盖安装，请先保留需要的应用数据，再卸载旧版并安装新版。macOS 安装包适用于 Apple Silicon，应用使用临时签名，未经过 Apple 公证。
+## 下载 / Downloads
 
-## English
+| 设备 / 安装方式 | GitHub 下载 | Gitee 发行页 |
+| --- | --- | --- |
+| Windows 10/11 x64 · 便携版 | [LanLink-0.92.0-windows-x64.zip](https://github.com/lokey-t/lanlink/releases/download/v0.92.0/LanLink-0.92.0-windows-x64.zip) | [发行页](https://gitee.com/lokey-t/lanlink/releases/tag/v0.92.0) |
+| Windows 10/11 x64 · 安装版 | [LanLink-0.92.0-windows-x64-setup.exe](https://github.com/lokey-t/lanlink/releases/download/v0.92.0/LanLink-0.92.0-windows-x64-setup.exe) | [发行页](https://gitee.com/lokey-t/lanlink/releases/tag/v0.92.0) |
+| macOS 14+ · Apple Silicon DMG | [LanLink-0.92.0-macos-arm64.dmg](https://github.com/lokey-t/lanlink/releases/download/v0.92.0/LanLink-0.92.0-macos-arm64.dmg) | [发行页](https://gitee.com/lokey-t/lanlink/releases/tag/v0.92.0) |
+| macOS 14+ · Apple Silicon ZIP | [LanLink-0.92.0-macos-arm64.zip](https://github.com/lokey-t/lanlink/releases/download/v0.92.0/LanLink-0.92.0-macos-arm64.zip) | [发行页](https://gitee.com/lokey-t/lanlink/releases/tag/v0.92.0) |
+| Android 10+ · 正式签名 | [LanLink-0.92.0-android.apk](https://github.com/lokey-t/lanlink/releases/download/v0.92.0/LanLink-0.92.0-android.apk) | [发行页](https://gitee.com/lokey-t/lanlink/releases/tag/v0.92.0) |
 
-Export Logs is available in Settings on Windows, macOS, and Android. Each device retains up to 100 activity entries from the current run. Export collects available logs from the local device and online group members in parallel and groups them by device in one UTF-8 text file. The report identifies devices that were offline, did not respond, or did not support log export.
+Android APK 沿用 v0.91.1 的正式签名证书。若旧版使用不同证书，Android 会拒绝覆盖安装。
 
-- Connection quality analysis reports round-trip latency, jitter, and probe timeouts for group devices.
-- When the local Android device is unready, the home screen shows a red status and a phone icon with a red cross. Tap the icon to open the setup guide.
-- Fixed late messages from ended remote-control sessions affecting newer sessions, and corrected offline-device switching paths and drag-and-drop staging behavior.
-- Android now groups the version, update channel, manual update check, and log export under Settings → About. Settings subpages support predictive back previews.
-
-The Android release APK uses the production signing certificate. Installations of v0.91.0 signed with the previous certificate require a fresh install. Preserve any app data you need before uninstalling. The macOS package supports Apple Silicon and uses an ad-hoc signature without Apple notarization.
+The Android APK uses the same production signing certificate as v0.91.1. Android rejects in-place upgrades from builds signed with a different certificate.

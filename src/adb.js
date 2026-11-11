@@ -19,11 +19,14 @@ export async function findAdb({ env = process.env, platform = process.platform, 
   const sdkRoots = [env.ANDROID_SDK_ROOT, env.ANDROID_HOME,
     platform === 'win32' && env.LOCALAPPDATA ? paths.join(env.LOCALAPPDATA, 'Android', 'Sdk') : '',
     platform === 'darwin' ? paths.join(home, 'Library', 'Android', 'sdk') : paths.join(home, 'Android', 'Sdk')];
+  const standalone = platform === 'win32' && /^[a-z]:$/i.test(env.SystemDrive || '')
+    ? paths.join(env.SystemDrive + '\\', 'platform-tools', name) : '';
   const candidates = [env.LANLINK_ADB, paths.join(root, 'runtime', 'platform-tools', name),
     ...sdkRoots.filter(Boolean).map(p => paths.join(p, 'platform-tools', name)),
     // Finder and login launches do not inherit Homebrew's shell PATH.
     ...(platform === 'darwin' ? ['/opt/homebrew/bin/adb', '/usr/local/bin/adb'] : []),
-    ...(env.PATH || env.Path || '').split(platform === 'win32' ? ';' : ':').filter(Boolean).map(p => paths.join(p.replace(/^"|"$/g, ''), name))];
+    ...(env.PATH || env.Path || '').split(platform === 'win32' ? ';' : ':').filter(Boolean).map(p => paths.join(p.replace(/^"|"$/g, ''), name)),
+    standalone];
   for (const candidate of candidates.filter(Boolean)) {
     if (!paths.isAbsolute(candidate)) continue;
     try { await exists(candidate, platform === 'win32' ? constants.F_OK : constants.X_OK); return candidate; } catch {}

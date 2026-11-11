@@ -15,6 +15,21 @@ namespace LanLink.Desktop {
     public static double Number(object value, string key, double fallback) { double n; return double.TryParse(Text(value, key), out n) ? n : fallback; }
   }
   public sealed class Client {
+    const int DiagnosticLimit = 500;
+    static readonly object diagnosticGate = new object();
+    static readonly Queue<string> diagnostics = new Queue<string>();
+    internal static void RecordDiagnostic(string source, string detail) {
+      if (string.IsNullOrWhiteSpace(detail)) return;
+      if (detail.Length > 8192) detail=detail.Substring(0,8192);
+      lock (diagnosticGate) {
+        if(diagnostics.Count >= DiagnosticLimit) diagnostics.Dequeue();
+        diagnostics.Enqueue(string.Format("{0:yyyy-MM-dd HH:mm:ss.fff}  [{1}]  {2}", DateTime.Now, source, detail));
+      }
+    }
+    internal static string DiagnosticReport() {
+      lock (diagnosticGate) return string.Join(Environment.NewLine+Environment.NewLine, diagnostics.ToArray());
+    }
+
     readonly JavaScriptSerializer json = new JavaScriptSerializer { MaxJsonLength = 12 * 1024 * 1024 };
     readonly Dictionary<string, TaskCompletionSource<object>> pending = new Dictionary<string, TaskCompletionSource<object>>();
     readonly object gate = new object();
@@ -45,13 +60,16 @@ namespace LanLink.Desktop {
           else promise.TrySetResult(Json.Get(message, "result"));
         } catch (Exception ex) { Fail("服务响应无法读取：" + ex.Message); }
       };
-      process.ErrorDataReceived += delegate { /* stderr is not a UI protocol */ };
+      process.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs e) {
+        RecordDiagnostic("Service stderr", e.Data);
+      };
       process.Exited += delegate { Fail("设备服务已退出，请重新启动 LanLink。"); };
       process.Start(); process.BeginOutputReadLine(); process.BeginErrorReadLine();
       if (await Task.WhenAny(ready.Task, Task.Delay(35000)) != ready.Task) throw new Exception("设备服务启动超时");
       await ready.Task;
     }
     void Fail(string message) {
+      if(!stopping) RecordDiagnostic("Service", message);
       ready.TrySetException(new Exception(message));
       lock (gate) { foreach (var p in pending.Values) p.TrySetException(new Exception(message)); pending.Clear(); }
       if (!stopping && Failed != null) Failed(message);
@@ -61,11 +79,16 @@ namespace LanLink.Desktop {
       lock (gate) {
         id = (++sequence).ToString(); pending[id] = promise;
         try { byte[] bytes = Encoding.UTF8.GetBytes(json.Serialize(new { id = id, method = method, args = args ?? new { } }) + "\n"); process.StandardInput.BaseStream.Write(bytes, 0, bytes.Length); process.StandardInput.BaseStream.Flush(); }
-        catch { pending.Remove(id); throw new Exception("设备服务连接已断开"); }
+        catch (Exception ex) { pending.Remove(id); RecordDiagnostic(method, ex.ToString()); throw new Exception("设备服务连接已断开", ex); }
       }
-      int timeout = method.StartsWith("update-") ? 900000 : method.StartsWith("stage-") || method == "send-files" || method == "device-paste" || method == "paste" || method == "adb-authorize" || method == "adb-connect" || method == "adb-match" || method == "adb-local-authorize" || method == "adb-local-devices" ? 130000 : 30000;
-      if (await Task.WhenAny(promise.Task, Task.Delay(timeout)) != promise.Task) { lock (gate) pending.Remove(id); throw new Exception("操作超时，请检查目标设备"); }
-      return await promise.Task;
+      int timeout = method.StartsWith("update-") ? 900000 : method.StartsWith("stage-") || method == "send-files" || method == "device-paste" || method == "paste" || method == "adb-authorize" || method == "adb-connect" || method == "adb-match" || method == "adb-local-authorize" || method == "adb-local-devices" || method == "group-hid-guide-connect" ? 130000 : 30000;
+      try {
+        if (await Task.WhenAny(promise.Task, Task.Delay(timeout)) != promise.Task) { lock (gate) pending.Remove(id); throw new Exception("操作超时，请检查目标设备"); }
+        return await promise.Task;
+      } catch (Exception ex) {
+        RecordDiagnostic(method, ex.Message);
+        throw;
+      }
     }
     public async Task Stop() {
       if (stopping) return; stopping = true;

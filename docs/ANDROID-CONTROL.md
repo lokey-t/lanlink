@@ -5,7 +5,7 @@
 ## 首次设置与持久恢复
 
 1. 手机与电脑加入同一组；手机在首次控制提示中允许该电脑操作。
-2. 电脑安装 Android SDK Platform-Tools。可自动检测 Android Studio 安装的 SDK，也支持 PATH、ANDROID_HOME、ANDROID_SDK_ROOT、LANLINK_ADB。
+2. 使用含 ADB 的 LanLink 桌面包时，电脑打开 LanLink 即可检测 ADB。自行构建的桌面包如未包含 ADB，可安装独立的 Android SDK Platform-Tools。LanLink 支持 Android Studio 安装的 SDK、PATH、ANDROID_HOME、ANDROID_SDK_ROOT 和 LANLINK_ADB，也会检查 Windows 系统盘根目录下的 `platform-tools`。修改 PATH 后请完全退出并重新打开 LanLink。
 3. 手机开启 USB 调试并连接电脑，在系统提示中信任该电脑。建议选择始终允许；厂商可能另有「USB 调试（安全设置）」。
 4. 电脑发起桌面控制或边缘键鼠切换时，若手机输入助手未配置，会弹出带 SVG 动画的原生连接引导。通过加密组身份自动匹配已连接的手机，点击连接授权；就绪且手机首次同意后电脑自动继续；也可从左侧「安卓授权」进入。不会对所有连接的手机批量授权。
 5. 成功后保存绑定。应用服务重启时助手自动重连，不需再次授权；手机重启后，电脑在已信任的 USB / 无线调试连接可用时自动启动助手。后台只恢复该设备公钥绑定的序列号，且再次检查组成员身份与手机给予的输入权限。
@@ -86,3 +86,7 @@ Root 模式自动尝试配置本应用的剪贴板 AppOps、相机和通知权�
 - 手机主动解除 ADB 后，电脑连接引导切换为手机确认动画，手机显示“恢复 ADB 授权”弹窗；仅点击允许后才能恢复配置，电脑不能替手机批准。
 
 Root 管理器本身的许可需在对应管理器撤销；应用中的「解除」停止 LanLink 的 Root 模式，不冒充撤销系统级许可。Root 自动配置、SELinux 策略及内部显示接口在不同厂商 ROM 上仍需验证。
+
+## 桌面打包时加入 ADB
+
+给 Windows 和 macOS 打包脚本分别设置 `LANLINK_ADB_DIST`，指向对应平台的 AOSP ADB 构建目录。Windows 也可通过 `-AdbRuntime` 传入该目录。目录应包含 `adb.exe`（Windows）或可执行的 `adb`（macOS）、运行所需的共享库、`NOTICE`、依赖许可证及对应的源码与构建信息。打包脚本将整个目录复制进软件，macOS 会在封装应用签名前签署其中的原生二进制。Android APK 不需要桌面 ADB。

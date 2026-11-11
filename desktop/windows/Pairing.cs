@@ -135,7 +135,7 @@ namespace LanLink.Desktop {
       InitialLoad = Task.FromResult(0);
       IsVisibleChanged += async delegate {
         closed = !IsVisible;
-        if (!closed) { initialPeers=null;completed=false;waitingConnection=false;InitialLoad = RefreshCode(); timer.Start(); }
+        if (!closed) { initialPeers=null;completed=false;waitingConnection=false;SetQRShown(true);InitialLoad = RefreshCode(); timer.Start(); }
         else { timer.Stop(); SetQRShown(false); CurrentCode=null; copyCode.IsEnabled=false; code.Text="···· ····"; remaining=0; try { await client.Call("pairing-stop"); } catch {} }
       };
       timer.Tick += async delegate { UpdateCountdown(); if (DateTime.UtcNow >= nextFetch) await RefreshCode(); };

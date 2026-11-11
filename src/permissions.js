@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { masterSelection } from './master.js';
 const labels = { input: '键鼠控制', screen: '屏幕查看', clipboard: '剪贴板与文件', shutdown: '远程关机' };
 
 function permissionKey(key) {
@@ -78,10 +79,14 @@ export function permissionRows(report) {
 }
 
 export async function groupPermissions(service) {
+  const masterId = masterSelection(service)?.id;
   const records = new Map([[service.config.id, { name: service.config.name, platform: process.platform }]]);
   for (const [id, value] of Object.entries(service.group.data.members)) if (!service.group.excluded(id)) records.set(id, value);
   for (const [id, value] of Object.entries(service.config.knownDevices || {})) if (!service.group.excluded(id)) records.set(id, value);
-  return { devices: await Promise.all([...records].map(async ([id, info]) => {
+  const ordered = [...records];
+  const masterIndex = ordered.findIndex(([id]) => id === masterId);
+  if (masterIndex > 0) ordered.unshift(...ordered.splice(masterIndex, 1));
+  return { devices: await Promise.all(ordered.map(async ([id, info]) => {
     const local = id === service.config.id, peer = service.peers.get(id), online = local || !!peer && !peer.closed;
     let report, message = online ? '' : '设备离线，无法读取当前权限';
     try {
@@ -96,6 +101,6 @@ export async function groupPermissions(service) {
       Object.assign(input, { system:'已就绪', state:'ready', status:'已就绪' });
     }
     return { id, name: local ? service.config.name : peer?.info?.name || info.name || '设备', platform: local ? process.platform : peer?.info?.platform || info.platform,
-      local, online, message, inputTransport, permissions, inboundPermissions:local?[]:Object.entries(labels).map(([key,label])=>({key,label,allowed:service.consent.allowed(id,key)})), engine: report?.engine || null };
+      local, online, master:id === masterId, message, inputTransport, permissions, inboundPermissions:local?[]:Object.entries(labels).map(([key,label])=>({key,label,allowed:service.consent.allowed(id,key)})), engine: report?.engine || null };
   })) };
 }

@@ -4,6 +4,22 @@ using Windows.Devices.Bluetooth;
 using Windows.Devices.Bluetooth.GenericAttributeProfile;
 using Windows.Security.Cryptography;
 
+if (args.Length != 0)
+{
+    try
+    {
+        object result = args switch
+        {
+            ["--find", var service] => await HidConnection.Find(Guid.ParseExact(service, "D")),
+            ["--pair", var address, var type] => await HidConnection.Pair(Convert.ToUInt64(address, 16), Enum.Parse<BluetoothAddressType>(type)),
+            _ => throw new ArgumentException(),
+        };
+        Console.WriteLine(JsonSerializer.Serialize(result));
+    }
+    catch { Environment.ExitCode = 1; }
+    return;
+}
+
 var hid = new BluetoothHid();
 while (await Console.In.ReadLineAsync() is { } line)
 {

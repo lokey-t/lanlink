@@ -359,6 +359,10 @@ test('permission matrix opens the guide on the selected peer and requires local 
   const {a:source,b:target} = await pair(t);
   const {createActions} = await import('../src/actions.js');
   const invoke = createActions(source), confirm = createActions(target);
+  const matrix = await confirm('group-permissions', {});
+  assert.equal(matrix.devices[0].id, source.config.id);
+  assert.equal(matrix.devices[0].master, true);
+  assert.equal(matrix.devices.find(device=>device.id === target.config.id).master, false);
   await target.settings({permissions:{screen:false}});
   await target.setConsent(source.config.id,{input:false,screen:false});
   const result=await invoke('permission-guide-open',{id:target.config.id,permission:'screen'});
@@ -429,6 +433,7 @@ test('Bluetooth loss releases the old session before authorized network fallback
   await a.inputTransport.save(id,{preference:'network_only'});
   await a.switchTo(id);
   assert.equal(a.activeSession.transport,'network');
+  assert.equal(a.state().inputTransport.targets[0].selected,'network');
   assert.equal(a.native.calls.some(call=>call.method==='hid-send'),false);
   await a.inputTransport.save(id,{preference:'auto_bt_first'});
   await a.switchTo(id);
@@ -442,6 +447,77 @@ test('Bluetooth loss releases the old session before authorized network fallback
   await assert.rejects(a.switchTo(id), /蓝牙键鼠尚未就绪/);
   assert.equal(a.active,null);
   assert.equal(b.owner,null);
+});
+
+test('group HID panel reports the primary, keeps a ready channel on standby, and falls back when switched off', async t => {
+  const {a,b,id} = await bluetoothFixture(t);
+  const {createActions} = await import('../src/actions.js');
+  const invoke = createActions(a), remote = createActions(b);
+  const permission = {appEnabled:true, peerAllowed:true, systemGranted:true};
+  const selected = () => a.inputTransport.describe(id, permission).selected;
+  assert.equal(selected(), 'bluetooth');
+  await a.switchTo(id);
+  await a.returnLocal();
+  assert.equal(selected(), 'bluetooth');
+  assert.equal(a.native.calls.some(call=>call.method === 'hid-stop'),false);
+  const status = await invoke('group-hid-status', {});
+  assert.equal(status.master.id, a.config.id);
+  assert.equal(status.targets.find(target=>target.id === id).connected, true);
+  await assert.rejects(remote('group-hid-enable', {enabled:false}), /主设备/);
+  await invoke('group-hid-enable', {enabled:false});
+  assert.equal((await loadConfig(a.dir)).groupHidEnabled, false);
+  assert.equal(a.native.calls.some(call=>call.method === 'hid-stop'),true);
+  assert.equal(selected(), 'network');
+  await a.switchTo(id);
+  assert.equal(a.activeSession.transport, 'network');
+});
+
+test('only the current primary may open a target HID guide and a stale prompt cannot cancel its replacement', async t => {
+  const {a,b} = await pair(t);
+  const fromPrimary = a.getPeer(b.config.id);
+  await assert.rejects(b.getPeer(a.config.id).request('hid-connect-guide', {name:'Other device'}), /主设备/);
+  assert.deepEqual(await fromPrimary.request('hid-connect-guide', {name:'LanLink'}), {opened:true});
+  const first = b.inputTransport.guideNotice();
+  assert.equal(first.id,a.config.id);
+  await fromPrimary.request('hid-connect-guide', {name:'LanLink'});
+  const second = b.inputTransport.guideNotice();
+  await assert.rejects(b.inputTransport.finishGuide(first.requestId, true), /请求已结束/);
+  assert.equal(b.inputTransport.guideNotice(), second);
+  await b.inputTransport.finishGuide(second.requestId, true);
+  assert.equal(b.inputTransport.guideNotice(), null);
+});
+
+test('direct HID pairing proves the primary before starting OS pairing and saves only a ready link', async t => {
+  const {a,b} = await pair(t);
+  const peer = a.getPeer(b.config.id), serviceId = a.inputTransport.serviceId;
+  const nonce = 'a'.repeat(32);
+  let acceptsProof = false, subscribed = false, paired = 0;
+  peer.info.capabilities.autoHidTarget = 1;
+  b.native.capabilities.hidDirectPairing = true;
+  a.inputTransport.started = true;
+  a.inputTransport.adapter = {rendezvousReady:true};
+  a.inputTransport.pairing = {peer, until:Date.now() + 120000};
+  a.native.call = async (method, args) => {
+    if (method === 'hid-claim' && acceptsProof && args.nonce === nonce) return {host:'paired-host'};
+    if (method === 'hid-status') return {hidServiceReady:true, rendezvousReady:true,
+      hosts:subscribed ? [{id:'paired-host', hostConnected:true, reportSubscribed:true, ready:true}] : []};
+    return {};
+  };
+  b.native.call = async (method) => {
+    if (method === 'hid-find-device') return {address:'0123456789ab', addressType:1, nonce};
+    if (method === 'hid-pair-device') { paired++; subscribed = true; return {paired:true}; }
+    return {};
+  };
+  await peer.request('hid-connect-guide', {name:'LanLink', serviceId});
+  const id = b.inputTransport.guideNotice().requestId;
+  await assert.rejects(b.inputTransport.connectGuide(id), /凭证/);
+  assert.equal(paired, 0);
+  assert.equal(a.inputTransport.record(b.config.id).host, undefined);
+  acceptsProof = true;
+  await b.inputTransport.connectGuide(id);
+  assert.equal(paired, 1);
+  assert.equal(b.inputTransport.guideNotice(), null);
+  assert.equal(a.inputTransport.record(b.config.id).host, a.inputTransport.hostKey('paired-host'));
 });
 
 test('group HID settings preserve a connected link while the receiver selects network input', async t => {

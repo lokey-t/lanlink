@@ -63,7 +63,7 @@ export class Service extends EventEmitter {
   }
   log(message) { this.logs.unshift({ time: Date.now(), message: String(message).slice(0, 300) }); this.logs.length = Math.min(this.logs.length, runtimeLogLimit); this.emit('change'); }
   trackTask(task) { this.messageTasks.add(task); const done = () => this.messageTasks.delete(task); task.then(done, done); return task; }
-  identity() { return { id: this.config.id, name: this.config.name, platform: process.platform, masterSelection:masterSelection(this),layout:layoutSelection(this),capabilities: { ...this.native.capabilities,qualityProbe:1,qualityBuild,staging:1,quic:this.quic.enabled?1:0,motionV2:this.quic.native?.binaryMotion?2:0,bulk:1,rtcVideo:1, controlPrepare: true, bluetoothControl: 1, hidSettings: 1, autoHidMaster: ['darwin','win32'].includes(process.platform) ? 1 : 0, dualLink: true, memberKey: this.group.own.key } }; }
+  identity() { return { id: this.config.id, name: this.config.name, platform: process.platform, masterSelection:masterSelection(this),layout:layoutSelection(this),capabilities: { ...this.native.capabilities,qualityProbe:1,qualityBuild,staging:1,quic:this.quic.enabled?1:0,motionV2:this.quic.native?.binaryMotion?2:0,bulk:1,rtcVideo:1, controlPrepare: true, bluetoothControl: 1, hidSettings: 1, autoHidMaster: ['darwin','win32'].includes(process.platform) ? 1 : 0, autoHidTarget:this.native.capabilities.hidDirectPairing === true ? 1 : 0, dualLink: true, memberKey: this.group.own.key } }; }
   async start() {
     this.updater=new Updater(this);
     await this.updater.loadResult();
@@ -80,7 +80,12 @@ export class Service extends EventEmitter {
       this.config.knownDevices = {}; this.config.deviceGrants = {}; this.config.edges = {};delete this.config.layout;delete this.config.masterSelection;this.config.master=false;this.consent.reset(this.config.deviceGrants);
     }
     delete this.config.pendingGroupJoin;
-    await initializeMaster(this);await initializeLayout(this);await saveConfig(this.dir, this.config);await this.staging.load(); this.group.start(); await this.native.start(); if (Object.keys(this.inputTransport.records).some(id => this.inputTransport.record(id).host)) this.inputTransport.advertise().catch(() => {}); this.secret = parseToken(this.config.token);
+    await initializeMaster(this);await initializeLayout(this);await saveConfig(this.dir, this.config);await this.staging.load(); this.group.start(); await this.native.start();
+    if (Object.keys(this.inputTransport.records).some(id => {
+      const record = this.inputTransport.record(id);
+      return record.host && (record.external || this.inputTransport.groupEnabled());
+    })) this.inputTransport.advertise().catch(() => {});
+    this.secret = parseToken(this.config.token);
     this.server = net.createServer(s => this.attach(s));
     await new Promise((resolve, reject) => { this.server.once('error', reject); this.server.listen(this.options.port ?? 45831, this.options.host || '0.0.0.0', resolve); });
       this.server.on('error', e => this.log('网络监听失败：' + e.message)); this.port = this.server.address().port;
@@ -281,8 +286,11 @@ export class Service extends EventEmitter {
     if (!this.currentPeer(peer)) throw Error('设备连接已结束');
     if (method === 'hid-link-status') {
       await this.inputTransport.refresh();
-      return { connected:this.currentPeer(peer) && this.inputTransport.connected(peer.remote.id) };
+      return { connected:this.currentPeer(peer) && this.inputTransport.connected(peer.remote.id),
+        ready:this.currentPeer(peer) && this.inputTransport.ready(peer.remote.id) };
     }
+    if (method === 'hid-master-status' && this.inputTransport.role()) return this.inputTransport.masterStatus();
+    if (method === 'hid-connect-guide') return this.inputTransport.receiveGuide(peer, a.name, a.serviceId);
     if (method === 'hid-pair-start' || method === 'hid-pair-confirm')
       return this.configure(() => this.inputTransport.pairIncoming(peer, method === 'hid-pair-confirm'));
     if (method === 'bluetooth-offer') return this.inputTransport.offer(peer);

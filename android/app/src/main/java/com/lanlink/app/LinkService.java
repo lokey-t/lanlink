@@ -33,7 +33,6 @@ public class LinkService extends Service implements Wire.Listener {
   private final Set<Wire> sockets = ConcurrentHashMap.newKeySet();
   private final Set<String> connecting = ConcurrentHashMap.newKeySet();
   public final ExecutorService jobs = Executors.newFixedThreadPool(6);
-  final PhoneHid phoneHid = new PhoneHid(this);
   final ThreadPoolExecutor inputJobs =
       new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(128));
   private final ScheduledExecutorService clock = Executors.newScheduledThreadPool(2);
@@ -55,9 +54,7 @@ public class LinkService extends Service implements Wire.Listener {
   public volatile String status = "正在启动", active;
   private volatile String owner;
   private boolean ownerFallbackAccepted;
-  private volatile boolean ownerPointer, ownerBluetooth;
-  private volatile long outgoingHidUntil;
-  private volatile boolean outgoingHid;
+  private volatile boolean ownerPointer;
   private String ownerEdgeSession;
   private long ownerGlowSeq;
   private volatile long glowGeneration;
@@ -599,8 +596,6 @@ public class LinkService extends Service implements Wire.Listener {
         true,
         "controlPrepare",
         true,
-        "hidSettings", 1,
-        "bluetoothControl", 1,
         "networkInputReady", inputReady,
         "input", inputReady,
         "host",
@@ -664,32 +659,6 @@ public class LinkService extends Service implements Wire.Listener {
       try { result.put(peer.id, peer.info); } catch (JSONException ignored) {}
     }
     return result;
-  }
-
-  private String hidKey(String type, String id) {
-    return "hid_" + type + "_" + group.data.optString("id") + "_" + id;
-  }
-
-  boolean hidEnabled(String id) { return prefs.getBoolean(hidKey("enabled", id), true); }
-
-  void setHidEnabled(String id, boolean enabled) {
-    if (!authorizationDevices().has(id)) return;
-    prefs.edit().putBoolean(hidKey("enabled", id), enabled).apply();
-    if (!enabled && id.equals(active) && outgoingHid) releaseControl();
-  }
-
-  String hidHost(String id) { return prefs.getString(hidKey("host", id), ""); }
-
-  synchronized void bindHidHost(Wire peer, String address) throws IOException {
-    if (peers.get(peer.id) != peer || group.excluded(peer.id)) throw new IOException("设备连接已结束");
-    Iterator<String> ids = authorizationDevices().keys();
-    while (ids.hasNext()) {
-      String id = ids.next();
-      if (!id.equals(peer.id) && address.equals(hidHost(id)))
-        throw new IOException("这个蓝牙设备已绑定到其他目标");
-    }
-    if (!prefs.edit().putString(hidKey("host", peer.id), address).commit())
-      throw new IOException("无法保存蓝牙键鼠配对");
   }
 
   private synchronized void rememberDevice(Wire p) {
@@ -1146,31 +1115,16 @@ public class LinkService extends Service implements Wire.Listener {
   }
 
   synchronized void requireOwner(Wire p) throws Exception {
-    keepOwner(p, null);
-  }
-
-  private synchronized boolean keepOwner(Wire p, String session) throws Exception {
     groupLayout.requireMaster(p.id, p.id.equals(owner) && ownerPointer);
-    boolean bluetooth = ownerBluetooth && p.id.equals(owner);
-    if (!bluetooth) requireInputPermission(p);
+    requireInputPermission(p);
     if (!p.id.equals(owner) || ownerUntil < System.currentTimeMillis())
       throw new IOException("请先取得控制权");
-    if (bluetooth) {
-      if (!hidEnabled(p.id)) throw new IOException("BLUETOOTH_NOT_READY: 已停用蓝牙键鼠");
-      if (session == null || !session.equals(ownerEdgeSession)) throw new IOException("此会话使用蓝牙键鼠");
-      requireConsent(p, "input");
-      if (!allowed("input")) throw new IOException("PERMISSION_REQUIRED: 请先在手机同意远程输入");
-    }
     ownerUntil = System.currentTimeMillis() + 4000;
-    return bluetooth;
   }
 
   JSONObject handle(Wire p, String method, JSONObject a) throws Exception {
     if (p.id == null || peers.get(p.id) != p || !p.matchesGroupToken(token)) throw new IOException("设备连接已结束");
     if (group != null && group.excluded(p.id)) throw new IOException("设备已移出组");
-    if (method.equals("hid-link-status")) return obj("connected", phoneHid.connected(p.id));
-    if (method.equals("hid-pair-start") || method.equals("hid-pair-confirm"))
-      return phoneHid.pairing(p, method.equals("hid-pair-confirm"));
     if (method.equals("runtime-logs")) return obj("logs", runtimeLogs.snapshot());
     if (method.equals("permission-guide-open") || method.equals("permission-toggle")) {
       String key = a.optString("permission");
@@ -1247,7 +1201,7 @@ public class LinkService extends Service implements Wire.Listener {
           "requestPending", consent.pending(p.id),
           "permissions",
           entries,
-          "inputTransport", obj("schemaVersion", 1, "networkInputReady", inputReady, "bluetoothEnabled", hidEnabled(p.id)),
+          "inputTransport", obj("schemaVersion", 1, "networkInputReady", inputReady, "bluetoothEnabled", false),
           "engine",
           obj(
               "ready",
@@ -1352,11 +1306,9 @@ public class LinkService extends Service implements Wire.Listener {
       case "acquire": {
         String session = a.optString("edgeSession", null);
         if (session != null && session.length() != 36) session = null;
-        boolean bluetooth = a.optString("inputTransport").equals("bluetooth");
+        if ("bluetooth".equals(a.optString("inputTransport")))
+          throw new IOException("BLUETOOTH_NOT_READY: 安卓端已停用蓝牙键鼠");
         boolean pointerMode = a.optBoolean("pointer", !a.optBoolean("screen"));
-        if (bluetooth && (session == null || !pointerMode || a.optBoolean("screen")))
-          throw new IOException("蓝牙键鼠控制请求无效");
-        if (bluetooth && !hidEnabled(p.id)) throw new IOException("BLUETOOTH_NOT_READY: 已停用蓝牙键鼠");
         final long generation;
         synchronized (this) {
           generation = inboundGeneration;
@@ -1367,13 +1319,7 @@ public class LinkService extends Service implements Wire.Listener {
             throw new IOException("CONTROL_CONFLICT: 本设备正在被另一台设备控制");
           if (session != null) preparedInbound.put(p, session);
         }
-        if (bluetooth) {
-          requireConsent(p, "input");
-          if (!allowed("input")) {
-            needPermission(p, "input");
-            throw new IOException("PERMISSION_REQUIRED: 请先在手机同意远程输入");
-          }
-        } else prepareControl(p, a.optBoolean("screen"));
+        prepareControl(p, a.optBoolean("screen"));
         synchronized (this) {
           checkInbound(generation,p,session);
           if (method.equals("prepare")) return obj("ready", true);
@@ -1381,19 +1327,17 @@ public class LinkService extends Service implements Wire.Listener {
           groupLayout.requireMaster(p.id, a.optBoolean("pointer", !a.optBoolean("screen")));
           if (owner != null && !owner.equals(p.id) && ownerUntil > System.currentTimeMillis())
             throw new IOException("CONTROL_CONFLICT: 本设备正在被另一台设备控制");
-          if (bluetooth && !hidEnabled(p.id)) throw new IOException("BLUETOOTH_NOT_READY: 已停用蓝牙键鼠");
-          if (!bluetooth && (!p.id.equals(owner) || ownerPointer != pointerMode || ownerBluetooth))
+          if (!p.id.equals(owner) || ownerPointer != pointerMode)
             shell.request(obj("method", "release"));
           owner = p.id;
           ownerFallbackAccepted = a.optBoolean("fallbackAccepted");
           ownerPointer = pointerMode;
-          ownerBluetooth = bluetooth;
           ownerEdgeSession = session;
           preparedInbound.remove(p);
           ownerGlowSeq = 0;
           ownerNativePointer = false;
           ownerUntil = System.currentTimeMillis() + 4000;
-          if (ownerPointer && !bluetooth) {
+          if (ownerPointer) {
             try { ownerNativePointer = shell.request(obj("method", "activatePointer")).optBoolean("nativePointer"); }
             catch (Exception ignored) {}
             if (!ownerNativePointer) {
@@ -1424,7 +1368,7 @@ public class LinkService extends Service implements Wire.Listener {
         }
         return obj();
       case "keepControl":
-        if (keepOwner(p, a.optString("edgeSession", null))) return obj();
+        requireOwner(p);
         if (shell.ready()) {
           if (ownerPointer) {
             boolean nativePointer =
@@ -1610,21 +1554,13 @@ public class LinkService extends Service implements Wire.Listener {
 
   /** A touchpad only needs native input permission; it never opens a screen session. */
   public void controlTouchpad(String id, boolean newSession) throws Exception {
-    controlTouchpad(id, newSession, false);
-  }
-
-  void controlTouchpad(String id, boolean newSession, boolean forceNetwork) throws Exception {
     JSONObject capabilities = peer(id).info.optJSONObject("capabilities");
     if (capabilities == null || !capabilities.optBoolean("relativeInput"))
       throw new IOException("此设备不支持原生触控板控制");
-    control(id, newSession, false, false, forceNetwork);
+    control(id, newSession, false, false);
   }
 
   private void control(String id, boolean newSession, boolean fallbackAccepted, boolean screen) throws Exception {
-    control(id, newSession, fallbackAccepted, screen, false);
-  }
-
-  private void control(String id, boolean newSession, boolean fallbackAccepted, boolean screen, boolean forceNetwork) throws Exception {
     Wire target = peer(id);
     String[] permissions = screen ? new String[]{"input", "screen"} : new String[]{"input"};
     final String session = UUID.randomUUID().toString();
@@ -1640,15 +1576,11 @@ public class LinkService extends Service implements Wire.Listener {
       outgoingSession = session;
       outgoingCancelled = false;
     }
-    boolean acquired = false, retryNetwork = false;
+    boolean acquired = false;
     try {
       JSONObject report=target.request("permission-status",obj());peerAccess.put(id,report);
-      JSONObject remoteTransport = report.optJSONObject("inputTransport");
-      boolean bluetooth = !screen && !forceNetwork && hidEnabled(id) && phoneHid.connected(id) &&
-          remoteTransport != null && remoteTransport.optBoolean("bluetoothEnabled", false) &&
-          !"android".equals(target.info.optString("platform"));
       JSONObject rows=report.optJSONObject("permissions");
-      if(rows!=null)for(String key:permissions){JSONObject row=rows.optJSONObject(key);if(row!=null && (!row.optBoolean("appEnabled") || !bluetooth && !row.optBoolean("systemGranted"))){target.request("permission-prepare",obj("permissions",new JSONArray(Arrays.asList(permissions))));throw new IOException("PERMISSION_REQUIRED: 设备未就绪，请在被控设备完成权限设置");}}
+      if(rows!=null)for(String key:permissions){JSONObject row=rows.optJSONObject(key);if(row!=null && (!row.optBoolean("appEnabled") || !row.optBoolean("systemGranted"))){target.request("permission-prepare",obj("permissions",new JSONArray(Arrays.asList(permissions))));throw new IOException("PERMISSION_REQUIRED: 设备未就绪，请在被控设备完成权限设置");}}
       if(!PeerAccess.allowed(report,permissions)) {
         if(!"有限授权".equals(PeerAccess.status(report,target.info.optString("platform"))) && System.currentTimeMillis()-accessRequested.getOrDefault(id,0L)>120000){target.request("permission-request",obj("permissions",new JSONArray(Arrays.asList(permissions))));accessRequested.put(id,System.currentTimeMillis());}
         throw new IOException("有限授权".equals(PeerAccess.status(report,target.info.optString("platform")))?"CONSENT_DENIED: 此功能未授权，请在设备页申请授权":"CONSENT_PENDING: 请在被控设备允许本设备控制");
@@ -1656,26 +1588,14 @@ public class LinkService extends Service implements Wire.Listener {
       JSONObject capability = target.info.optJSONObject("capabilities");
       JSONObject args = obj("newSession", newSession, "fallbackAccepted", fallbackAccepted,
           "screen", screen, "edgeSession", session);
-      if (bluetooth) {
-        args.put("inputTransport", "bluetooth");
-        args.put("touchpad", true);
-      }
-      try {
-        if (capability != null && capability.optBoolean("controlPrepare")) target.request("prepare", args);
-        long leaseStart = SystemClock.elapsedRealtime();
-        JSONObject caps = target.request("acquire", args);
-        acquired = true;
-        synchronized (this) {
-          if (outgoingCancelled || peers.get(id) != target)
-            throw new IOException("CONTROL_ENDED: 控制请求已取消");
-          target.info.put("capabilities", caps);
-          outgoingHid = bluetooth;
-          outgoingHidUntil = leaseStart + 3500;
-          active = id;
-        }
-      } catch (Exception failure) {
-        if (!bluetooth || !String.valueOf(failure.getMessage()).contains("BLUETOOTH_NOT_READY:")) throw failure;
-        synchronized (this) { retryNetwork = !outgoingCancelled; }
+      if (capability != null && capability.optBoolean("controlPrepare")) target.request("prepare", args);
+      JSONObject caps = target.request("acquire", args);
+      acquired = true;
+      synchronized (this) {
+        if (outgoingCancelled || peers.get(id) != target)
+          throw new IOException("CONTROL_ENDED: 控制请求已取消");
+        target.info.put("capabilities", caps);
+        active = id;
       }
     } finally {
       boolean cancel;
@@ -1693,7 +1613,6 @@ public class LinkService extends Service implements Wire.Listener {
         if (active == null) outgoingSession = null;
       }
     }
-    if (retryNetwork) control(id, newSession, fallbackAccepted, screen, true);
   }
 
   public void releaseControl() {
@@ -1702,8 +1621,6 @@ public class LinkService extends Service implements Wire.Listener {
     synchronized (this) {
       String id = active;
       target = id == null ? null : peers.get(id);
-      if (id != null && outgoingHid) phoneHid.release(id);
-      outgoingHid = false;
       active = null;
       session = outgoingSession;
       if (outgoingPending != null) outgoingCancelled = true;
@@ -1738,17 +1655,8 @@ public class LinkService extends Service implements Wire.Listener {
     remoteInput(active, a);
   }
 
-  boolean usingHid(String target) { return target.equals(active) && outgoingHid; }
-
   public void remoteInput(String target, JSONObject a) throws Exception {
     if (target == null || !target.equals(active)) throw new IOException("等待电脑同意控制；已同意时请点击重新请求");
-    synchronized (this) {
-      if (usingHid(target)) {
-        if (hidEnabled(target) && SystemClock.elapsedRealtime() < outgoingHidUntil && phoneHid.send(target, a)) return;
-        releaseControl();
-        throw new IOException("BLUETOOTH_NOT_READY: 蓝牙键鼠连接已结束");
-      }
-    }
     Wire destination = peer(target);
     JSONObject caps = destination.info.optJSONObject("capabilities");
     if (a.optString("kind").equals("relative")
@@ -1770,29 +1678,17 @@ public class LinkService extends Service implements Wire.Listener {
 
   private void keepOutgoingControl(String id) {
     final String session;
-    final boolean bluetooth;
     synchronized (this) {
       if (!id.equals(active)) return;
       session = outgoingSession;
-      bluetooth = outgoingHid;
-      if (bluetooth && (!hidEnabled(id) || !phoneHid.connected(id))) {
-        releaseControl();
-        return;
-      }
     }
-    long leaseStart = SystemClock.elapsedRealtime();
     try {
-      peer(id).request("keepControl", bluetooth ? obj("edgeSession", session) : obj());
+      peer(id).request("keepControl", obj());
     } catch (Exception error) {
       synchronized (this) {
         if (id.equals(active) && Objects.equals(session, outgoingSession) && !QuicNative.isBusy(error))
           releaseControl();
       }
-      return;
-    }
-    synchronized (this) {
-      if (bluetooth && id.equals(active) && Objects.equals(session, outgoingSession))
-        outgoingHidUntil = Math.max(outgoingHidUntil, leaseStart + 3500);
     }
   }
 
@@ -2235,7 +2131,7 @@ public class LinkService extends Service implements Wire.Listener {
   }
 
   String incomingInputTransport() {
-    return owner == null || ownerUntil < System.currentTimeMillis() ? "" : ownerBluetooth ? "bluetooth" : "network";
+    return owner == null || ownerUntil < System.currentTimeMillis() ? "" : "network";
   }
 
   public String controlledBy() {
@@ -2316,7 +2212,6 @@ public class LinkService extends Service implements Wire.Listener {
   }
 
   public void onDestroy() {
-    phoneHid.close();
     if (backgroundRecovery != null) backgroundRecovery.stopped();
     if(staging!=null)staging.close();
     getSystemService(NotificationManager.class).cancel(17);

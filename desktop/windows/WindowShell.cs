@@ -45,6 +45,7 @@ namespace LanLink.Desktop {
         case "adb": geometry = "M8,3 L16,3 L16,18 L8,18 Z M10,21 L14,21 M12,18 L12,21 M10,6 L14,6"; break;
         case "upload": geometry="M4,16 L4,21 L20,21 L20,16 M12,16 L12,3 M7,8 L12,3 L17,8"; break;
         case "download": geometry="M4,16 L4,21 L20,21 L20,16 M12,3 L12,16 M7,11 L12,16 L17,11"; break;
+        case "refresh": geometry="M20,9 A8,8 0 1 0 20,15 M20,4 L20,9 L15,9"; break;
         case "clipboard-upload": geometry="M8,5 L5,5 Q3,5 3,7 L3,20 Q3,22 5,22 L14,22 Q16,22 16,20 L16,18 M7,2 L12,2 Q13,2 13,3 L13,6 L6,6 L6,3 Q6,2 7,2 M6,11 L11,11 M6,15 L10,15 M19,15 L19,4 M15,8 L19,4 L23,8";break;
         case "clipboard-download": geometry="M8,5 L5,5 Q3,5 3,7 L3,20 Q3,22 5,22 L14,22 Q16,22 16,20 L16,18 M7,2 L12,2 Q13,2 13,3 L13,6 L6,6 L6,3 Q6,2 7,2 M6,11 L11,11 M6,15 L10,15 M19,4 L19,15 M15,11 L19,15 L23,11";break;
         case "clipboard": geometry="M8,6 L5,6 L5,21 L19,21 L19,6 L16,6 M9,3 L15,3 L15,8 L9,8 Z M8,12 L16,12 M8,16 L14,16"; break;
@@ -64,6 +65,8 @@ namespace LanLink.Desktop {
         case "layout": geometry = "M3,4 L10,4 L10,11 L3,11 Z M14,4 L21,4 L21,11 L14,11 Z M3,15 L10,15 L10,22 L3,22 Z M14,15 L21,15 L21,22 L14,22 Z"; break;
         case "pointer": geometry = "M6,3 L6,20 L11,15 L15,21 L18,19 L14,13 L21,12 Z"; break;
         case "keyboard": geometry = "M2,6 L22,6 L22,19 L2,19 Z M5,9 L6,9 M9,9 L10,9 M13,9 L14,9 M17,9 L19,9 M5,12 L6,12 M9,12 L10,12 M13,12 L14,12 M17,12 L19,12 M7,16 L17,16"; break;
+        case "wifi": geometry = "M2,8 Q12,0 22,8 M5,12 Q12,6 19,12 M8,16 Q12,12 16,16 M11,20 L13,20"; break;
+        case "bluetooth": geometry = "M5,5 L19,17 L12,22 L12,2 L19,7 L5,19"; break;
         default: geometry = "M3,4 L21,4 L21,17 L3,17 Z M12,17 L12,21 M7,21 L17,21"; break;
       }
       return new Viewbox { Width = size, Height = size, Child = new System.Windows.Shapes.Path { Data = Geometry.Parse(geometry), Stroke = MainWindow.Brush(name=="clipboard-upload"||name=="clipboard-download"||name=="plus"?"#4169CE":"#637596"), StrokeThickness = 1.55, StrokeLineJoin = PenLineJoin.Round, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round, Width = 24, Height = 24 } };

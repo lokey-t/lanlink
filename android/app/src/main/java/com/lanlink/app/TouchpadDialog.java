@@ -58,9 +58,8 @@ final class TouchpadDialog extends Dialog {
   private android.window.OnBackInvokedCallback backCallback;
   private long requestSince = System.currentTimeMillis();
   private volatile boolean closed, requesting;
-  private boolean freshRequest = true, wasConnected, wasBluetooth, retryAutomatically = true;
+  private boolean freshRequest = true, wasConnected, retryAutomatically = true;
   private long nextAttempt, requestStart;
-  private boolean forceNetwork;
 
   private final Runnable refresh = new Runnable() {
     public void run() {
@@ -78,21 +77,10 @@ final class TouchpadDialog extends Dialog {
       } else if (owned) {
         wasConnected = true;
         setReady(true);
-        wasBluetooth = service.usingHid(peer.id);
-        status.setText(Language.t(wasBluetooth ? "已连接 · 蓝牙 HID" : "已连接 · 原生触控板"));
+        status.setText(Language.t("已连接 · 原生触控板"));
       } else {
         setReady(false);
-        if (!connected) {
-          retryAutomatically = false;
-          status.setText(Language.t("设备已离线，请返回列表并等待设备上线"));
-        } else if (wasBluetooth) {
-          forceNetwork = true;
-          wasBluetooth = false;
-          wasConnected = false;
-          retryAutomatically = true;
-          nextAttempt = System.currentTimeMillis() + 700;
-          status.setText(Language.t("正在连接…"));
-        } else if (wasConnected) {
+        if (wasConnected) {
           retryAutomatically = false;
           wasConnected = false;
           status.setText(Language.t("控制已中断，点击连接重新开始"));
@@ -115,7 +103,7 @@ final class TouchpadDialog extends Dialog {
     ui = new Ui(activity);
     settings = activity.getSharedPreferences("standalone_touchpad", 0);
     outer = new FrameLayout(activity);
-    outer.setBackgroundColor(0xff080809);
+    outer.setBackgroundColor(Color.BLACK);
     stage = new FrameLayout(activity);
     outer.addView(stage, new FrameLayout.LayoutParams(-1, -1));
 
@@ -133,6 +121,8 @@ final class TouchpadDialog extends Dialog {
     pad = new TouchpadView(activity, event -> service.remoteInput(peer.id, event),
         error -> main.post(() -> failed(error)));
     pad.setStandaloneDark();
+    bindMouseHold(leftKey, 0);
+    bindMouseHold(rightKey, 2);
     hideIntroHint = () -> pad.setIntroHintVisible(false);
     pad.setHapticFeedbackEnabled(settings.getBoolean("haptics", true));
     FrameLayout area = new FrameLayout(activity);
@@ -210,11 +200,39 @@ final class TouchpadDialog extends Dialog {
     pad.clickButton(button);
   }
 
+  private void bindMouseHold(View key, int button) {
+    key.setOnTouchListener(new View.OnTouchListener() {
+      private int pointer = -1;
+
+      @Override public boolean onTouch(View view, MotionEvent event) {
+        int action = event.getActionMasked();
+        if (action == MotionEvent.ACTION_DOWN) {
+          if (!pad.isEnabled() || !peer.id.equals(service.active)) return false;
+          pointer = event.getPointerId(event.getActionIndex());
+          view.setPressed(true);
+          pad.holdButton(button, true);
+        } else if (action == MotionEvent.ACTION_CANCEL || action == MotionEvent.ACTION_UP
+            || (action == MotionEvent.ACTION_POINTER_UP && event.getPointerId(event.getActionIndex()) == pointer)) {
+          pointer = -1;
+          view.setPressed(false);
+          pad.holdButton(button, false);
+        }
+        return true;
+      }
+    });
+  }
+
+  private void releaseMouseButtons() {
+    leftKey.setPressed(false);
+    rightKey.setPressed(false);
+    pad.holdButton(0, false);
+    pad.holdButton(2, false);
+  }
+
   private void retry() {
     if (!currentPeerConnected()) { dismiss(); return; }
     if (requesting) return;
     freshRequest = true;
-    forceNetwork = false;
     requestSince = Math.max(System.currentTimeMillis(), service.endedAt + 1);
     retryAutomatically = true;
     nextAttempt = 0;
@@ -272,7 +290,7 @@ final class TouchpadDialog extends Dialog {
     } else {
       surface.setLayoutParams(new FrameLayout.LayoutParams(-1, -1));
     }
-    surface.setBackground(menuVisible ? ui.shape(0xff111112, 16) : null);
+    surface.setBackground(menuVisible ? ui.shape(Color.BLACK, 16) : null);
     surface.setClipToOutline(menuVisible);
   }
 
@@ -386,7 +404,7 @@ final class TouchpadDialog extends Dialog {
     float[] radii = new float[8];
     radii[2 * corner] = radii[2 * corner + 1] = radius;
     GradientDrawable fill = new GradientDrawable();
-    fill.setColor(0xff1d1d20);
+    fill.setColor(Color.BLACK);
     fill.setCornerRadii(radii);
     GradientDrawable mask = new GradientDrawable();
     mask.setColor(Color.WHITE);
@@ -445,7 +463,10 @@ final class TouchpadDialog extends Dialog {
 
   private void updateInput() {
     boolean enabled = ready && !menuVisible;
-    if (!enabled && pad.isEnabled()) pad.cancelGesture();
+    if (!enabled && pad.isEnabled()) {
+      releaseMouseButtons();
+      pad.cancelGesture();
+    }
     pad.setEnabled(enabled);
     pad.setAlpha(ready || menuVisible ? 1f : .58f);
     for (View key : new View[] {leftKey, rightKey, keyboardKey}) {
@@ -469,11 +490,11 @@ final class TouchpadDialog extends Dialog {
     requestStart = System.currentTimeMillis();
     setReady(false);
     status.setText(Language.t("正在连接…"));
-    final boolean fresh = freshRequest, network = forceNetwork;
+    final boolean fresh = freshRequest;
     commands.execute(() -> {
       try {
         if (closed) return;
-        service.controlTouchpad(peer.id, fresh, network);
+        service.controlTouchpad(peer.id, fresh);
         if (closed) {
           if (peer.id.equals(service.active)) service.releaseControl();
           return;
@@ -484,8 +505,7 @@ final class TouchpadDialog extends Dialog {
           freshRequest = false;
           wasConnected = true;
           setReady(true);
-          wasBluetooth = service.usingHid(peer.id);
-          status.setText(Language.t(wasBluetooth ? "已连接 · 蓝牙 HID" : "已连接 · 原生触控板"));
+          status.setText(Language.t("已连接 · 原生触控板"));
         }, Math.max(0, 320 - elapsed));
       } catch (Exception failure) {
         main.post(() -> {
@@ -494,7 +514,6 @@ final class TouchpadDialog extends Dialog {
           if (reason.startsWith("CONSENT_") || reason.startsWith("PERMISSION_")) freshRequest = false;
           retryAutomatically = reason.startsWith("CONSENT_PENDING:")
               || reason.startsWith("PERMISSION_REQUIRED:")
-              || reason.startsWith("BLUETOOTH_NOT_READY:")
               || reason.contains("上次控制请求尚未结束");
           nextAttempt = System.currentTimeMillis() + 2000;
           failed(failure);
@@ -536,16 +555,21 @@ final class TouchpadDialog extends Dialog {
       window.setNavigationBarColor(Color.BLACK);
       window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
       window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+      WindowManager.LayoutParams attributes = window.getAttributes();
+      attributes.layoutInDisplayCutoutMode = Build.VERSION.SDK_INT >= 30
+          ? WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+          : WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+      window.setAttributes(attributes);
       if (Build.VERSION.SDK_INT >= 30) {
         window.setDecorFitsSystemWindows(false);
         outer.setOnApplyWindowInsetsListener((view, insets) -> {
-          Insets safe = insets.getInsets(WindowInsets.Type.displayCutout() | WindowInsets.Type.ime());
+          Insets safe = insets.getInsets(WindowInsets.Type.ime());
           view.setPadding(safe.left, safe.top, safe.right, safe.bottom);
           styleRails(insets, safe);
           return insets;
         });
         outer.requestApplyInsets();
-      } else outer.setFitsSystemWindows(true);
+      }
       if (Build.VERSION.SDK_INT >= 33) {
         backCallback = this::onBackPressed;
         window.getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
@@ -578,7 +602,10 @@ final class TouchpadDialog extends Dialog {
   public void onWindowFocusChanged(boolean focused) {
     super.onWindowFocusChanged(focused);
     if (focused) immersive();
-    else pad.cancelGesture();
+    else {
+      releaseMouseButtons();
+      pad.cancelGesture();
+    }
   }
 
   protected void onStop() {
@@ -594,6 +621,7 @@ final class TouchpadDialog extends Dialog {
     if (Build.VERSION.SDK_INT >= 33 && backCallback != null && getWindow() != null)
       getWindow().getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(backCallback);
     hideKeyboard();
+    releaseMouseButtons();
     pad.close();
     activity.setRequestedOrientation(oldOrientation);
     if (peer.id.equals(service.active) || requesting && service.active == null) service.releaseControl();

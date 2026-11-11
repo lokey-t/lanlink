@@ -7,7 +7,7 @@ if (releaseSigningFile.exists()) {
 android {
     namespace 'com.lanlink.app'
     compileSdk 35
-    defaultConfig { applicationId 'com.lanlink.app'; minSdk 29; targetSdk 35; versionCode 92; versionName '0.91.1'; testInstrumentationRunner 'com.lanlink.app.PermissionFlowTest' }
+    defaultConfig { applicationId 'com.lanlink.app'; minSdk 29; targetSdk 35; versionCode 93; versionName '0.92.0'; testInstrumentationRunner 'com.lanlink.app.PermissionFlowTest' }
     signingConfigs {
         release {
             if (releaseSigningFile.exists()) {

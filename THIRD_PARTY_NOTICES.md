@@ -72,6 +72,15 @@ and the user's JDK. They are development
 tools, not copied into the desktop application. Downloaded SDK/tools and local
 debug signing keys remain in the ignored `.tools` folder.
 
+## Bundled desktop ADB
+
+Desktop packages built with `LANLINK_ADB_DIST` include an AOSP Android Debug
+Bridge host build under `runtime/platform-tools`. The source is
+https://android.googlesource.com/platform/packages/modules/adb/.
+The bundled runtime directory carries the build's NOTICE, component licenses,
+source and build references, and any shared libraries required by that build.
+The ADB server is a separate process. Android builds do not bundle a desktop ADB.
+
 ## Electron 44.4.5 (historical 0.2 desktop only)
 
 Official runtime: https://github.com/electron/electron/releases/tag/v44.4.5

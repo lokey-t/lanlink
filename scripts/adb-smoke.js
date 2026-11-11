@@ -33,7 +33,7 @@ let instrument, peer, realNative;
 const testRequest = (...args) => (peer.tcpRequest || peer.request.bind(peer))(...args);
 try {
   await service.start();
-  instrument = exec(adb, ['-s', serial, 'shell', 'am', 'instrument', '-w', '-e', 'adbSmokePort', String(service.port), '-e', 'adbSmokeToken', config.token, ...(bluetoothFallback ? ['-e', 'adbSmokeHidDisabled', '1'] : []), 'com.lanlink.app.test/com.lanlink.app.PermissionFlowTest'], { windowsHide: true, timeout: 100000, maxBuffer: 1024 * 1024 }).then(r => ({ output: r.stdout }), () => ({ failed: true }));
+  instrument = exec(adb, ['-s', serial, 'shell', 'am', 'instrument', '-w', '-e', 'adbSmokePort', String(service.port), '-e', 'adbSmokeToken', config.token, 'com.lanlink.app.test/com.lanlink.app.PermissionFlowTest'], { windowsHide: true, timeout: 100000, maxBuffer: 1024 * 1024 }).then(r => ({ output: r.stdout }), () => ({ failed: true }));
   const deadline = Date.now() + 20000;
   while (!(peer = [...service.peers.values()].find(p => p.info?.platform === 'android'))) {
     if (Date.now() > deadline) throw Error('Android fixture did not connect to desktop service');
@@ -108,18 +108,16 @@ try {
     if ((await testRequest('testTarget')).externalMouse)
       throw Error('Preparing control must not register the Android system mouse');
     const ready = service.inputTransport.ready, host = service.inputTransport.host, request = peer.request;
-    let bluetoothDisabled = false, attemptedBluetoothAcquire = false;
+    let attemptedBluetoothAcquire = false;
     if (bluetoothFallback) {
-      if (service.inputTransport.preference(id) !== 'auto_bt_first' || peer.info.capabilities.bluetoothControl !== 1)
-        throw Error('The emulator must advertise Bluetooth input and use the default input preference');
+      if (service.inputTransport.preference(id) !== 'network_only' ||
+          peer.info.capabilities.bluetoothControl === 1 || permissions.inputTransport?.bluetoothEnabled !== false)
+        throw Error('Android must offer network-only input');
       service.inputTransport.ready = target => target === id;
       service.inputTransport.host = target => target === id ? {id:'stale-emulator-hid-link'} : null;
       peer.request = async (method, args, timeout) => {
         if (method === 'acquire' && args?.inputTransport === 'bluetooth') attemptedBluetoothAcquire = true;
-        const result = await request.call(peer, method, args, timeout);
-        if (method === 'permission-status' && result.inputTransport?.bluetoothEnabled === false)
-          bluetoothDisabled = true;
-        return result;
+        return request.call(peer, method, args, timeout);
       };
     }
     const clock = service.edge.now; let now = clock()+1000; service.edge.now=()=>now;
@@ -135,7 +133,7 @@ try {
       throw Error('Edge dwell did not acquire phone control over the network');
     if (!process.argv.includes('--dual-link') && peer.fastLink?.serial)
       throw Error('The LAN mouse test must run without a USB input route');
-    if (bluetoothFallback && (!bluetoothDisabled || attemptedBluetoothAcquire))
+    if (bluetoothFallback && attemptedBluetoothAcquire)
       throw Error('The desktop did not honor the Android Bluetooth preference before acquiring control');
     let pointerState;for(let i=0;i<10;i++){pointerState=await testRequest('testTarget');if(pointerState.externalMouse)break;await new Promise(r=>setTimeout(r,60));}
 

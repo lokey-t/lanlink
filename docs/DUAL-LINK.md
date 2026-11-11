@@ -27,3 +27,11 @@ Windows / macOS 安装 Android SDK Platform-Tools，手机开启 USB 调试并�
 - 临时 ADB 转发只移除本软件创建的具体端口，不清空其他工具的转发规则。
 
 底层端口转发参考 [ADB 官方命令文档](https://android.googlesource.com/platform/packages/modules/adb/+/refs/heads/main/docs/user/adb.1.md)。
+
+## 键鼠 HID 通道
+
+组内蓝牙 HID 键鼠通道适用于 Windows 和 macOS。安卓端的键鼠指令可通过局域网或已连接的 USB 数据线传输。
+
+在 Windows 或 macOS 的「本组设备权限」打开「HID通道」。在组内主设备上启用开关，确认系统蓝牙已开启，再选择被控设备。被控端会显示连接引导。Windows 被控端可以在引导内发起连接，系统要求确认配对时按提示操作。也可打开被控端的系统蓝牙设置，连接引导中显示的主设备，再确认连接。
+
+跨屏键鼠优先选择已就绪的 HID 通道。HID 不可用且网络键鼠已授权时使用网络。键盘图标右下角显示相应标记。正常结束键鼠会话会释放按键并保留 HID 连接，以便下次使用。

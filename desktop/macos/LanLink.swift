@@ -152,6 +152,9 @@ struct Device: Identifiable, Equatable {
     var needsServiceRecovery: Bool { !serviceError.isEmpty || !serviceWarning.isEmpty }
     var globalMessage: String { !serviceError.isEmpty ? serviceError : !serviceWarning.isEmpty ? serviceWarning : !shutdownNotice.isEmpty ? shutdownNotice : notice }
     @Published var specificPermissionGuide = false
+    @Published var hidGuidePresented = false
+    var hidGuideRequest: [String:Any] = [:]
+    private var hidGuideShownId = ""
     @Published var specificPermissionRequest: [String:Any] = [:]
     @Published var permissionTargetReminder = false
     @Published var permissionTargetName = ""
@@ -504,7 +507,9 @@ struct Device: Identifiable, Equatable {
             else { notice = error.localizedDescription }
         } }
     }
-    private var updateNoticeVersion = ""
+    private var updateAlert: NSAlert?
+    private var updateOfferKey = ""
+    private var respondingToUpdate = false
     private var shownUpdateResult: Double = 0
     func performUpdate(_ method: String) {
         Task {
@@ -512,19 +517,73 @@ struct Device: Identifiable, Equatable {
             catch { notice = error.localizedDescription }
         }
     }
+    private func refreshUpdateOffer() {
+        guard !respondingToUpdate, !closing else { return }
+        let update = state["update"] as? [String: Any] ?? [:]
+        let channel = update["updateChannel"] as? String ?? "stable"
+        let version = update["version"] as? String ?? ""
+        let key = channel + "/" + version
+        let prompt = update["prompt"] as? Bool == true
+        if let alert = updateAlert {
+            if prompt && updateOfferKey == key { return }
+            updateOfferKey = ""
+            alert.window.sheetParent?.endSheet(alert.window, returnCode: .cancel)
+            return
+        }
+        guard prompt, let main = appDelegate?.mainWindow, main.isVisible, !main.isMiniaturized, main.attachedSheet == nil else { return }
+        let alert = NSAlert()
+        alert.messageText = L("发现新版本") + " " + version + " · " + L(channel == "beta" ? "测试版" : "正式版")
+        let available = update["phase"] as? String == "available"
+        let pageHint = available ? "" : L("点击现在更新可打开此版本发布页。")
+        if let notes = update["notes"] as? String, !notes.isEmpty {
+            alert.informativeText = pageHint
+            let scroll = NSTextView.scrollableTextView()
+            scroll.frame = NSRect(x: 0, y: 0, width: 440, height: 210)
+            scroll.borderType = .bezelBorder
+            if let text = scroll.documentView as? NSTextView {
+                text.isEditable = false
+                text.font = .systemFont(ofSize: NSFont.systemFontSize)
+                text.textContainerInset = NSSize(width: 6, height: 6)
+                text.string = notes
+            }
+            alert.accessoryView = scroll
+        } else {
+            alert.informativeText = [L("此版本暂无更新说明"), pageHint].filter { !$0.isEmpty }.joined(separator: "\n")
+        }
+        alert.addButton(withTitle: L("现在更新"))
+        alert.addButton(withTitle: L("稍后提醒我")).keyEquivalent = "\u{1b}"
+        alert.addButton(withTitle: L("本版本不再提示"))
+        updateAlert = alert
+        updateOfferKey = key
+        alert.beginSheetModal(for: main) { [weak self] response in Task { @MainActor in
+            guard let self else { return }
+            self.updateAlert = nil
+            guard self.updateOfferKey == key, !self.closing else { return }
+            self.respondingToUpdate = true
+            defer { self.respondingToUpdate = false }
+            do {
+                if response == .alertFirstButtonReturn, available {
+                    self.adbDevice = nil
+                    self.permissionsVisible = false
+                    self.sidebarPage = "settings"
+                    _ = try await self.call("update-install", ["channel": channel, "version": version])
+                } else {
+                    let choice = response == .alertThirdButtonReturn ? "skip" : "later"
+                    _ = try await self.call("update-reminder", ["channel": channel, "version": version, "choice": choice])
+                    if response == .alertFirstButtonReturn, let page = update["downloadPage"] as? String,
+                       let url = URL(string: page), url.scheme == "https", url.host == "github.com" || url.host == "gitee.com" {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                await self.refresh()
+            } catch { self.notice = error.localizedDescription }
+        } }
+    }
     func refresh() async {
         let generation = serviceGeneration
         do {
             let next = try await call("state")
             guard generation == serviceGeneration, !Task.isCancelled else { return }
-            if let update = next["update"] as? [String: Any], update["phase"] as? String == "available",
-               let version = update["version"] as? String, version != updateNoticeVersion {
-                updateNoticeVersion = version
-                let previous = update["result"] as? [String: Any]
-                if previous?["phase"] as? String != "failed" || previous?["version"] as? String != version {
-                    notice = L("发现新版本") + " " + version + " · " + L("请在设置中下载更新")
-                }
-            }
             if let update = next["update"] as? [String: Any], let result = update["result"] as? [String: Any],
                let at = result["at"] as? Double, at > 0, at != shownUpdateResult,
                let message = result["message"] as? String {
@@ -537,6 +596,7 @@ struct Device: Identifiable, Equatable {
             checkPermissionsAfterUpdate()
             showFirstDevicePermissionGuideIfNeeded(wasFirstDevice: (state["groupMemberCount"] as? Int ?? 1) > 1 || !(state["knownDevices"] as? [String: Any] ?? [:]).isEmpty)
             refreshRequests()
+            refreshUpdateOffer()
             let registered = Self.startupRegistered
             if startupEnabled != registered { startupEnabled = registered }
             for (id, info) in state["knownDevices"] as? [String: [String: Any]] ?? [:] { all.append(Device(id: id, name: info["name"] as? String ?? "已配对设备", platform: info["platform"] as? String ?? "")) }
@@ -762,7 +822,7 @@ struct Device: Identifiable, Equatable {
         refreshAdbAuthorization()
         let requests = state["consentRequests"] as? [[String: Any]] ?? []
         if let alert = consentAlert, !requests.contains(where: { $0["requestId"] as? String == consentRequest }) { alert.window.sheetParent?.endSheet(alert.window, returnCode: .cancel); consentAlert = nil }
-        if consentAlert == nil, let request = requests.first, let main = (appDelegate)?.mainWindow {
+        if consentAlert == nil, let request = requests.first, let main = (appDelegate)?.mainWindow, main.attachedSheet == nil {
             let alert = NSAlert(); alert.messageText = L("设备权限请求"); alert.informativeText = LF("{0} 请求恢复这台 Mac 上受限的功能，可在高级选项中调整。", request["name"] as? String ?? L("设备"))
             alert.addButton(withTitle: L("同意并记住")); alert.addButton(withTitle: L("暂不允许"))
             let keys = ["input", "screen", "clipboard", "shutdown"], names = ["键鼠标操作", "屏幕共享", "剪贴板文件共享", "远程关机"]
@@ -783,6 +843,13 @@ struct Device: Identifiable, Equatable {
             if id != permissionGuideShownId { firstDevicePermissionGuide=false;permissionGuideShownId=id;specificPermissionRequest=request;appDelegate?.showMain();specificPermissionGuide=true }
         } else if state["permissionNotice"] is [String: Any], !firstDevicePermissionGuide { appDelegate?.showMain(); firstDevicePermissionGuide = true }
         else if state["permissionNotice"] == nil { specificPermissionGuide=false }
+        let hidGuide = (state["inputTransport"] as? [String:Any])?["guide"] as? [String:Any]
+        if let request = hidGuide, let id = request["requestId"] as? String, id != hidGuideShownId {
+            hidGuideShownId = id
+            hidGuideRequest = request
+            appDelegate?.showMain()
+            hidGuidePresented = true
+        } else if hidGuide == nil { hidGuidePresented = false }
 
         refreshAndroidDisconnectNotice()
     }
@@ -1270,8 +1337,9 @@ struct AppTitleBar: View {
 }
 
 struct Home: View {
-    @ObservedObject var model: Model; @State var settings = false
-    func navigate(_ page: String) { model.layoutDragID = nil; settings = page == "settings"; model.adbDevice = nil; model.permissionsVisible = page == "permissions"; model.sidebarPage = page }
+    @ObservedObject var model: Model
+    var settings: Bool { model.sidebarPage == "settings" }
+    func navigate(_ page: String) { model.layoutDragID = nil; model.adbDevice = nil; model.permissionsVisible = page == "permissions"; model.sidebarPage = page }
     var body: some View { ZStack {
         Glass(material: .sidebar)
         VStack(spacing: 0) {
@@ -1354,8 +1422,9 @@ struct Home: View {
                 .accessibilityIdentifier("successToast")
             }
         }.padding(26).background(Palette.surface.opacity(0.78), in: RoundedRectangle(cornerRadius: 22)).overlay(RoundedRectangle(cornerRadius: 22).stroke(Palette.line.opacity(0.82), lineWidth: 1)).padding(.trailing, 16).padding(.bottom, 16)
-    }.frame(width: layout.size.width, height: layout.size.height).onChange(of: model.adbDevice?.id) { _, id in if id != nil { settings = false } }
+    }.frame(width: layout.size.width, height: layout.size.height)
         .sheet(isPresented:$model.specificPermissionGuide) { TargetPermissionGuide(model:model,request:model.specificPermissionRequest).id(model.specificPermissionRequest["requestId"] as? String ?? "") }
+        .sheet(isPresented:$model.hidGuidePresented) { HidTargetGuide(model:model, request:model.hidGuideRequest) }
         .sheet(isPresented:$model.permissionTargetReminder) { SwitchDeviceGuideView(name:model.permissionTargetName) }
         .sheet(item: $model.managingDevice) { device in MemberPermissionsView(model: model, device: device) }
         .sheet(isPresented: $model.firstDevicePermissionGuide, onDismiss: {
@@ -1422,6 +1491,7 @@ struct AdbHubView: View {
     @ObservedObject var model: Model
     @State private var devices: [[String: Any]] = []
     @State private var message = "正在读取授权状态…"
+    @State private var showingManualGuide = false
     func refresh() async {
         do { let result = try await model.call("adb-group"); devices = result["devices"] as? [[String: Any]] ?? []; message = devices.isEmpty ? "本组暂无安卓设备，请在我的设备中添加手机。" : "已授权的手机会自动恢复输入连接。" }
         catch { message = error.localizedDescription }
@@ -1437,8 +1507,66 @@ struct AdbHubView: View {
                 if item["ready"] as? Bool != true { Button(L("连接授权")) { model.perform("adb-guide-open",["id":item["id"] ?? ""]) }.disabled(item["online"] as? Bool != true) }
             }.padding(24).background(Palette.card, in: RoundedRectangle(cornerRadius: 20))
         } } }
-        HStack { Button(L("刷新状态")) { Task { await refresh() } };Spacer();Button { model.showAdb(Device(id:"",name:"其他设备",platform:"android",online:true)) } label:{Text(L("帮助其他组的设备ADB授权")).font(.caption).underline()}.buttonStyle(.plain) }
-    }.frame(maxWidth: .infinity,maxHeight: .infinity,alignment: .topLeading).buttonStyle(FlatButtonStyle()).task { await refresh() } }
+        HStack {
+            Button(L("刷新状态")) { Task { await refresh() } }
+            Spacer()
+            Button { model.showAdb(Device(id:"",name:"其他设备",platform:"android",online:true)) } label: {
+                Text(L("帮助其他组的设备ADB授权")).font(.caption).underline()
+            }.buttonStyle(.plain)
+            Button { showingManualGuide = true } label: {
+                Text(L("无法连接")).font(.caption).underline()
+            }.buttonStyle(.plain)
+        }
+    }.frame(maxWidth: .infinity,maxHeight: .infinity,alignment: .topLeading).buttonStyle(FlatButtonStyle())
+        .sheet(isPresented: $showingManualGuide) { ManualAdbGuideView() }
+        .task { await refresh() }
+    }
+}
+
+struct ManualAdbGuideView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var copied = false
+    private let detect = "adb devices -l"
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(L("手动 ADB 授权")).font(.title2)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    step("1. 准备 USB 调试", "在电脑安装 Android SDK Platform-Tools，并将其目录加入 PATH。在手机开发者选项中开启 USB 调试，用数据线连接电脑，并在手机上允许 USB 调试。")
+                    step("2. 检查连接", "打开电脑终端并运行下方命令。状态为 device 时可继续，显示 unauthorized 时请解锁手机并确认调试授权。若列表为空，请检查数据线是否支持数据传输。")
+                    HStack {
+                        command(detect)
+                        Button(L(copied ? "已复制到本机剪贴板" : "复制命令")) {
+                            NSPasteboard.general.clearContents()
+                            copied = NSPasteboard.general.setString(detect, forType: .string)
+                        }
+                    }
+                    step("3. 启动 LanLink 助手", "在手机 LanLink 打开「设置 → 使用说明 → 连接与故障排查 → 显示 ADB 启动命令」，将手机生成的完整 adb shell 命令粘贴到电脑终端执行。若连接了多台调试设备，请先断开其他设备。下方是命令格式，参数以手机显示为准。")
+                    command("adb shell \"CLASSPATH='APK_PATH' app_process /system/bin com.lanlink.app.ShellAgent PORT SECRET\"")
+                    step("4. 确认授权", "让命令保持运行，回到「安卓授权」点击「刷新状态」。手机服务重启后，请在手机上重新获取命令。若曾解除 ADB 授权，请先在手机 LanLink 的「ADB 授权」中重新允许。")
+                }.frame(maxWidth: .infinity, alignment: .leading)
+            }.frame(height: 415)
+            HStack {
+                Spacer()
+                Button(L("关闭")) { dismiss() }.keyboardShortcut(.cancelAction)
+            }
+        }.padding(24).frame(width: 560).background(Palette.surface).buttonStyle(FlatButtonStyle())
+    }
+
+    private func step(_ title: String, _ instructions: String) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(L(title)).font(.headline)
+            Text(L(instructions)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func command(_ text: String) -> some View {
+        Text(text).font(.system(.body, design: .monospaced))
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading).padding(10)
+            .background(Palette.canvas, in: RoundedRectangle(cornerRadius: 10))
+    }
 }
 // Vector paths use the same 24-unit coordinate system as assets/icons/permissions/*.svg.
 struct PermissionGlyph: Shape {
@@ -1478,13 +1606,19 @@ struct DevicePermissionsView: View {
     @ObservedObject var model: Model
     @State private var devices: [[String: Any]] = []
     @State private var message = "正在读取组内权限…"
+    @State private var showingHid = false
     func refreshDevices() async {
         do { let result = try await model.call("group-permissions"); guard !Task.isCancelled else { return }; devices = result["devices"] as? [[String:Any]] ?? []; message = "悬停查看含义 · 左键或右键打开菜单" }
         catch { message = error.localizedDescription }
     }
     var body: some View {
         VStack(alignment:.leading,spacing:18) {
-            HStack { Text(L("本组设备权限")).font(.title2); Spacer(); Button(L("刷新")) { Task { await refreshDevices() } } }
+            HStack {
+                Text(L("本组设备权限")).font(.title2)
+                Spacer()
+                Button(L("HID通道")) { showingHid = true }
+                Button(L("刷新")) { Task { await refreshDevices() } }
+            }
             Text(Model.displayMessage(message)).font(.caption).foregroundStyle(Palette.muted)
             HStack(spacing:18) { ForEach(["ready","unready","disabled"],id: \.self) { state in Label(L(permissionStateTitle(state)),systemImage:"circle.fill").font(.caption).foregroundStyle(permissionColor(state)) } }
             ScrollView([.horizontal,.vertical]) {
@@ -1492,7 +1626,19 @@ struct DevicePermissionsView: View {
                     HStack { Text(L("设备")).frame(width:180,alignment:.leading); ForEach(permissionOrder,id: \.self) { key in Text(L(permissionTitles[key]!)).frame(width:88) } }.font(.caption).foregroundStyle(Palette.muted).padding(.horizontal,18)
                     ForEach(devices,id: \.masterChoiceID) { device in
                         HStack(spacing:0) {
-                            VStack(alignment:.leading,spacing:7) { Text(device["name"] as? String ?? L("设备")).font(.headline); Text(L(device["local"] as? Bool == true ? "本机" : device["online"] as? Bool == true ? "在线" : "离线")).font(.caption).foregroundStyle(Palette.muted); if let message=device["message"] as? String,!message.isEmpty { Text(Model.displayMessage(message)).font(.caption).foregroundStyle(Palette.muted) } }.frame(width:180,alignment:.leading)
+                            VStack(alignment:.leading,spacing:7) {
+                                if device["master"] as? Bool == true {
+                                    Text(L("主设备")).font(.caption).foregroundStyle(Color.indigo)
+                                        .padding(.horizontal,7).padding(.vertical,3)
+                                        .background(Color.indigo.opacity(0.08), in:Capsule())
+                                }
+                                Text(device["name"] as? String ?? L("设备")).font(.headline)
+                                Text(L(device["local"] as? Bool == true ? "本机" : device["online"] as? Bool == true ? "在线" : "离线"))
+                                    .font(.caption).foregroundStyle(Palette.muted)
+                                if let message=device["message"] as? String,!message.isEmpty {
+                                    Text(Model.displayMessage(message)).font(.caption).foregroundStyle(Palette.muted)
+                                }
+                            }.frame(width:180,alignment:.leading)
                             ForEach(permissionOrder,id: \.self) { key in
                                 PermissionCellView(model:model,device:device,row:(device["permissions"] as? [[String:Any]] ?? []).first { $0["key"] as? String == key } ?? ["key":key],refresh:refreshDevices).frame(width:88)
                             }
@@ -1503,6 +1649,168 @@ struct DevicePermissionsView: View {
             Text(L("本机行：功能总开关；其他设备行：本机使用该设备的权限。")).font(.caption).foregroundStyle(Palette.muted)
         }
         .frame(maxWidth:.infinity,maxHeight:.infinity).buttonStyle(FlatButtonStyle()).task { while !Task.isCancelled { await refreshDevices(); do { try await Task.sleep(nanoseconds:4_000_000_000) } catch { break } } }
+        .sheet(isPresented:$showingHid) { HidChannelsView(model:model) }
+    }
+}
+
+private struct HidBluetoothGlyph: Shape {
+    func path(in rect: CGRect) -> Path {
+        let points = [(0.16,0.2),(0.84,0.74),(0.5,0.98),(0.5,0.02),(0.84,0.26),(0.16,0.8)]
+        var path = Path()
+        for (index, point) in points.enumerated() {
+            let position = CGPoint(x:rect.minX + point.0 * rect.width, y:rect.minY + point.1 * rect.height)
+            if index == 0 { path.move(to:position) } else { path.addLine(to:position) }
+        }
+        return path
+    }
+}
+
+private func openHidBluetoothSettings(privacy: Bool = false) {
+    let pane = privacy ? "com.apple.preference.security?Privacy_Bluetooth" : "com.apple.BluetoothSettings"
+    if let url = URL(string:"x-apple.systempreferences:" + pane) { NSWorkspace.shared.open(url) }
+}
+
+struct HidChannelsView: View {
+    @ObservedObject var model: Model
+    @Environment(\.dismiss) private var dismiss
+    @State private var master: [String:Any] = [:]
+    @State private var targets: [[String:Any]] = []
+    @State private var message = ""
+    @State private var busy = false
+    @State private var loading = false
+    @State private var showingMasterGuide = false
+
+    private var localMaster: Bool { master["local"] as? Bool == true }
+    private var enabled: Bool { master["enabled"] as? Bool == true }
+
+    private func refresh() async {
+        guard !loading else { return }
+        loading = true
+        defer { loading = false }
+        do {
+            let state = try await model.call("group-hid-status")
+            guard !Task.isCancelled else { return }
+            master = state["master"] as? [String:Any] ?? [:]
+            targets = state["targets"] as? [[String:Any]] ?? []
+        } catch { if !Task.isCancelled { message = Model.displayMessage(error.localizedDescription) } }
+    }
+
+    private func perform(_ action: @escaping () async throws -> Void) {
+        guard !busy && !loading else { return }
+        busy = true
+        message = ""
+        Task {
+            defer { busy = false }
+            do { try await action(); await refresh() }
+            catch { message = Model.displayMessage(error.localizedDescription) }
+        }
+    }
+
+    private func row(_ device: [String:Any], ready: Bool, status: String, action: @escaping () -> Void) -> some View {
+        Button(action:action) {
+            HStack {
+                HidBluetoothGlyph().stroke(style:StrokeStyle(lineWidth:1.4,lineCap:.round,lineJoin:.round))
+                    .frame(width:14,height:17).foregroundStyle(ready ? Color.green : Palette.muted)
+                Text(device["name"] as? String ?? L("设备"))
+                Spacer()
+                Text(L(status)).font(.caption).foregroundStyle(ready ? Color.green : Palette.muted)
+            }.padding(.horizontal,12).padding(.vertical,9)
+                .background(Palette.card,in:RoundedRectangle(cornerRadius:10))
+                .overlay(RoundedRectangle(cornerRadius:10).stroke(Palette.line))
+                .contentShape(Rectangle())
+        }
+    }
+
+    var body: some View {
+        VStack(alignment:.leading,spacing:14) {
+            HStack { Text(L("HID通道")).font(.title2); Spacer(); Button(L("完成")) { dismiss() } }
+            VStack(spacing:0) {
+                AdbMotion(asset:"hid-channel.svg")
+                Text(L("HID 通过蓝牙传送键盘和鼠标输入。连接就绪时优先使用蓝牙。"))
+                    .font(.callout).foregroundStyle(Palette.muted).multilineTextAlignment(.center)
+            }.padding(.horizontal,14).padding(.bottom,14).frame(maxWidth:.infinity)
+                .background(Palette.accent.opacity(0.07),in:RoundedRectangle(cornerRadius:14))
+            Toggle(L("启用 HID 通道"),isOn:Binding(get:{ enabled },set:{ value in
+                perform { _ = try await model.call("group-hid-enable",["enabled":value]) }
+            })).toggleStyle(.switch).disabled(!localMaster || busy || loading)
+                .padding(.horizontal,12).padding(.vertical,9)
+                .background(Palette.card,in:RoundedRectangle(cornerRadius:10))
+            Text(L("主设备")).font(.headline)
+            if master.isEmpty { Text(L("请先选择组内主控设备")).foregroundStyle(Palette.muted) }
+            else {
+                let ready = master["ready"] as? Bool == true
+                row(master,ready:ready,status:ready ? "已就绪" : "蓝牙未就绪") {
+                    if localMaster { showingMasterGuide = true }
+                    else { message = L("请在主设备设置 HID 通道") }
+                }
+            }
+            Text(L("被控设备")).font(.headline)
+            if targets.isEmpty { Text(L("暂无组内设备")).foregroundStyle(Palette.muted) }
+            ScrollView {
+                VStack(spacing:6) {
+                    ForEach(targets,id:\.masterChoiceID) { device in
+                        let ready = device["connected"] as? Bool == true
+                        row(device,ready:ready,status:ready ? "已连接" : device["online"] as? Bool == true ? "未连接" : "离线") {
+                            guard !ready else { return }
+                            guard localMaster else { message = L("请在主设备设置 HID 通道"); return }
+                            perform {
+                                _ = try await model.call("group-hid-guide-open",["id":device.masterChoiceID])
+                                message = LF("{0} 已收到连接引导",device["name"] as? String ?? L("设备"))
+                            }
+                        }
+                    }
+                }
+            }.frame(maxHeight:190)
+            if !message.isEmpty { Text(message).font(.caption).foregroundStyle(Palette.muted) }
+        }.padding(22).frame(width:460).buttonStyle(FlatButtonStyle())
+        .alert(L("开启蓝牙权限"),isPresented:$showingMasterGuide) {
+            Button(L("取消"),role:.cancel) {}
+            Button(L("打开蓝牙设置")) {
+                perform {
+                    let state = try await model.call("group-hid-master-open")
+                    if state["ready"] as? Bool != true { openHidBluetoothSettings(privacy:state["reason"] as? String == "unauthorized") }
+                }
+            }
+        } message: { Text(L("请开启蓝牙，并在系统设置中允许 LanLink 使用蓝牙。")) }
+        .task {
+            while !Task.isCancelled {
+                if !busy { await refresh() }
+                do { try await Task.sleep(for:.seconds(2)) } catch { break }
+            }
+        }
+    }
+}
+
+struct HidTargetGuide: View {
+    @ObservedObject var model: Model
+    @Environment(\.dismiss) private var dismiss
+    let request: [String:Any]
+    @State private var message = ""
+    @State private var busy = false
+
+    private func finish(cancel: Bool) {
+        busy = true
+        Task {
+            defer { busy = false }
+            do {
+                _ = try await model.call("group-hid-guide-finish",["requestId":request["requestId"] ?? "", "cancel":cancel])
+                dismiss()
+            } catch { message = Model.displayMessage(error.localizedDescription) }
+        }
+    }
+
+    var body: some View {
+        VStack(alignment:.leading,spacing:14) {
+            Text(L("连接 HID 通道")).font(.title2)
+            Text(LF("请在本机的系统蓝牙设置中连接 {0}。",request["name"] as? String ?? L("设备")))
+            if !message.isEmpty { Text(message).font(.caption).foregroundStyle(.red) }
+            HStack {
+                Button(L("取消")) { finish(cancel:true) }
+                Spacer()
+                Button(L("打开蓝牙设置")) { openHidBluetoothSettings() }
+                Button(L("已连接，确认")) { finish(cancel:false) }
+            }.disabled(busy)
+        }.padding(22).frame(width:460).buttonStyle(FlatButtonStyle())
     }
 }
 struct PremiumFeaturesView: View {
@@ -1723,7 +2031,7 @@ struct InputTransportView: View {
                 ForEach(modes,id: \.0) { mode in Text(L(mode.1)).tag(mode.0) }
             }
             if automaticGroup {
-                Text(L("组内蓝牙跟随当前主设备。首次连接请在手机上允许附近设备权限，并按系统提示确认配对。")).font(.caption)
+                Text(L("组内蓝牙跟随当前主设备。首次连接时请按系统提示确认配对。")).font(.caption)
             } else {
                 hostPicker
                 if !host.isEmpty && host != savedHost {
@@ -1809,10 +2117,27 @@ struct PermissionCellView: View {
             .overlay(alignment: .topTrailing) {
                 Image(systemName: statusSymbol).font(.system(size: 12)).foregroundStyle(color).padding(3)
             }
+            .overlay(alignment:.bottomTrailing) {
+                if channel == "bluetooth" || channel == "network" {
+                    Group {
+                        if channel == "bluetooth" {
+                            HidBluetoothGlyph().stroke(style:StrokeStyle(lineWidth:1.1,lineCap:.round,lineJoin:.round))
+                                .frame(width:8,height:11)
+                        } else {
+                            Image(systemName:"wifi").font(.system(size:10,weight:.medium))
+                        }
+                    }.foregroundStyle(color).frame(width:16,height:16)
+                        .background(Palette.card,in:Circle()).padding(3)
+                }
+            }
+    }
+    private var channel: String {
+        guard key == "input", device["master"] as? Bool != true else { return "" }
+        return (device["inputTransport"] as? [String:Any])?["selected"] as? String ?? ""
     }
     private var title: String { L(permissionTitles[key] ?? key) }
     private var statusTitle: String { L(permissionStateTitle(state)) }
-    private var helpText: String { title + " · " + statusTitle }
+    private var helpText: String { title + " · " + statusTitle + (channel == "bluetooth" ? " · " + L("蓝牙") : channel == "network" ? " · Wi-Fi" : "") }
     private var accessibleName: String { (device["name"] as? String ?? "") + " · " + helpText }
     private var applicationState: String {
         let app = L(row["app"] as? String ?? "未知")
@@ -2186,7 +2511,7 @@ struct PairingView: View {
     let back: () -> Void
     @Environment(\.colorScheme) private var colorScheme
     @State private var code = ""; @State private var input = ""; @State private var qr: NSImage?
-    @State private var showing = false; @State private var busy = false
+    @State private var showing = true; @State private var busy = false
     @State private var loading = false; @State private var alive = true; @State private var error = ""
     @State private var deadline = Date.distantPast; @State private var now = Date(); @State private var duration = 60.0
     @State private var host = ""

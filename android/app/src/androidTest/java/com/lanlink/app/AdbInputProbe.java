@@ -108,7 +108,6 @@ final class AdbInputProbe {
                 public void ready(Wire p) {
                   service.ready(p);
                   try {
-                    if (args.containsKey("adbSmokeHidDisabled")) service.setHidEnabled(p.id, false);
                     service.consent.request(p.id, "ADB smoke desktop");
                     DeviceConsent.Request request = service.consent.peek();
                     if (request == null) throw new AssertionError("fixture consent missing");

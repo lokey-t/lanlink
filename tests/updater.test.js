@@ -3,10 +3,12 @@ import assert from 'node:assert/strict';
 import {mkdtemp,writeFile,readFile,mkdir,rm,copyFile} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import {randomBytes} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {setTimeout as delay} from 'node:timers/promises';
 import {gunzipSync,gzipSync} from 'node:zlib';
-import {delta,hash,reconstruct,newer,safePath,materialize} from '../src/update-package.js';
+import {delta,hash,reconstruct,newer,safePath} from '../src/update-package.js';
+import {buildApkDelta} from '../scripts/build-apk-delta.js';
 import {Updater,assetBytes,release,prepareUpdate,verifyMacUpdate} from '../src/updater.js';
 const fullAsset = {name:'full', size:16, sha256:'a'.repeat(64)};
 const fullLink = {name:'full',browser_download_url:'https://example.com/full'};
@@ -17,12 +19,100 @@ test('binary patch validates base, target, ranges, numeric versions and paths',(
  assert(newer('0.3.100','0.3.9'));assert(!newer('0.3.9','0.3.9'));assert(!newer('0.3.9-beta','0.3.8'));
  for(const name of ['../x','/x','a/../x','C:/x','a\\x'])assert.throws(()=>safePath(os.tmpdir(),name));
 });
-test('release generator creates one combined delta and reconstructs a clean tree',async()=>{
- const dir=await mkdtemp(path.join(os.tmpdir(),'lanlink-update-test-'));try{
- for(const name of ['old','new'])await mkdir(path.join(dir,name));await writeFile(path.join(dir,'old/a'),Buffer.alloc(131072,7));await writeFile(path.join(dir,'old/deleted'),'gone');await writeFile(path.join(dir,'new/a'),Buffer.concat([Buffer.alloc(131072,7),Buffer.from('new')]));await writeFile(path.join(dir,'new/added'),'added');
- const input={version:'0.3.99',targets:{'win32-x64':{current:path.join(dir,'new'),previous:path.join(dir,'old'),from:'0.3.98'}}};await writeFile(path.join(dir,'input.json'),JSON.stringify(input));const r=spawnSync(process.execPath,['scripts/build-update.js',path.join(dir,'input.json'),path.join(dir,'out')],{encoding:'utf8'});assert.equal(r.status,0,r.stderr);
- const manifest=JSON.parse(await readFile(path.join(dir,'out/lanlink-update.json'))),bytes=await readFile(path.join(dir,'out',manifest.delta.name));assert.equal(hash(bytes),manifest.delta.sha256);const bundle=JSON.parse(gunzipSync(bytes));await materialize(path.join(dir,'old'),path.join(dir,'stage'),bundle.targets['win32-x64'].files);assert.deepEqual(await readFile(path.join(dir,'stage/a')),await readFile(path.join(dir,'new/a')));await assert.rejects(readFile(path.join(dir,'stage/deleted')));
- }finally{await rm(dir,{recursive:true,force:true});}
+test('release generator builds isolated target deltas and retains a compatible full package', async () => {
+ const dir = await mkdtemp(path.join(os.tmpdir(),'lanlink-update-test-'));
+ const original = globalThis.fetch;
+ try {
+  const previous = path.join(dir,'old'), current = path.join(dir,'new'), out = path.join(dir,'out');
+  const version = '0.3.99', previousVersion = '0.3.98';
+  for (const [root, number] of [[previous,previousVersion],[current,version]]) {
+   await mkdir(path.join(root,'Contents/Resources'),{recursive:true});
+   for (const file of ['build-info.json','Contents/Resources/build-info.json']) {
+    await writeFile(path.join(root,file),JSON.stringify({version:number}));
+   }
+  }
+  const base = Buffer.alloc(131072,7), next = Buffer.concat([base,Buffer.from('new')]);
+  await writeFile(path.join(previous,'app'),base);
+  await writeFile(path.join(previous,'deleted'),'gone');
+  await writeFile(path.join(current,'app'),next);
+  const targets = {'win32-x64':{previous,current},'darwin-arm64':{previous,current}};
+  const input = path.join(dir,'input.json');
+  await writeFile(input,JSON.stringify({version,previousVersion,targets}));
+  const args = ['scripts/build-update.js',input,out];
+  assert.match(spawnSync(process.execPath,args,{encoding:'utf8'}).stderr,/must include Windows, macOS and Android/);
+  const build = spawnSync(process.execPath,[...args,'--partial'],{encoding:'utf8'});
+  assert.equal(build.status,0,build.stderr);
+  const manifest = JSON.parse(await readFile(path.join(out,'lanlink-update.json')));
+  assert.equal(manifest.format,1);
+  assert.equal(manifest.delta,undefined);
+  for (const [target,{delta,full,deltaFrom}] of Object.entries(manifest.targets)) {
+   assert.equal(deltaFrom,previousVersion);
+   const bytes = await readFile(path.join(out,delta.name));
+   assert.equal(hash(bytes),delta.sha256);
+   assert.deepEqual(Object.keys(JSON.parse(gunzipSync(bytes)).targets),[target]);
+   const downloaded = [];
+   const releases = [{assets:[delta,full].map(({name})=>({name,browser_download_url:'https://example.com/'+name}))}];
+   globalThis.fetch = async url => {
+    const name = path.basename(url.pathname);
+    downloaded.push(name);
+    return new Response(await readFile(path.join(out,name)));
+   };
+   for (const [baseVersion, asset] of [[previousVersion,delta],['0.3.97',full]]) {
+    const stage = path.join(dir,target+'-'+baseVersion);
+    await prepareUpdate({root:previous,stage,target,version:baseVersion,manifest,releases});
+    assert.deepEqual(await readFile(path.join(stage,'app')),next);
+    await assert.rejects(readFile(path.join(stage,'deleted')));
+    assert.deepEqual(downloaded.splice(0),[asset.name]);
+   }
+  }
+ } finally {
+  globalThis.fetch = original;
+  await rm(dir,{recursive:true,force:true});
+ }
+});
+
+const jdkTool = name => process.env.JAVA_HOME ? path.join(process.env.JAVA_HOME, 'bin',
+ name + (process.platform === 'win32' ? '.exe' : '')) : name;
+
+test('Android applies the generated delta and rejects damaged or mismatched APKs',
+ {skip:spawnSync(jdkTool('javac'),['-version']).status !== 0}, async () => {
+ const dir = await mkdtemp(path.join(os.tmpdir(),'lanlink-apk-delta-'));
+ try {
+  const base = randomBytes(256*1024);
+  const next = Buffer.concat([base.subarray(0,21000),Buffer.from('shift APK entries'),base.subarray(21000)]);
+  const patch = buildApkDelta(base,next);
+  assert(patch.length < next.length / 3);
+  const runner = path.join(dir,'ApplyDelta.java');
+  await writeFile(runner,`
+package com.lanlink.app;
+import java.io.File;
+public class ApplyDelta {
+  public static void main(String[] args) throws Exception {
+    ApkDelta.apply(new File(args[0]), new File(args[1]), new File(args[2]), Long.parseLong(args[3]), args[4]);
+  }
+}
+`);
+  const compiled = spawnSync(jdkTool('javac'),['-d',dir,runner,
+   'android/app/src/main/java/com/lanlink/app/ApkDelta.java'],{encoding:'utf8'});
+  assert.equal(compiled.status,0,compiled.stderr);
+  const patchFile = path.join(dir,'patch.gz'), baseFile = path.join(dir,'base.apk'), output = path.join(dir,'out.apk');
+  await writeFile(patchFile,patch);
+  await writeFile(baseFile,base);
+  const apply = (sha = hash(next)) => spawnSync(jdkTool('java'),['-cp',dir,'com.lanlink.app.ApplyDelta',
+   patchFile,baseFile,output,String(next.length),sha],{encoding:'utf8'});
+  const applied = apply();
+  assert.equal(applied.status,0,applied.stderr);
+  assert.deepEqual(await readFile(output),next);
+  assert.match(apply('0'.repeat(64)).stderr,/Reconstructed APK checksum mismatch/);
+  await writeFile(patchFile,patch.subarray(0,-5));
+  assert.equal(apply().status,1);
+  await writeFile(patchFile,patch);
+  base[0] ^= 1;
+  await writeFile(baseFile,base);
+  assert.match(apply().stderr,/Installed APK checksum mismatch/);
+ } finally {
+  await rm(dir,{recursive:true,force:true});
+ }
 });
 test('mirror failure retries, asset corruption is rejected, disabled automatic checks are quiet',async()=>{
  const original=globalThis.fetch;let calls=0;try{globalThis.fetch=async url=>{calls++;if(String(url).includes('github'))throw Error('offline');if(String(url).includes('manifest'))return new Response(JSON.stringify(desktopManifest('0.3.99')));return new Response(JSON.stringify({tag_name:'v0.3.99',assets:[{name:'lanlink-update.json',browser_download_url:'https://example.com/manifest'},fullLink]}));};assert.equal((await release('stable','win32-x64')).manifest.version,'0.3.99');assert.equal(calls,3);
@@ -155,16 +245,57 @@ test('an unsupported release offers its version page without claiming an in-app 
    if (value.includes('example.com')) return new Response(JSON.stringify(desktopManifest(version)));
    const assets = [{name:'lanlink-update.json',browser_download_url:'https://example.com/manifest'}];
    if (mirrorHasAsset && value.includes('gitee.com')) assets.push(fullLink);
-   return new Response(JSON.stringify({tag_name:'v'+version, assets}));
+   return new Response(JSON.stringify({tag_name:'v'+version, assets, body:value.includes('github.com')?'Fix device discovery':''}));
   };
   const updater = new Updater({config:{}},'win32-x64');
   const missing = await updater.check();
   assert.equal(missing.phase,'unavailable');
+  assert.equal(missing.notes,'Fix device discovery');
   assert.match(missing.downloadPage,/\/releases\/tag\/v99\.5\.0$/);
   mirrorHasAsset = true;
-  assert.equal((await updater.check()).phase,'available');
+  const available = await updater.check();
+  assert.equal(available.phase,'available');
+  assert.equal(available.notes,'Fix device discovery');
   assert.equal((await release('stable','win32-x64')).page,'https://gitee.com/lokey-t/lanlink/releases/tag/v99.5.0');
  } finally { globalThis.fetch = original; }
+});
+
+test('update reminder choices persist per channel and version', async () => {
+ const original = globalThis.fetch;
+ const dir = await mkdtemp(path.join(os.tmpdir(),'lanlink-update-reminders-'));
+ let version = '99.5.0';
+ try {
+  globalThis.fetch = async url => {
+   const beta = String(url).includes('?');
+   const entry = {tag_name:'v'+version, prerelease:beta, body:beta?'Beta notes':'Stable notes'};
+   return new Response(JSON.stringify(beta?[entry]:entry));
+  };
+  const service = {dir, config:{}};
+  const updater = new Updater(service,'win32-x64');
+  assert.equal((await updater.check(false)).prompt,true);
+  assert.equal(updater.state().notes,'Stable notes');
+  assert.equal((await updater.deferPrompt({channel:'stable',version,choice:'skip'})).prompt,false);
+
+  service.config.updateChannel = 'beta';
+  assert.equal((await updater.check(false)).prompt,true);
+  assert.equal(updater.state().notes,'Beta notes');
+  assert.equal((await updater.deferPrompt({channel:'beta',version,choice:'later'})).prompt,false);
+  assert.equal((await updater.check(false)).prompt,false);
+  assert.equal((await updater.check()).prompt,true);
+
+  const config = JSON.parse(await readFile(path.join(dir,'config.json'),'utf8'));
+  const restarted = new Updater({dir,config},'win32-x64');
+  assert.equal((await restarted.check(false)).prompt,false);
+  config.updateReminders.beta[version] = Date.now() - 1;
+  assert.equal(restarted.state().prompt,true);
+  config.updateChannel = 'stable';
+  assert.equal((await restarted.check()).prompt,false);
+  version = '99.5.1';
+  assert.equal((await restarted.check(false)).prompt,true);
+ } finally {
+  globalThis.fetch = original;
+  await rm(dir,{recursive:true,force:true});
+ }
 });
 
 test('a failed desktop replacement restores the old app and persists an actionable result', async () => {

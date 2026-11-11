@@ -27,7 +27,112 @@ export class InputTransport {
     const record = Object.hasOwn(this.records,id) ? this.records[id] : null;
     return record && (record.external || record.group === this.service.group.data.id && !this.service.group.excluded(id)) ? record : {};
   }
-  preference(id) { return this.record(id).preference || modes[0]; }
+  groupEnabled() { return this.service.config.groupHidEnabled !== false; }
+  preference(id) {
+    const record = this.record(id);
+    const android = this.service.peers.get(id)?.info?.platform === 'android';
+    return !record.external && (android || !this.groupEnabled()) ? 'network_only' : record.preference || modes[0];
+  }
+  async setGroupEnabled(enabled) {
+    const s = this.service;
+    if (!this.role() || typeof enabled !== 'boolean') throw Error('请在主设备设置 HID 通道');
+    if (!enabled && (s.activeSession?.transport === 'bluetooth' && !s.activeSession.external ||
+        s.controlIntent?.transport === 'bluetooth' && !s.controlIntent.external)) await s.returnLocal();
+    await commitConfig(s.dir, s.config, () => ({ groupHidEnabled:enabled }));
+    if (!enabled) {
+      this.pairing = null;
+      this.claims.clear();
+      if (this.starting) await this.starting.catch(() => {});
+      if (!Object.keys(this.records).some(id => this.record(id).external)) {
+        this.started = this.manual = false;
+        await s.native.call('hid-stop', {}, 2000).catch(() => {});
+        await this.refresh();
+      }
+    } else await this.advertise(false).catch(() => {});
+    s.emit('change');
+    return {};
+  }
+  async openMasterBluetooth() {
+    if (!this.role()) throw Error('请在主设备设置 HID 通道');
+    if (!this.groupEnabled()) throw Error('请先开启 HID 通道');
+    await this.advertise(false);
+    return this.masterStatus();
+  }
+  async masterStatus() {
+    await this.refresh();
+    return {
+      enabled:this.groupEnabled(),
+      ready:this.groupEnabled() && this.adapter?.hidServiceReady === true,
+      reason:this.adapter?.reason || '',
+      connected:[...this.service.peers.keys()].filter(id => this.ready(id)),
+    };
+  }
+  async guideTarget(id) {
+    if (!this.role()) throw Error('请在主设备设置 HID 通道');
+    if (!this.groupEnabled()) throw Error('请先开启 HID 通道');
+    const { name } = await this.preparePairing(id, false);
+    const peer = this.service.getPeer(id);
+    try {
+      const result = await peer.request('hid-connect-guide', { name, serviceId:this.serviceId }, 4000);
+      if (!result?.opened) throw Error('请升级目标设备后重试');
+      return { name };
+    } catch (error) {
+      if (this.pairing?.peer === peer) this.pairing = null;
+      throw error;
+    }
+  }
+  receiveGuide(peer, name, serviceId) {
+    const s = this.service;
+    if (masterSelection(s)?.id !== peer.remote.id || !s.currentPeer(peer) ||
+        typeof name !== 'string' || !name.trim() || name.length > 120) throw Error('请求不是来自本组主设备');
+    this.guide = { requestId:randomUUID(), id:peer.remote.id, name,
+      direct:s.native.capabilities.hidDirectPairing === true && typeof serviceId === 'string' && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(serviceId),
+      serviceId, expires:Date.now() + 120000 };
+    s.emit('change');
+    return { opened:true };
+  }
+  guideNotice() {
+    const s = this.service, guide = this.guide, peer = s.peers.get(guide?.id);
+    return guide?.expires > Date.now() && masterSelection(s)?.id === guide.id &&
+      peer && s.currentPeer(peer) && !s.group.excluded(guide.id) ? guide : null;
+  }
+  async finishGuide(requestId, cancel) {
+    const guide = this.guideNotice();
+    if (!guide || guide.requestId !== requestId) throw Error('请求已结束，请重新打开配对引导');
+    if (!cancel) {
+      const result = await this.requestPairing(guide.id, true);
+      if (!result?.connected) throw Error('蓝牙键鼠尚未就绪');
+    }
+    if (this.guide === guide) this.guide = null;
+    this.service.emit('change');
+    return {};
+  }
+  async connectGuide(requestId) {
+    const guide = this.guideNotice(), s = this.service;
+    if (!guide?.direct || guide.requestId !== requestId) throw Error('请求已结束，请重新打开配对引导');
+    if (this.connectingGuide) throw Error('正在连接蓝牙');
+    this.connectingGuide = true;
+    try {
+      return await this.connectTargetGuide(guide, s.getPeer(guide.id));
+    } finally { this.connectingGuide = false; }
+  }
+  async connectTargetGuide(guide, peer) {
+    const s = this.service;
+    const { serviceId } = await peer.request('bluetooth-offer', {}, 8500);
+    if (serviceId !== guide.serviceId || this.guideNotice() !== guide) throw Error('蓝牙连接凭证无效');
+    const device = await s.native.call('hid-find-device', { serviceId }, 15000);
+    if (this.guideNotice() !== guide) throw Error('请求已结束，请重新打开配对引导');
+    await peer.request('bluetooth-claim', { serviceId, nonce:device.nonce }, 3000);
+    if (this.guideNotice() !== guide) throw Error('请求已结束，请重新打开配对引导');
+    const { paired } = await s.native.call('hid-pair-device', { address:device.address, addressType:device.addressType }, 55000);
+    if (!paired) throw Error('无法直接连接蓝牙，请在系统蓝牙设置中连接');
+    for (let attempt = 0; attempt < 8 && this.guideNotice() === guide; attempt++) {
+      const status = await peer.request('hid-link-status', {}, 1500);
+      if (status?.ready) return this.finishGuide(guide.requestId, false);
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    throw Error('蓝牙键鼠尚未就绪');
+  }
   binding(id) {
     const s = this.service, peer = s.peers.get(id), claim = this.claims.get(id);
     if (peer?.info?.capabilities?.autoHidTarget === 1 && !this.record(id).host) {
@@ -91,6 +196,7 @@ export class InputTransport {
     }
   }
   connected(id) {
+    if (!this.groupEnabled() && !this.record(id).external) return false;
     const binding = this.binding(id), host = this.hosts.get(binding);
     return Date.now() - this.checkedAt < 4000 && this.adapter?.hidServiceReady === true &&
       host?.hostConnected === true && host.reportSubscribed === true && host.bonded !== false &&
@@ -150,7 +256,9 @@ export class InputTransport {
       if (s.active || s.switching || s.returning) throw Error('请先结束当前键鼠控制再绑定蓝牙目标');
       const bound = new Set(Object.keys(this.records).map(key => this.record(key).host).filter(Boolean));
       const unbound = [...this.hosts].filter(([key, host]) => !bound.has(key) && host.reportSubscribed);
-      if (!bound.has(binding) && (unbound.length !== 1 || unbound[0][0] !== binding))
+      const claim = this.claims.get(target);
+      const proven = args.systemPairing && claim?.host === binding && claim.role === this.role() && s.currentPeer(claim.peer);
+      if (!proven && !bound.has(binding) && (unbound.length !== 1 || unbound[0][0] !== binding))
         throw Error('请断开其他尚未绑定的蓝牙设备后重试');
       const host = this.hosts.get(binding);
       if (!host?.ready || host.bonded === false) throw Error('目标蓝牙报告尚未就绪');
@@ -170,7 +278,7 @@ export class InputTransport {
     await this.refresh();
     const members = { ...s.group.data.members, ...s.config.knownDevices };
     for (const [id, peer] of s.peers) members[id] = peer.info || {};
-    const ids = Object.keys(members).filter(id => id !== s.config.id && !s.group.excluded(id));
+    const ids = Object.keys(members).filter(id => id !== s.config.id && members[id]?.platform !== 'android' && !s.group.excluded(id));
     const group = s.group.data.id;
     const devices = await Promise.all(ids.map(async id => {
       const peer = s.peers.get(id), info = members[id];
@@ -185,19 +293,37 @@ export class InputTransport {
         enabled:this.preference(id) !== 'network_only',
       };
     }));
-    return { devices: s.group.data.id === group ? devices.filter(d => !s.group.excluded(d.id)) : [] };
+    const masterId = masterSelection(s)?.id;
+    const local = masterId === s.config.id;
+    const masterPeer = s.peers.get(masterId);
+    const masterStatus = local ? await this.masterStatus() :
+      await masterPeer?.request('hid-master-status', {}, 1500).catch(() => null);
+    const readyTargets = new Set(Array.isArray(masterStatus?.connected) ? masterStatus.connected : []);
+    return {
+      devices: s.group.data.id === group ? devices.filter(d => !s.group.excluded(d.id)) : [],
+      master: masterId && { id:masterId, local, name:local ? s.config.name : members[masterId]?.name || '设备', ...masterStatus },
+      targets: s.group.data.id === group ? Object.entries({ [s.config.id]:{ name:s.config.name, platform:process.platform }, ...members })
+        .filter(([id, info]) => id !== masterId && info?.platform !== 'android' && !s.group.excluded(id))
+        .map(([id, info]) => ({ id, name:info.name || '设备', platform:info.platform, online:id === s.config.id || s.peers.has(id),
+          connected:readyTargets.has(id) })) : [],
+    };
   }
   async requestPairing(id, confirm) {
     const peer = this.service.getPeer(id);
     if (peer.info?.capabilities?.hidSettings !== 1) throw Error('请升级目标设备后重试');
     return peer.request(confirm ? 'hid-pair-confirm' : 'hid-pair-start', {}, 9000);
   }
-  async preparePairing(id) {
+  async preparePairing(id, manual = true) {
     const s = this.service, peer = s.getPeer(id);
     if (peer.info?.capabilities?.hidSettings !== 1) throw Error('请升级目标设备后重试');
     if (!['darwin', 'win32'].includes(process.platform)) throw Error('本机不支持蓝牙 HID 配对');
-    const {adapter} = await this.advertise();
-    if (adapter.peripheralSupported === false || process.platform === 'win32' && !adapter.hidServiceReady ||
+    if (!this.groupEnabled()) throw Error('请先开启 HID 通道');
+    let {adapter} = await this.advertise(manual);
+    for (let i = 0; i < 3 && !adapter.hidServiceReady && !['unauthorized', 'powered_off', 'unsupported'].includes(adapter.reason); i++) {
+      await new Promise(resolve => setTimeout(resolve, 350));
+      ({adapter} = await this.refresh());
+    }
+    if (adapter.peripheralSupported === false || !adapter.hidServiceReady ||
         ['unauthorized', 'powered_off', 'unsupported'].includes(adapter.reason))
       throw Error('蓝牙服务未就绪');
     if (!s.currentPeer(peer) || s.group.excluded(id)) throw Error('设备连接已结束');
@@ -209,7 +335,12 @@ export class InputTransport {
     if (this.pairing?.peer !== peer || this.pairing.until < Date.now())
       throw Error('请先在对方设备的蓝牙 HID 键鼠页面开启配对');
     if (!confirm) return { name:process.platform === 'darwin' ? 'LanLink' : hostname() };
-    if (!this.connected(id)) {
+    if (this.connected(id)) {
+      const claim = this.claims.get(id);
+      if (!this.record(id).host && claim?.peer === peer && claim.role === this.role()) {
+        await this.save(id, { host:claim.host, confirmed:true, systemPairing:true });
+      }
+    } else {
       const snapshot = await this.refresh();
       const reserved = new Set([
         ...Object.keys(this.records).map(key => this.record(key).host).filter(Boolean),
@@ -232,6 +363,7 @@ export class InputTransport {
     const network = !external && appAllowed && permission?.supported !== false && permission?.systemGranted === true;
     const capability = this.adapter?.peripheralSupported;
     const active = this.service.active === id ? this.service.activeSession?.transport || 'network' : 'none';
+    const selected = active === 'none' ? selectTransport(this.preference(id), bluetooth, network) : active;
     return {
       schemaVersion: 1, preference: this.preference(id), automaticGroup:peer?.info?.capabilities?.autoHidTarget === 1,
       authorization: external || appAllowed ? 'allowed' : 'denied',
@@ -246,16 +378,18 @@ export class InputTransport {
         standby: bluetooth && active !== 'bluetooth' && this.preference(id) !== 'network_only',
       },
       availability: bluetooth ? network ? 'both' : 'bluetooth_only' : network ? 'network_only' : 'unavailable',
-      active,
+      active, selected,
     };
   }
   state() {
     const s = this.service;
-    const peers = [...s.peers].map(([id,p]) => ({ id, name:p.info?.name || '设备', ...this.describe(id, p.access?.permissions?.input) }));
+    const peers = [...s.peers].filter(([,p]) => p.info?.platform !== 'android')
+      .map(([id,p]) => ({ id, name:p.info?.name || '设备', ...this.describe(id, p.access?.permissions?.input) }));
     const external = Object.keys(this.records).filter(id => this.record(id).external).map(id => ({ id, name:this.record(id).name, external:true, ...this.describe(id) }));
     const { adapterPresent, peripheralSupported, hidServiceReady, advertising, reason } = this.adapter || {};
     return {
       adapter: { adapterPresent, peripheralSupported, hidServiceReady, advertising, reason },
+      guide:this.guideNotice(),
       hosts: [...this.hosts].map(([id,h]) => ({ id, bonded:h.bonded, hostConnected:h.hostConnected, reportSubscribed:h.reportSubscribed })),
       targets: [...peers, ...external].map(target => ({ ...target, host:this.binding(target.id) })),
     };

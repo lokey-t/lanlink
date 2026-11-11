@@ -16,6 +16,10 @@ if [ -z "${LANLINK_NODE_DIST:-}" ]; then echo 'Set LANLINK_NODE_DIST to an extra
 test -x "$LANLINK_NODE_DIST/bin/node"
 test -f "$LANLINK_NODE_DIST/LICENSE"
 test -f node_modules/werift/package.json || { echo 'Run npm ci --ignore-scripts before packaging'; exit 1; }
+if [ -n "${LANLINK_ADB_DIST:-}" ]; then
+  test -x "$LANLINK_ADB_DIST/adb" || { echo 'ADB runtime is missing executable adb'; exit 1; }
+  test -f "$LANLINK_ADB_DIST/NOTICE" || { echo 'ADB runtime is missing NOTICE'; exit 1; }
+fi
 "$LANLINK_NODE_DIST/bin/node" -e 'if(Number(process.versions.node.split(".")[0])<22)process.exit(1)'
 DEST="${LANLINK_PACKAGE_DIR:-$(pwd)/dist/LanLink-$VERSION-macos-$ARCH}"
 BUNDLE="$DEST/LanLink.app"
@@ -38,6 +42,9 @@ cp runtime/liblanlink_quic.dylib "$BUNDLE/Contents/Resources/runtime/"
 cp build-info.json package.json package-lock.json "$BUNDLE/Contents/Resources/"
 cp "$LANLINK_NODE_DIST/bin/node" "$BUNDLE/Contents/Resources/runtime/node"
 cp "$LANLINK_NODE_DIST/LICENSE" "$BUNDLE/Contents/Resources/runtime/NODE-LICENSE"
+if [ -n "${LANLINK_ADB_DIST:-}" ]; then
+  cp -R "$LANLINK_ADB_DIST" "$BUNDLE/Contents/Resources/runtime/platform-tools"
+fi
 # Every Mac build includes the decoder required by Android H.264 video.
 if [ -z "${LANLINK_FFMPEG_DIST:-}" ]; then
   sh scripts/build-video-macos.sh
@@ -83,6 +90,16 @@ bridge="$BUNDLE/Contents/Resources/native/macos/LanLinkBridge"
 runtime="$BUNDLE/Contents/Resources/runtime/node"
 if [ "$SIGN_IDENTITY" = "-" ]; then
   codesign --force --sign - --identifier com.lanlink.native.bridge "$bridge"
+  if [ -f "$BUNDLE/Contents/Resources/runtime/platform-tools/adb" ]; then
+    find "$BUNDLE/Contents/Resources/runtime/platform-tools" -type f -exec sh -c '
+      set -e
+      for item do
+        case $(file -b "$item") in
+          *Mach-O*) codesign --force --sign - "$item";;
+        esac
+      done
+    ' sign-adb {} +
+  fi
   if [ -f "$BUNDLE/Contents/Resources/runtime/video/bin/ffmpeg" ]; then
     codesign --force --sign - "$BUNDLE/Contents/Resources/runtime/video/bin/ffmpeg"
   fi

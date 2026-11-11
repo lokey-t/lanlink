@@ -1,9 +1,15 @@
-param([string]$NodeRuntime = '', [string]$VideoRuntime = '', [switch]$NoZip)
+param([string]$NodeRuntime = '', [string]$VideoRuntime = '', [switch]$NoZip, [string]$AdbRuntime = $env:LANLINK_ADB_DIST)
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $version = (Get-Content (Join-Path $root 'package.json') -Raw | ConvertFrom-Json).version
 if (-not $NodeRuntime) { $NodeRuntime = Split-Path (Get-Command node).Source }
 $runtime = (Resolve-Path $NodeRuntime).Path
+if ($AdbRuntime) {
+    $AdbRuntime = (Resolve-Path -LiteralPath $AdbRuntime).Path
+    foreach ($file in @('adb.exe', 'NOTICE')) {
+        if (!(Test-Path -LiteralPath (Join-Path $AdbRuntime $file) -PathType Leaf)) { throw "ADB runtime is missing $file" }
+    }
+}
 & node (Join-Path $root 'scripts/build-info.js')
 if ($LASTEXITCODE -ne 0) { throw 'Build identity generation failed' }
 if (-not (Test-Path -LiteralPath (Join-Path $runtime 'node.exe'))) { throw 'Node runtime missing' }
@@ -15,6 +21,9 @@ if (-not $license) { throw 'Node license missing: use a complete official runtim
 New-Item -ItemType Directory -Force (Join-Path $output 'runtime') | Out-Null
 Copy-Item -LiteralPath (Join-Path $runtime 'node.exe') -Destination (Join-Path $output 'runtime/node.exe')
 Copy-Item -LiteralPath $license -Destination (Join-Path $output 'runtime/NODE-LICENSE')
+if ($AdbRuntime) {
+    Copy-Item -LiteralPath $AdbRuntime -Destination (Join-Path $output 'runtime/platform-tools') -Recurse
+}
 if ($VideoRuntime) {
     $video = (Resolve-Path $VideoRuntime).Path
     foreach ($file in @('bin/ffmpeg.exe', 'LICENSE.txt')) { if (-not (Test-Path -LiteralPath (Join-Path $video $file))) { throw "Video runtime missing $file" } }
@@ -30,7 +39,8 @@ $hidProject = Join-Path $root 'native/windows/Hid/LanLinkHid.csproj'
 $hidBuild = Join-Path $root '.tools/windows-hid-build'
 $hidPackages = Join-Path $hidBuild 'packages'
 $hidOutput = Join-Path $output 'runtime/hid'
-& dotnet publish $hidProject -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:DebugType=None --artifacts-path $hidBuild "-p:RestorePackagesPath=$hidPackages" -o $hidOutput
+# Keep the self-contained HID helper small enough for the desktop update format.
+& dotnet publish $hidProject -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -p:DebugType=None --artifacts-path $hidBuild "-p:RestorePackagesPath=$hidPackages" -o $hidOutput
 if ($LASTEXITCODE -ne 0) { throw 'Windows Bluetooth HID build failed. Install the .NET 8 SDK.' }
 $hidAssets = Get-Content (Join-Path $hidBuild 'obj/LanLinkHid/project.assets.json') -Raw | ConvertFrom-Json
 $hidFramework = $hidAssets.project.frameworks.PSObject.Properties | Select-Object -First 1

@@ -8,6 +8,16 @@
 This file preserves the original release notes in Chinese, with same-version addenda grouped together.
 Historical entries describe their version at the time. For current behavior, permission defaults, build instructions, and validation scope, use the READMEs and the latest validation reports.
 
+## 0.92.0 · HID 键鼠与分平台增量更新 / HID input and per-platform updates
+
+- 新增 Windows 和 macOS 组内蓝牙 HID 键鼠通道。跨屏控制优先使用已就绪的 HID 通道，可在获授权时回退到网络。
+- 修复增量更新错误。Windows x64、macOS arm64 和 Android 各自提供独立增量包，并在补丁不可用时下载对应的全量包。
+- 优化 Android 界面和横屏触控板，修复若干问题。
+
+- Added a Bluetooth HID keyboard and mouse channel for grouped Windows and macOS devices. Cross-screen input prefers a ready HID channel and can fall back to the network when authorized.
+- Fixed incremental updates. Windows x64, macOS arm64, and Android each get a separate delta and fall back to their full package when needed.
+- Improved the Android interface and landscape touchpad, and fixed several issues.
+
 ## 0.91.1 · 组内日志与连接质量 / Group logs and connection quality
 
 - 设置新增「导出日志」。并行收集本机和在线同组设备各自最近 100 条运行日志，合并后另存为文本文件，并标明未能收集的设备。

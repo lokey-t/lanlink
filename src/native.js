@@ -1,9 +1,11 @@
 import { EventEmitter } from 'node:events';
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 const root = fileURLToPath(new URL('../', import.meta.url));
+const windowsHid = path.join(root, 'runtime', 'hid', 'LanLinkHid.exe');
 export class NativeBridge extends EventEmitter {
   constructor({ disabled = false } = {}) { super(); this.disabled = disabled; this.pending = new Map(); this.seq = 0; this.capabilities = {}; }
   async start() {
@@ -20,6 +22,7 @@ export class NativeBridge extends EventEmitter {
       try { if(line.startsWith('@D ')){const parts=line.split(' '),dx=Number(parts[1]),dy=Number(parts[2]);if(parts.length===3&&Number.isFinite(dx)&&Number.isFinite(dy))this.emit('event',{type:'input',kind:'move',dx,dy});return;}const m = JSON.parse(line); if (m.replyTo) { const p = this.pending.get(m.replyTo); if (p) { clearTimeout(p.timer); this.pending.delete(m.replyTo); m.error ? p.reject(new Error(m.error)) : p.resolve(m.result); } } else this.emit('event', m); } catch {}
     });
     this.capabilities = await this.call('capabilities', {}, 25000);
+    if (process.platform === 'win32' && existsSync(windowsHid)) this.capabilities.hidDirectPairing = true;
     if(this.capabilities.compactMotion===1)await this.call('compactMotion',{enabled:true});
   }
   fail(e) { for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(e); } this.pending.clear(); this.emit('diagnostic', e.message); }
@@ -37,11 +40,25 @@ export class NativeBridge extends EventEmitter {
       else this.child.stdin.write(JSON.stringify({id,method,args})+'\n'); });
   }
   callWindowsHid(method, args, timeout) {
+    if (method === 'hid-find-device' || method === 'hid-pair-device') {
+      const find = method === 'hid-find-device';
+      const value = find ? args.serviceId : args.address;
+      const pattern = find ? /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/ : /^[a-f0-9]{12}$/;
+      if (typeof value !== 'string' || !pattern.test(value) || !find && ![0,1,2].includes(args.addressType))
+        return Promise.reject(new Error('蓝牙连接凭证无效'));
+      const command = find ? ['--find', value] : ['--pair', value, String(args.addressType)];
+      return new Promise((resolve, reject) => {
+        execFile(windowsHid, command, { timeout, windowsHide:true, maxBuffer:4096 }, (error, stdout) => {
+          if (error) { reject(new Error('无法直接连接蓝牙，请在系统蓝牙设置中连接')); return; }
+          try { resolve(JSON.parse(stdout)); }
+          catch { reject(new Error('无法直接连接蓝牙，请在系统蓝牙设置中连接')); }
+        });
+      });
+    }
     if (!this.hidChild && method === 'hid-status') return Promise.resolve({});
     if (!this.hidChild && method !== 'hid-start') return Promise.reject(new Error('Windows 蓝牙键鼠组件不可用'));
     if (!this.hidChild) {
-      const executable = path.join(root, 'runtime', 'hid', 'LanLinkHid.exe');
-      const child = spawn(executable, [], { windowsHide:true, stdio:['pipe','pipe','ignore'] });
+      const child = spawn(windowsHid, [], { windowsHide:true, stdio:['pipe','pipe','ignore'] });
       const pending = this.hidPending = new Map();
       this.hidChild = child;
       const fail = () => {

@@ -59,6 +59,8 @@ namespace LanLink.Desktop {
     string inputFailure;
     Border navigationHotspot, screenFrame; StackPanel navigationKeys;
     bool preparing, prepared, freshRequest=true; double screenRatio = .5; DateTime acquiredAt;
+    bool restarting;
+    int streamRevision;
     [StructLayout(LayoutKind.Sequential)] struct SizingRect { public int Left, Top, Right, Bottom; }
     [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam);
     internal void ShowNavigationPreview() { navigationHotspot.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice,0) {RoutedEvent=Mouse.MouseEnterEvent}); }
@@ -178,11 +180,25 @@ namespace LanLink.Desktop {
       UiLocale.Bind(button,System.Windows.Automation.AutomationProperties.NameProperty,tooltip); panel.Children.Add(button);
     }
     async Task ResumeAfterFocus() { if(!resumeOnActivate||closed||conflict)return;resumeOnActivate=false;wantsControl=true;retryAt=DateTime.MinValue;await BeginControl(); }
+    internal Task RetryFailedControl() {
+      return statusBanner.Visibility == Visibility.Visible && (!controlling || image.Source == null)
+        ? RestartControl() : Task.FromResult(0);
+    }
     async Task RestartControl() {
-      if(preparing || closed)return;
-      retryControlButton.IsEnabled=false;status.Text=Locale.T("正在重新连接设备…");await Release();
-      resumeOnActivate=false;freshRequest=true;wantsControl=true;prepared=false;ControlRequested=false;fallbackAccepted=false;conflict=false;inputFailure=null;retryAt=DateTime.MinValue;
-      status.Text=Locale.T("正在重新连接设备…");await BeginControl();UpdateStatusBanner();
+      if(preparing || restarting || closed)return;
+      restarting=true;
+      status.Text=Locale.T("正在重新连接设备…");
+      UpdateStatusBanner();
+      try {
+        await Release();
+        await main.Client.Call("stream-close", new { id=device.Id });
+        if(closed)return;
+        streamRevision++;
+        image.Source=null;
+        resumeOnActivate=false;freshRequest=true;wantsControl=true;prepared=false;ControlRequested=false;
+        fallbackAccepted=false;conflict=false;inputFailure=null;retryAt=DateTime.MinValue;
+      } finally { restarting=false;UpdateStatusBanner(); }
+      await BeginControl();
     }
     public void ResumeFallback(bool accepted) { controlling = false; fallbackAccepted = accepted; wantsControl = accepted; ControlRequested = false; retryAt = DateTime.MinValue; }
     public void CancelAdbGuide() { wantsControl=false; prepared=false; controlling=false; resumeOnActivate=false; sessionVersion++; inputFailure=null; ShowTransientStatus(Locale.T("已取消连接 · 点击重新控制可再次连接")); }
@@ -199,7 +215,7 @@ namespace LanLink.Desktop {
       if(statusBanner==null)return;
       bool healthy=image.Source!=null && (status.Text.StartsWith(Locale.T("正在控制")) || status.Text.StartsWith(Locale.T("仅查看")));
       statusBanner.Visibility=closed || string.IsNullOrWhiteSpace(status.Text) || healthy?Visibility.Collapsed:Visibility.Visible;
-      retryControlButton.IsEnabled=!preparing;
+      retryControlButton.IsEnabled=!preparing && !restarting;
     }
     void ShowTransientStatus(string message) {
       if(closed)return;status.Text=message;int version=++statusVersion;
@@ -223,7 +239,7 @@ namespace LanLink.Desktop {
       Width = Math.Max(MinWidth, width * scale + horizontal); Height = Math.Max(320, height * scale + chrome);
     }
     async Task BeginControl() {
-      if (closed || preparing || !inputs.IsCompleted || !releaseTask.IsCompleted || controlling || !wantsControl || main.HandlingFallback || DateTime.UtcNow < retryAt) return;
+      if (closed || preparing || restarting || !inputs.IsCompleted || !releaseTask.IsCompleted || controlling || !wantsControl || main.HandlingFallback || DateTime.UtcNow < retryAt) return;
       if (device.Platform == "android" && main.InputMode(device.Id) == "accessibility-limited" && !fallbackAccepted) {
         showingModeDialog = true; try { fallbackAccepted = main.ConfirmInputMode(device, this); } finally { showingModeDialog = false; }
         if (!fallbackAccepted) { wantsControl = false; ShowTransientStatus(Locale.T("备用控制未启用 · 可从右侧 ADB 开启增强控制")); return; }
@@ -237,11 +253,17 @@ namespace LanLink.Desktop {
     }
     async Task Frames() {
       bool streaming = false, legacy = false, jpegOnly = false, h264Only = false;
+      int revision = streamRevision;
       while (!closed) {
-        var ended=Json.Get(main.State,"controlEnded"); if(Json.Text(ended,"id")==device.Id && Json.Number(ended,"at",0)>=openedAt) { main.NotifyTransient(string.IsNullOrEmpty(Json.Text(ended,"message"))?Locale.T("对方已结束控制"):Json.Text(ended,"message")); Close(); break; }
+        if(restarting) { await Task.Delay(100); continue; }
+        if(revision!=streamRevision) {
+          revision=streamRevision;
+          streaming=legacy=jpegOnly=h264Only=false;
+        }
+        var ended=Json.Get(main.State,"controlEnded"); if(Json.Text(ended,"id")==device.Id && Json.Number(ended,"at",0)>=openedAt) { main.NotifyInfo(string.IsNullOrEmpty(Json.Text(ended,"message"))?Locale.T("对方已结束控制"):Json.Text(ended,"message")); Close(); break; }
         if(controlling && (DateTime.UtcNow-acquiredAt).TotalSeconds>2 && Json.Text(main.State,"active") != device.Id) controlling=false;
         await BeginControl(); if(closed)break;
-        if (conflict || !prepared || (wantsControl && !controlling)) { await Task.Delay(500); continue; }
+        if (restarting || conflict || !prepared || (wantsControl && !controlling)) { await Task.Delay(500); continue; }
         bool retry = false;int version=sessionVersion;
         try {
           if (!legacy && !streaming) { var opened=await main.Client.Call("stream-open", new { id = device.Id, jpegOnly = jpegOnly }); h264Only=Json.Flag(opened,"h264Only"); streaming = true; }
@@ -259,9 +281,10 @@ namespace LanLink.Desktop {
           if (legacy) await Task.Delay(50);
         }
         catch (Exception ex) {
+          Client.RecordDiagnostic("Remote video", ex.ToString());
           if(closed)break;if(version!=sessionVersion)continue;
           status.Text = MainWindow.DisplayError(ex.Message);
-          if(ex.Message.StartsWith("CONTROL_ENDED:")) { main.NotifyTransient(Locale.T("对方已结束控制")); Close(); break; }
+          if(ex.Message.StartsWith("CONTROL_ENDED:")) { main.NotifyInfo(Locale.T("对方已结束控制")); Close(); break; }
           controlling=false; if(wantsControl) prepared=false;
           if(Terminal(ex.Message)) { conflict = true; wantsControl = false; }
           if (ex.Message.StartsWith("VIDEO_H264_REQUIRED:") || ex.Message.Contains("Root 投屏需要 H.264")) { h264Only=true; jpegOnly=false;legacy=false; }
@@ -269,16 +292,33 @@ namespace LanLink.Desktop {
           else if (!h264Only && (ex.Message.Contains("解码") || ex.Message.Contains("视频帧"))) jpegOnly = true;
           retry = true;
         }
-        if (retry) { if (streaming) { try { await main.Client.Call("stream-close", new { id = device.Id }); } catch { } streaming = false; } await Task.Delay(1500); }
+        if (retry) {
+          if (streaming || legacy) {
+            try { await main.Client.Call("stream-close", new { id = device.Id }); } catch { }
+            streaming = false;
+          }
+          if (!closed && version==sessionVersion && (wantsControl || conflict)) {
+            freshRequest=true;
+            await ReleaseInput();
+          }
+          await Task.Delay(1500);
+        }
       }
     }
     Task Release() { var previous=releaseTask;releaseTask=ReleaseAfter(previous);return releaseTask; }
     async Task ReleaseAfter(Task previous) {
       try{await previous;}catch{}
       resumeOnActivate=false;
-      wantsControl = false; fallbackAccepted = false; int version=++sessionVersion;forwardedKeys.Clear();bool hadInputFailure=inputFailure!=null;inputFailure=null;if (!controlling) {if(hadInputFailure)ShowTransientStatus(Locale.T("已返回本机 · 查看模式"));return;} controlling = false; pendingMove = null; image.ReleaseMouseCapture();
-      try { await inputs; var state = await main.Client.Call("state"); if (Json.Text(state, "active") == device.Id) await main.Client.Call("release", new {id=device.Id}); } catch { }
-      if(!closed && version==sessionVersion)ShowTransientStatus(Locale.T("已返回本机 · 查看模式"));
+      wantsControl=false;fallbackAccepted=false;int version=++sessionVersion;
+      bool hadControl=controlling || inputFailure!=null;
+      inputFailure=null;
+      await ReleaseInput();
+      if(hadControl && !closed && !restarting && version==sessionVersion)
+        ShowTransientStatus(Locale.T("已返回本机 · 查看模式"));
+    }
+    async Task ReleaseInput() {
+      controlling=false;pendingMove=null;forwardedKeys.Clear();image.ReleaseMouseCapture();
+      try { await inputs; await main.Client.Call("release", new {id=device.Id}); } catch { }
     }
     async Task Send(object input) {
       if (closed || !controlling || input == null) return;
