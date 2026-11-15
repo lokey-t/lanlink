@@ -13,7 +13,7 @@ LanLink 让同一局域网里的电脑和 Android 手机一起工作：把鼠标
 
 无需注册账号，日常协作不依赖云端服务或互联网。设备通过临时数字码或二维码加入同一组，再以加密直连传输数据。桌面采用原生窗口，运行环境随软件包提供。
 
-> **当前版本：0.92.1。** 本文描述当前工作树的实现，不等同于所有平台均已完成实机验收。构建与测试范围见[验证状态](#validation)。本仓库尚未提供覆盖整个项目的许可证，详见[许可与第三方组件](#license)。
+> **当前版本：0.92.1。** 本文描述当前工作树的实现，不等同于所有平台均已完成实机验收。构建与测试范围见[验证状态](#validation)。
 
 
 <a id="downloads"></a>
@@ -441,7 +441,7 @@ npm --prefix website run build
 
 提交 [Issue](https://github.com/lokey-t/lanlink/issues) 时，请写明两端版本、操作系统、设备角色、网络 / USB 路径、复现步骤、预期与实际结果，以及必要的脱敏日志。不要附带组密钥、私钥、配对码或完整配置目录。
 
-欢迎提交改进建议与 [Pull Request](https://github.com/lokey-t/lanlink/pulls)。改动应聚焦具体问题：协议变更说明旧端回退与权限影响；平台功能记录实际验证环境；文档改动同步两份 README。开始复用或分发代码前，请先确认下方的项目许可状态。
+欢迎提交改进建议与 [Pull Request](https://github.com/lokey-t/lanlink/pulls)。改动应聚焦具体问题：协议变更说明旧端回退与权限影响；平台功能记录实际验证环境；文档改动同步两份 README。
 
 <a id="validation"></a>
 ## 验证状态
@@ -478,7 +478,7 @@ npm --prefix website run build
 <a id="license"></a>
 ## 许可与第三方组件
 
-**仓库目前没有覆盖整个项目的根目录 `LICENSE`。** `native/quic/Cargo.toml` 的 `license = "MIT"` 仅是该 Rust 子库的声明，不能代替全仓库授权；也不应将第三方组件的许可证视为 LanLink 的项目许可证。复用、修改或分发项目代码前，需要向维护者确认适用条款。
+LanLink 的项目源码采用 [GNU 通用公共许可证第 3 版](LICENSE)（`GPL-3.0-only`）。第三方组件适用各自的许可证。
 
 LanLink 使用 quiche / BoringSSL、Koffi、werift、Android WebRTC、FFmpeg、qrcode-generator 和 ZXing 等组件。组件来源、许可证与分发要求见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)；打包时需保留对应的许可与源码 / 构建说明。
 

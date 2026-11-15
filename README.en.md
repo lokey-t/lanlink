@@ -13,7 +13,7 @@ LanLink brings the computers and Android phones on your local network into one w
 
 No account is required, and everyday collaboration works without cloud services or internet access. Devices join a group through a temporary numeric code or QR code, then exchange data over encrypted direct connections. Desktop clients use native windows and ship with their runtime.
 
-> **Current version: 0.92.1.** This README describes the current working tree; it does not imply that every platform has passed physical-device acceptance testing. See [validation status](#validation) for the recorded scope. The repository does not yet include a project-wide license; see [licensing and third-party components](#license).
+> **Current version: 0.92.1.** This README describes the current working tree; it does not imply that every platform has passed physical-device acceptance testing. See [validation status](#validation) for the recorded scope.
 
 
 <a id="downloads"></a>
@@ -441,7 +441,7 @@ The preview runs at `http://127.0.0.1:4173`; output goes to `website/dist/`. The
 
 When opening an [issue](https://github.com/lokey-t/lanlink/issues), include both client versions, operating systems, device roles, the network / USB path, reproduction steps, expected and actual behavior, and relevant redacted logs. Do not attach group secrets, private keys, pairing codes, or a full configuration directory.
 
-Suggestions and [pull requests](https://github.com/lokey-t/lanlink/pulls) are welcome. Keep changes focused: explain compatibility fallbacks and permission implications for protocol changes, record actual test environments for platform features, and keep both READMEs in sync for documentation changes. Confirm the project licensing terms below before reusing or redistributing code.
+Suggestions and [pull requests](https://github.com/lokey-t/lanlink/pulls) are welcome. Keep changes focused: explain compatibility fallbacks and permission implications for protocol changes, record actual test environments for platform features, and keep both READMEs in sync for documentation changes.
 
 <a id="validation"></a>
 ## Validation status
@@ -478,7 +478,7 @@ The detailed guides and historical release notes are currently primarily in Chin
 <a id="license"></a>
 ## Licensing and third-party components
 
-**There is currently no root `LICENSE` covering the entire project.** The `license = "MIT"` declaration in `native/quic/Cargo.toml` applies to that Rust crate's metadata; it does not establish licensing for the whole repository. Third-party licenses likewise do not license LanLink itself. Confirm the applicable terms with the maintainer before reusing, modifying, or redistributing project code.
+LanLink's project source code is licensed under the [GNU General Public License, version 3](LICENSE) (`GPL-3.0-only`). Third-party components are governed by their respective licenses.
 
 LanLink uses quiche / BoringSSL, Koffi, werift, Android WebRTC, FFmpeg, qrcode-generator, and ZXing. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for component sources, licenses, and distribution requirements. Preserve the corresponding license notices and source / build information when packaging.
 
