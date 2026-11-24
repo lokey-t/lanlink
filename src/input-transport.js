@@ -30,8 +30,9 @@ export class InputTransport {
   groupEnabled() { return this.service.config.groupHidEnabled !== false; }
   preference(id) {
     const record = this.record(id);
-    const android = this.service.peers.get(id)?.info?.platform === 'android';
-    return !record.external && (android || !this.groupEnabled()) ? 'network_only' : record.preference || modes[0];
+    const info = this.service.peers.get(id)?.info;
+    const networkOnlyTarget = info?.platform === 'android' && info.capabilities?.hidCursorSession !== 1;
+    return !record.external && (networkOnlyTarget || !this.groupEnabled()) ? 'network_only' : record.preference || modes[0];
   }
   async setGroupEnabled(enabled) {
     const s = this.service;
@@ -360,7 +361,8 @@ export class InputTransport {
     const external = record.external === true;
     const peer = this.service.peers.get(id);
     const canTrackCursor = external || peer?.info?.capabilities?.hidCursorSession === 1;
-    const bluetooth = canTrackCursor && (external || appAllowed) && this.ready(id);
+    const bluetoothEnabled = external || peer?.bluetoothInputEnabled !== false;
+    const bluetooth = canTrackCursor && bluetoothEnabled && (external || appAllowed) && this.ready(id);
     const network = !external && appAllowed && permission?.supported !== false && permission?.systemGranted === true;
     const capability = this.adapter?.peripheralSupported;
     const active = this.service.active === id ? this.service.activeSession?.transport || 'network' : 'none';
@@ -368,9 +370,9 @@ export class InputTransport {
     return {
       schemaVersion: 1, preference: this.preference(id), automaticGroup:peer?.info?.capabilities?.autoHidTarget === 1,
       authorization: external || appAllowed ? 'allowed' : 'denied',
-      capabilities: { bluetooth: capability === true ? 'supported' : capability === false ? 'unsupported' : 'unknown', network: external || permission?.supported === false ? 'unsupported' : permission ? 'supported' : 'unknown' },
+      capabilities: { bluetooth: !canTrackCursor || capability === false ? 'unsupported' : capability === true ? 'supported' : 'unknown', network: external || permission?.supported === false ? 'unsupported' : typeof permission?.supported === 'boolean' || typeof permission?.systemGranted === 'boolean' ? 'supported' : 'unknown' },
       readiness: {
-        bluetooth: bluetooth ? 'ready' : !canTrackCursor || !this.adapter?.hidServiceReady ? 'unavailable' : !this.binding(id) ? 'pairing_required' : host?.reportSubscribed ? 'degraded' : 'connecting',
+        bluetooth: bluetooth ? 'ready' : !canTrackCursor || !bluetoothEnabled || !this.adapter?.hidServiceReady ? 'unavailable' : !this.binding(id) ? 'pairing_required' : host?.reportSubscribed ? 'degraded' : 'connecting',
         network: network ? 'ready' : 'unavailable',
       },
       bluetooth: {
@@ -384,7 +386,7 @@ export class InputTransport {
   }
   state() {
     const s = this.service;
-    const peers = [...s.peers].filter(([,p]) => p.info?.platform !== 'android')
+    const peers = [...s.peers].filter(([,p]) => p.info)
       .map(([id,p]) => ({ id, name:p.info?.name || '设备', ...this.describe(id, p.access?.permissions?.input) }));
     const external = Object.keys(this.records).filter(id => this.record(id).external).map(id => ({ id, name:this.record(id).name, external:true, ...this.describe(id) }));
     const { adapterPresent, peripheralSupported, hidServiceReady, advertising, reason } = this.adapter || {};

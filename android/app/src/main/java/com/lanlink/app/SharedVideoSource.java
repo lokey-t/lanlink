@@ -10,6 +10,7 @@ final class SharedVideoSource implements VideoEncoder.Output, VideoSource {
   private VideoSource source;
   private boolean closed;
   private int bitrate = 4_000_000;
+  private int fps = 30;
 
   SharedVideoSource(Runnable idle) { this.idle = idle; }
 
@@ -17,6 +18,7 @@ final class SharedVideoSource implements VideoEncoder.Output, VideoSource {
     if (closed) { value.close(); throw new IOException("屏幕串流已停止"); }
     source = value;
     value.setBitrate(bitrate);
+    value.setFrameRate(fps);
   }
 
   synchronized VideoSource attach(VideoEncoder.Output output) throws IOException {
@@ -24,6 +26,7 @@ final class SharedVideoSource implements VideoEncoder.Output, VideoSource {
     Lease lease = new Lease(output);
     viewers.put(lease, 4_000_000);
     updateRate();
+    updateCadence();
     source.requestKey();
     return lease;
   }
@@ -41,6 +44,14 @@ final class SharedVideoSource implements VideoEncoder.Output, VideoSource {
   }
 
   private synchronized List<Lease> snapshot() { return new ArrayList<>(viewers.keySet()); }
+
+  private void updateCadence() {
+    int next = viewers.isEmpty() ? 30 : 60;
+    for (Lease viewer : viewers.keySet()) next = Math.min(next, viewer.targetFps);
+    if (next == fps) return;
+    fps = next;
+    if (source != null) source.setFrameRate(fps);
+  }
 
   public void frame(VideoWire.Frame frame) {
     for (Lease lease : snapshot()) if (!lease.closed) {
@@ -70,6 +81,7 @@ final class SharedVideoSource implements VideoEncoder.Output, VideoSource {
   private final class Lease implements VideoSource {
     final VideoEncoder.Output output;
     volatile boolean closed;
+    int targetFps = 30;
     Lease(VideoEncoder.Output output) { this.output = output; }
     public void setBitrate(int rate) {
       synchronized (SharedVideoSource.this) {
@@ -79,6 +91,13 @@ final class SharedVideoSource implements VideoEncoder.Output, VideoSource {
       }
     }
     public void requestKey() { if (!closed) SharedVideoSource.this.requestKey(); }
+    public void setFrameRate(int fps) {
+      synchronized (SharedVideoSource.this) {
+        if (closed || !viewers.containsKey(this)) return;
+        targetFps = fps;
+        updateCadence();
+      }
+    }
     public void close() {
       boolean last;
       synchronized (SharedVideoSource.this) {
@@ -86,6 +105,7 @@ final class SharedVideoSource implements VideoEncoder.Output, VideoSource {
         closed = true;
         viewers.remove(this);
         updateRate();
+        updateCadence();
         last = viewers.isEmpty();
       }
       if (last) idle.run();

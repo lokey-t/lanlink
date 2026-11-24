@@ -388,7 +388,7 @@ public class MainActivity extends Activity {
     Bitmap skeleton = Bitmap.createBitmap(200, 200, Bitmap.Config.ARGB_8888);
     Canvas canvas = new Canvas(skeleton);
     Paint paint = new Paint(3);
-    paint.setColor(0xffb8aef0);
+    paint.setColor(Ui.ACCENT_LINE);
     paint.setStrokeWidth(8);
     paint.setStrokeCap(Paint.Cap.ROUND);
     paint.setStyle(Paint.Style.STROKE);
@@ -398,7 +398,7 @@ public class MainActivity extends Activity {
       canvas.drawLine(corner[0], corner[1], corner[0], corner[1] + 30 * corner[3], paint);
     }
     paint.setStyle(Paint.Style.FILL);
-    paint.setColor(0xffe1ddf6);
+    paint.setColor(Ui.dark ? 0xff383f66 : 0xffe1e4fa);
     for (int[] block :
         new int[][] {{58, 48}, {120, 47}, {88, 88}, {48, 123}, {121, 126}, {91, 151}})
       canvas.drawRoundRect(block[0], block[1], block[0] + 22, block[1] + 22, 6, 6, paint);
@@ -427,7 +427,7 @@ public class MainActivity extends Activity {
     ui.gap(codeColumn, 18);
     ProgressBar progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
     progress.setMax(60000);
-    progress.setProgressTintList(android.content.res.ColorStateList.valueOf(0xffa797ec));
+    progress.setProgressTintList(android.content.res.ColorStateList.valueOf(Ui.PURPLE));
     progress.setProgressBackgroundTintList(android.content.res.ColorStateList.valueOf(Ui.LILAC));
     codeColumn.addView(progress, new LinearLayout.LayoutParams(-1, ui.dp(6)));
     ui.gap(codeColumn, 10);
@@ -501,6 +501,7 @@ public class MainActivity extends Activity {
           if (open) form.post(() -> entry.requestRectangleOnScreen(
               new android.graphics.Rect(0, 0, entry.getWidth(), entry.getHeight()), false));
         });
+    final String[] pairingHost = {null};
     Runnable beginJoin =
         () -> {
           if (pairJoining) return;
@@ -550,7 +551,7 @@ public class MainActivity extends Activity {
                         if (pairingService.pairing == null) throw new Exception(Language.t("配对服务尚未就绪"));
                         JSONObject result =
                             pairingService.pairing.join(
-                                value, value.equals(scannedCode) ? scannedId : null);
+                                value, pairingHost[0] == null && value.equals(scannedCode) ? scannedId : null, pairingHost[0]);
                         pairingService.joinGroup(result, false, expectedGroup);
                         main.post(
                             () -> {
@@ -579,7 +580,45 @@ public class MainActivity extends Activity {
                 .show();
           else connect.run();
         };
-    submit.setOnClickListener(v -> beginJoin.run());
+    submit.setOnClickListener(v -> { pairingHost[0] = null; beginJoin.run(); });
+    TextView directPair = ui.text(Language.t("无法连接？"), 12, Ui.MUTED);
+    joinCard.addView(directPair);
+    directPair.setOnClickListener(v -> {
+      if (pairJoining) return;
+      LinearLayout fields = ui.column();
+      fields.setPadding(ui.dp(24), ui.dp(12), ui.dp(24), 0);
+      fields.addView(ui.text(Language.t("请让对方打开添加设备页面"), 13, Ui.MUTED));
+      EditText address = ui.edit(Language.t("对方 IPv4 地址"));
+      address.setSingleLine(true);
+      address.setInputType(android.text.InputType.TYPE_CLASS_PHONE);
+      fields.addView(address);
+      EditText directCode = ui.edit(Language.t("八位数字配对码"));
+      directCode.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+      directCode.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(8)});
+      fields.addView(directCode);
+      AlertDialog directDialog = new AlertDialog.Builder(this)
+          .setTitle(Language.t("通过 IP 配对")).setView(fields)
+          .setNegativeButton(Language.t("取消"), null)
+          .setPositiveButton(Language.t("申请配对"), null).create();
+      directDialog.setOnShowListener(d -> directDialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(button -> {
+        String host = address.getText().toString().trim();
+        if (!host.matches("(?:[0-9]{1,3}\\.){3}[0-9]{1,3}")) {
+          address.setError(Language.t("请输入有效的 IPv4 地址")); return;
+        }
+        for (String part : host.split("\\.")) if (Integer.parseInt(part) > 255) {
+          address.setError(Language.t("请输入有效的 IPv4 地址")); return;
+        }
+        if (!directCode.getText().toString().matches("[0-9]{8}")) {
+          directCode.setError(Language.t("请输入完整的八位数字")); return;
+        }
+        pairingHost[0] = host;
+        entry.setText(directCode.getText());
+        form.setVisibility(View.VISIBLE);
+        directDialog.dismiss();
+        beginJoin.run();
+      }));
+      directDialog.show();
+    });
     dialog.setOnDismissListener(
         d -> {
           main.removeCallbacks(refreshCode);
@@ -1028,6 +1067,8 @@ public class MainActivity extends Activity {
   private boolean pairJoining;
   private String settingsSignature = "";
   private int rootUiState = -1;
+  private Switch remoteAutoLockSwitch;
+  private boolean syncingRemoteAutoLock;
 
   private String settingsState(LinkService service) {
     return service == null
@@ -1039,6 +1080,11 @@ public class MainActivity extends Activity {
             + service.rootActive()
             + ":"
             + service.adbAuthorized()
+            + ":" + service.shell.adbReady()
+            + ":" + (service.shizuku != null && service.shizuku.enabled())
+            + ":" + service.shell.shizukuReady()
+            + ":" + (service.shizuku == null ? "" : service.shizuku.status())
+            + ":" + service.shell.backend()
             + ":"
             + service.shell.ready()
             + ":"
@@ -1059,7 +1105,7 @@ public class MainActivity extends Activity {
     try {
       String version = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
       JSONObject build = new JSONObject();
-      try (java.io.InputStream input = getAssets().open("build-info.json")) { build = new JSONObject(new String(input.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8)); } catch (Exception ignored) {}
+      try (java.io.InputStream input = getAssets().open("build-info.json")) { build = new JSONObject(AssetText.read(input)); } catch (Exception ignored) {}
       TextView buildLabel = ui.text(Language.t("版本 ") + version + Language.t(" · 构建 ") + build.optString("revision", Language.t("开发构建")) + (build.optString("sourceFingerprint").isEmpty() ? "" : Language.t("\n源码指纹 ") + build.optString("sourceFingerprint")) + (build.optString("builtAt").isEmpty() ? "" : Language.t("\n构建时间 ") + build.optString("builtAt")), 11, Ui.MUTED);
       buildLabel.setTextIsSelectable(true);ui.gap(identity, 12);identity.addView(buildLabel);
     } catch (Exception ignored) {}
@@ -1120,11 +1166,20 @@ public class MainActivity extends Activity {
           authorizationRow(
               "keyboard",
               Language.t("ADB 授权"),
-              adb ? service.shell.ready() ? Language.t("键鼠与屏幕串流已就绪") : Language.t("授权已保存，等待助手恢复") : Language.t("通过电脑为本机开启键鼠与屏幕串流"),
-              adb ? service.shell.ready() ? Language.t("已就绪") : Language.t("待恢复") : Language.t("未授权"),
+              adb ? service.shell.adbReady() ? Language.t("键鼠与屏幕串流已就绪") : Language.t("授权已保存，等待助手恢复") : Language.t("通过电脑为本机开启键鼠与屏幕串流"),
+              adb ? service.shell.adbReady() ? Language.t("已就绪") : Language.t("待恢复") : Language.t("未授权"),
               adb,
               this::showAdbAuthorization));
-
+      ui.line(permissions);
+      boolean shizukuReady = service != null && service.shell.shizukuReady();
+      permissions.addView(authorizationRow("settings", Language.t("Shizuku 授权"),
+          Language.t(service != null && service.shizuku.enabled() ? service.shizuku.status() : "通过 Shizuku 启用控制，与 ADB 自动互补"),
+          service != null ? Language.t(service.shizuku.label()) : Language.t("未启用"),
+          shizukuReady, this::showShizukuAuthorization));
+      ui.gap(permissions, 10);
+      permissions.addView(ui.text(Language.t("两种授权可同时开启，通道失效时自动使用另一可用方案。"), 12, Ui.MUTED));
+      if (service != null && service.shell.ready())
+        permissions.addView(ui.text(Language.t("当前控制通道：") + (service.shell.backend().equals("shizuku") ? "Shizuku" : "ADB"), 12, Ui.MUTED));
     }
     layout.addView(permissions);
     ui.gap(layout, 16);
@@ -1133,6 +1188,21 @@ public class MainActivity extends Activity {
     glowToggle.setOnCheckedChangeListener((button,enabled)->{if(enabled && !Settings.canDrawOverlays(this)){glowToggle.setChecked(false);requestEdgeGlowPermission();return;}getSharedPreferences("identity",0).edit().putBoolean("edge_glow",enabled).apply();});
     glowRow.addView(glowToggle);glowCard.addView(glowRow);glowCard.addView(ui.text(Language.t("默认关闭 · 切换到手机时在对应边缘显示短暂光效"),12,Ui.MUTED));layout.addView(glowCard);ui.gap(layout,16);
     LinearLayout options = ui.card();
+    LinearLayout autoLockRow = ui.row();
+    TextView autoLockLabel = ui.text(Language.t("控制期间防止自动锁定"), 14, Ui.INK);
+    autoLockRow.addView(autoLockLabel, new LinearLayout.LayoutParams(0, -2, 1));
+    remoteAutoLockSwitch = new Switch(this);
+    remoteAutoLockSwitch.setContentDescription(Language.t("控制期间防止自动锁定"));
+    remoteAutoLockSwitch.setEnabled(service != null);
+    remoteAutoLockSwitch.setChecked(service != null && service.preventRemoteAutoLock());
+    remoteAutoLockSwitch.setOnCheckedChangeListener((button, enabled) -> {
+      LinkService current = LinkService.instance;
+      if (!syncingRemoteAutoLock && current != null) current.setPreventRemoteAutoLock(enabled);
+    });
+    autoLockRow.addView(remoteAutoLockSwitch);
+    options.addView(autoLockRow);
+    options.addView(ui.text(Language.t("仅在手机已解锁且正在被远程控制时保持亮屏。"), 12, Ui.MUTED));
+    ui.line(options);
     options.addView(
         ui.item(
             "monitor",
@@ -1378,7 +1448,10 @@ public class MainActivity extends Activity {
         bounds = getWindowManager().getCurrentWindowMetrics().getBounds();
         Insets safe = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout()
             | WindowInsets.Type.ime());
-        bounds.inset(safe.left, safe.top, safe.right, safe.bottom);
+        bounds.left += safe.left;
+        bounds.top += safe.top;
+        bounds.right -= safe.right;
+        bounds.bottom -= safe.bottom;
       }
       int width = Math.max(1, Math.min(ui.dp(preferredWidth), bounds.width() - ui.dp(24)));
       int availableHeight = Math.max(1, bounds.height() - ui.dp(24));
@@ -1568,12 +1641,40 @@ public class MainActivity extends Activity {
     box.addView(ui.button(Language.t("取消"), false, dialog::dismiss));
   }
 
+  private void showShizukuAuthorization() {
+    LinkService service = LinkService.instance;
+    if (service == null || service.shizuku == null) return;
+    LinearLayout box = sheet(Language.t("Shizuku 授权"));
+    Dialog dialog = (Dialog) box.getTag();
+    box.addView(ui.text(Language.t(service.shizuku.status()), 15, Ui.INK));
+    ui.gap(box, 12);
+    box.addView(ui.text(Language.t("1. 安装并启动 Shizuku，支持无线调试、ADB 或 Root 启动。\n2. 点击下方按钮，允许 LanLink 使用 Shizuku。\n3. 可同时保留 ADB 授权，任一通道不可用时自动使用另一通道。\nRoot 启动的 Shizuku 也可在本应用非 Root 模式下使用。手机重启后需确保 Shizuku 已运行。设备控制权限仍由你单独决定。"), 13, Ui.MUTED));
+    ui.gap(box, 18);
+    box.addView(ui.button(Language.t("请求 Shizuku 授权"), true, () -> {
+      service.shizuku.request(); dialog.dismiss(); renderPage();
+    }));
+    ui.gap(box, 10);
+    box.addView(ui.button(Language.t("打开 Shizuku"), false, () -> {
+      Intent intent = getPackageManager().getLaunchIntentForPackage("moe.shizuku.privileged.api");
+      if (intent == null) intent = new Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://shizuku.rikka.app/download/"));
+      try { startActivity(intent); } catch (Exception e) { toast(Language.t("无法打开 Shizuku，请手动打开")); }
+    }));
+    if (service.shizuku.enabled()) {
+      ui.gap(box, 10);
+      box.addView(ui.button(Language.t("关闭 Shizuku 授权"), false, () -> {
+        service.shizuku.disable(); dialog.dismiss(); renderPage();
+      }));
+    }
+    ui.gap(box, 10);
+    box.addView(ui.button(Language.t("关闭"), false, dialog::dismiss));
+  }
+
   private void showAdbAuthorization() {
     LinearLayout box = sheet(Language.t("ADB 授权"));
     Dialog dialog = (Dialog) box.getTag();
     LinkService service = LinkService.instance;
     boolean granted = service != null && service.adbAuthorized();
-    box.addView(ui.text(granted ? service.shell.ready() ? Language.t("ADB 助手已就绪，同组设备可直接使用，无需重复连接数据线。") : Language.t("ADB 授权已保存，但助手尚未运行。请连接已信任的电脑恢复助手，恢复后同组设备均可直接使用。") : Language.t("未授权。需要通过电脑完成一次配置。"), 15, Ui.INK));
+    box.addView(ui.text(granted ? service.shell.adbReady() ? Language.t("ADB 助手已就绪，同组设备可直接使用，无需重复连接数据线。") : Language.t("ADB 授权已保存，但助手尚未运行。请连接已信任的电脑恢复助手，恢复后同组设备均可直接使用。") : Language.t("未授权。需要通过电脑完成一次配置。"), 15, Ui.INK));
     ui.gap(box, 12);
     box.addView(
         ui.text(
@@ -1705,7 +1806,7 @@ public class MainActivity extends Activity {
     ui.gap(box, 8);
     box.addView(
         ui.text(
-            Language.t("非 Root 模式需通过电脑完成 ADB 授权，助手就绪后即可使用键鼠控制和 H.264 屏幕串流。Root 模式需手机已 Root，并在 Root 管理器中允许 LanLink 使用 Root 权限。"),
+            Language.t("非 Root 模式可使用 ADB 或 Shizuku 授权，两种通道可同时开启并自动互补。Root 模式需手机已 Root，并在 Root 管理器中允许 LanLink 使用 Root 权限。"),
             13,
             Ui.MUTED));
     ui.gap(box, 18);
@@ -1768,7 +1869,7 @@ public class MainActivity extends Activity {
     TextView label = ui.title(name, 14);
     label.setMaxLines(1);
     label.setEllipsize(android.text.TextUtils.TruncateAt.END);
-    int stateColor=state.equals(Language.t("● 在线"))?Ui.GREEN:state.equals(Language.t("● 未就绪"))?0xffb58a39:state.equals(Language.t("● 未授权"))?0xffbf6371:state.equals(Language.t("● 有限授权"))?0xff8270b9:Ui.MUTED;
+    int stateColor=state.equals(Language.t("● 在线"))?Ui.GREEN:state.equals(Language.t("● 未就绪"))?Ui.AMBER:state.equals(Language.t("● 未授权"))?Ui.RED:state.equals(Language.t("● 有限授权"))?Ui.MASTER:Ui.MUTED;
     TextView stateLabel = ui.text(state, 12, showReadinessGuide ? Ui.RED : stateColor);
     int glyphWidth = ui.dp(showReadinessGuide ? 48 : 30);
     if (deviceColumns()) {
@@ -2210,7 +2311,7 @@ public class MainActivity extends Activity {
         View row = ui.item(platformIcon(device.optString("platform")), device.optString("name", Language.t("设备")),
             state, online ? Language.t("进入") : null, online ? () -> openTouchpad(peer) : null);
         row.setContentDescription(device.optString("name", Language.t("设备")) + "，" + state
-            + (online ? Language.t("，打开全屏触控板") : ""));
+            + (online ? Language.t("，打开触控板") : ""));
         if (!online) row.setAlpha(.55f);
         else if (report != null && !PeerAccess.allowed(report, "input")) guardFeature(row, peer, "input");
         card.addView(row);
@@ -2317,16 +2418,7 @@ public class MainActivity extends Activity {
   private String clipboardHistoryKey(){LinkService service=LinkService.instance;if(service==null)return "starting";org.json.JSONArray list=service.groupClipboard.history();StringBuilder key=new StringBuilder();for(int i=0;i<list.length();i++)key.append(list.optJSONObject(i).optString("id")).append(';');return key.toString();}
   private void clipboardPage(){
     heading(Language.t("剪贴板"),Language.t("最近 10 分钟 · 最多 30 条文字记录"));LinkService service=LinkService.instance;org.json.JSONArray list=service==null?new org.json.JSONArray():service.groupClipboard.history();clipboardHistorySignature=clipboardHistoryKey();
-    if(list.length()==0) {
-      if (tabletLayout) {
-        LinearLayout empty = ui.card(); empty.setGravity(Gravity.CENTER);
-        empty.setMinimumHeight(ui.dp(260));
-        empty.addView(ui.icon("clipboard", Ui.PURPLE), new LinearLayout.LayoutParams(ui.dp(52), ui.dp(52)));
-        ui.gap(empty, 20);
-        TextView message = ui.text(Language.t("暂无同步记录，复制文字后将在这里出现。"), 14, Ui.MUTED);
-        message.setGravity(Gravity.CENTER); empty.addView(message); layout.addView(empty);
-      } else layout.addView(ui.text(Language.t("暂无同步记录，复制文字后将在这里出现。"),14,Ui.MUTED));
-    }
+    if(list.length()==0) layout.addView(ui.emptyState("clipboard", Language.t("暂无同步记录，复制文字后将在这里出现。"), tabletLayout ? 260 : 200));
     for(int i=0;i<list.length();i++){
       JSONObject record=list.optJSONObject(i);if(record==null)continue;String id=record.optString("id");LinearLayout card=ui.card();LinearLayout meta=ui.row();TextView source=ui.text(record.optString("name",Language.t("设备"))+" · "+new java.text.SimpleDateFormat("HH:mm:ss",Locale.getDefault()).format(new Date(record.optLong("at"))),12,Ui.MUTED);meta.addView(source,new LinearLayout.LayoutParams(0,-2,1));meta.addView(ui.button(Language.t("复制"),false,()->run(()->{link().groupClipboard.copy(id);main.post(()->toast(Language.t("已复制到本机剪贴板")));})));card.addView(meta);ui.gap(card,12);String value=record.optString("text");TextView text=ui.text(value.length()>2000?value.substring(0,2000):value,14,Ui.INK);text.setMaxLines(6);text.setEllipsize(android.text.TextUtils.TruncateAt.END);text.setTextIsSelectable(true);card.addView(text);if(value.length()>2000)card.addView(ui.text(Language.t("长文本预览 · 复制可获取完整内容"),12,Ui.MUTED));layout.addView(card);ui.gap(layout,12);
     }
@@ -2532,7 +2624,7 @@ public class MainActivity extends Activity {
       noticeBox.addView(activeBanner);
     }
     if (request == null) {
-      if (s != null) getSystemService(NotificationManager.class).cancel(2);
+      if (s != null) s.cancelPermissionNotifications();
       return;
     }
   }
@@ -2632,9 +2724,12 @@ public class MainActivity extends Activity {
       ui.gap(box, 18);
       box.addView(ui.button(Language.t("允许 ADB 授权"),true,()->{s.enableAdbAuthorization();s.dismissPermissionNotice();closePermissionDialog();update();}));
       ui.gap(box,10);
+      box.addView(ui.button(Language.t("使用 Shizuku 授权"),false,()->{closePermissionDialog();showShizukuAuthorization();}));
+      ui.gap(box,10);
       box.addView(ui.button(Language.t("暂不允许"),false,dialog::dismiss));
       return;
-    } else if (s.rootEnabled() && !request.needs.contains("consent")) {
+    } else if (s.rootEnabled() && (request.needs.contains("input") || request.needs.contains("screen"))
+        && !request.needs.contains("consent")) {
       box.addView(ui.text(Language.t("Root 助手或系统操作暂不可用，请确认 Root 管理器仍允许 LanLink。"), 14, Ui.MUTED));
       if (s.shell.lastInputError != null)
         box.addView(ui.text(s.shell.lastInputError, 13, Ui.MUTED));
@@ -2741,7 +2836,7 @@ public class MainActivity extends Activity {
       boolean granted = permissionRows.get(b).getAsBoolean();
       b.setText(permissionTitles.get(b) + (granted ? Language.t(" · 已授权") : ""));
       b.setEnabled(!granted);
-      b.setTextColor(granted ? Ui.GREEN : Ui.dark ? 0xff171323 : Color.WHITE);
+      b.setTextColor(granted ? Ui.GREEN : Ui.dark ? 0xff141b27 : Color.WHITE);
       b.setBackground(ui.touch(granted ? Ui.MINT : Ui.PURPLE, 16));
     }
   }
@@ -2814,6 +2909,13 @@ public class MainActivity extends Activity {
     if (ui == null) return;
     if (page.equals("layout") && groupLayoutPanel != null) groupLayoutPanel.refresh();
     LinkService s = LinkService.instance;
+    if (page.equals("settings") && remoteAutoLockSwitch != null) {
+      syncingRemoteAutoLock = true;
+      try {
+        remoteAutoLockSwitch.setEnabled(s != null);
+        remoteAutoLockSwitch.setChecked(s != null && s.preventRemoteAutoLock());
+      } finally { syncingRemoteAutoLock = false; }
+    }
     if (page.equals("settings") && !settingsSignature.equals(settingsState(s))) {
       renderPage();
       return;
@@ -2871,9 +2973,13 @@ public class MainActivity extends Activity {
       if (backgroundGuide == dialog) { backgroundGuide = null; backgroundGuideStatus = null; }
     });
     if (recovery != null) {
-      box.addView(ui.text(recovery.optString("reason").equals("restricted")
-          ? Language.t("上次后台连接中断，且系统限制了 LanLink 后台运行。这可能与本次中断有关，请检查下方设置。")
-          : Language.t("上次后台连接意外中断，系统未提供明确原因。可检查省电与自启动设置，减少后台被清理的机会。"), 14, Ui.INK));
+      String message;
+      switch (recovery.optString("reason")) {
+        case "restricted": message = "LanLink 上次在后台停止，当时系统限制了后台运行。请按下方说明将电池设为「不受限制」，并允许自启动。"; break;
+        case "low-memory": message = "系统因内存不足停止了后台运行的 LanLink。你可以在下方检查电池限制和自启动设置。"; break;
+        default: message = "LanLink 上次在后台意外停止，系统未提供明确原因。请按下方说明检查电池限制和自启动设置。";
+      }
+      box.addView(ui.text(Language.t(message), 14, Ui.INK));
       ui.gap(box, 14);
     }
     box.addView(ui.title(Build.MANUFACTURER + " · " + Build.MODEL, 16));
@@ -2883,7 +2989,7 @@ public class MainActivity extends Activity {
     backgroundGuideStatus = ui.text(backgroundStatus(), 13, Ui.MUTED);
     box.addView(backgroundGuideStatus);
     ui.gap(box, 16);
-    box.addView(ui.button(Language.t("设置省电白名单"), true, () -> {
+    box.addView(ui.button(Language.t("设置电池使用限制"), true, () -> {
       if (!BackgroundRecovery.openBatterySettings(this)) toast(Language.t("无法打开系统设置，请手动进入 LanLink 应用信息进行设置"));
     }));
     ui.gap(box, 10);

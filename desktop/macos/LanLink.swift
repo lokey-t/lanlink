@@ -15,11 +15,17 @@ enum Palette {
     }
     static let ink = adaptive(0x202C43, 0xE4EAF4)
     static let muted = adaptive(0x65748B, 0xA8B5CA)
-    static let accent = adaptive(0x476389, 0xA7C2F5)
+    static let accent = adaptive(0x5B6BD5, 0xA9B4F5)
+    static let accentSoft = adaptive(0xECEEFC, 0x2E3456)
+    static let accentLine = adaptive(0xC7CDF2, 0x4A5285)
+    static let master = adaptive(0x7B70C5, 0xB3A8F0)
+    static let success = adaptive(0x2F8566, 0x7AC6A6)
+    static let warning = adaptive(0x9A6E1F, 0xE0B865)
+    static let danger = adaptive(0xC04A5C, 0xEF96A5)
     static let surface = adaptive(0xF9FBFE, 0x171E2B)
     static let canvas = adaptive(0xF1F5FC, 0x111722)
     static let card = adaptive(0xFFFFFF, 0x222C3C)
-    static let line = adaptive(0xDDE5F2, 0x3B4960)
+    static let line = adaptive(0xDFE5EF, 0x3B4960)
 }
 
 struct FlatButtonStyle: ButtonStyle {
@@ -27,7 +33,7 @@ struct FlatButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label.font(.system(size: 13, weight: .medium)).padding(.horizontal, 15).padding(.vertical, 10)
             .foregroundStyle(Palette.accent)
-            .background(configuration.isPressed ? Color.blue.opacity(0.18) : Palette.card, in: RoundedRectangle(cornerRadius: 10))
+            .background(configuration.isPressed ? Palette.accentSoft : Palette.card, in: RoundedRectangle(cornerRadius: 10))
             .overlay(RoundedRectangle(cornerRadius: 10).stroke(Palette.line, lineWidth: 1)).opacity(enabled ? 1 : 0.4)
     }
 }
@@ -120,7 +126,7 @@ struct Device: Identifiable, Equatable {
         } catch { notice = error.localizedDescription } }
     }
     func updateStatusMenu() {
-        guard let menu = statusItem?.menu, menu.items.count == 4 else { return }
+        guard let menu = statusMenu, menu.items.count == 4 else { return }
         menu.items[0].title = L("打开 LanLink")
         menu.items[1].title = L("返回本机键鼠")
         menu.items[3].title = L("退出 LanLink")
@@ -243,7 +249,6 @@ struct Device: Identifiable, Equatable {
     @Published var startupEnabled = Model.startupRegistered
     var pendingFeatureID:String?;var pendingFeature:(()->Void)?
     var accessController:AccessController?;var lastAccess="";var disclosure:ConsentDisclosure?;var adbGuide: AdbGuideController?; var lastAdbGuide = ""; var consentAlert: NSAlert?; var consentRequest = ""; var permissionWindow: NSWindow?
-    var androidDisconnectAlert: NSAlert?; var androidDisconnectRequest = ""; var seenAndroidDisconnectRequests: Set<String> = []
     var adbAuthorizedAlert: NSAlert?; var adbAuthorizedRequest = ""; var seenAdbAuthorizations: Set<String> = []
     var controlVersion = 0
     var root = Bundle.main.resourceURL!
@@ -255,7 +260,7 @@ struct Device: Identifiable, Equatable {
     var remoteControlTask: Task<Void, Never>?; var controlReleaseTask: Task<Void, Never>?
     var remoteTeardown: Task<Void, Never>?; var remoteOpenVersion = 0
     weak var remoteSurface: InputSurface?; var recoveringInput=false; var remoteRatio = 0.5; var remotePrepared = false; var preparingControl = false; var acquiredAt = Date.distantPast; var resumeRemote = false
-    var stream = Data(); var statusItem: NSStatusItem?; var remoteWindow: NSWindow?
+    var stream = Data(); var statusItem: NSStatusItem?; var statusMenu: NSMenu?; var remoteWindow: NSWindow?
     var edges: [String: String] { state["edges"] as? [String: String] ?? [:] }
     var masterID: String { state["masterId"] as? String ?? (isMaster ? state["id"] as? String ?? "" : "") }
     var layoutPositions: [String: SharedLayoutCell] {
@@ -369,7 +374,10 @@ struct Device: Identifiable, Equatable {
         menu.addItem(withTitle: L("返回本机键鼠"), action: #selector(AppDelegate.releaseControl), keyEquivalent: "")
         menu.addItem(.separator()); menu.addItem(withTitle: L("退出 LanLink"), action: #selector(AppDelegate.quitApp), keyEquivalent: "q")
         for entry in menu.items where !entry.isSeparatorItem { entry.target = appDelegate }
-        item.menu = menu; statusItem = item
+        // Left click opens the quick panel at the icon; right click keeps the classic menu.
+        item.button?.target = appDelegate; item.button?.action = #selector(AppDelegate.statusItemClicked(_:))
+        item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        statusMenu = menu; statusItem = item
     }
     func consume(_ bytes: Data) {
         if bytes.isEmpty { return }; stream.append(bytes)
@@ -397,9 +405,9 @@ struct Device: Identifiable, Equatable {
         for promise in waiting { promise.resume(throwing: failure(message)) }
         poll?.cancel(); poll = nil; serviceReady = false;stageReceivePanel?.close();stageReceivePanel=nil;stageReceiveSignature=""; fileDragEdges?.stop()
         var offlineState = state
-        for key in ["active", "pendingControl", "owner", "accessNotice", "adbGuide", "fallbackNotice", "androidDisconnectNotice", "adbAuthorization", "shutdownAt", "stageIncoming"] { offlineState.removeValue(forKey: key) }
+        for key in ["active", "pendingControl", "owner", "accessNotice", "adbGuide", "fallbackNotice", "adbAuthorization", "shutdownAt", "stageIncoming"] { offlineState.removeValue(forKey: key) }
         offlineState["viewers"] = [String](); offlineState["consentRequests"] = [[String: Any]](); state = offlineState
-        endAndroidDisconnectNotice(); endAdbAuthorization()
+        endAdbAuthorization()
         if !closing {
             serviceError = message; notice = message
             devices = devices.map { var d = $0; if !d.local { d.online = false }; return d }
@@ -417,7 +425,7 @@ struct Device: Identifiable, Equatable {
         failed("正在重启设备服务…")
         closeRemote(); await remoteTeardown?.value
         accessController?.end(); adbGuide?.end(); pendingFeature = nil; pendingFeatureID = nil
-        endAndroidDisconnectNotice(); endAdbAuthorization()
+        endAdbAuthorization()
         if let alert = consentAlert { alert.window.sheetParent?.endSheet(alert.window, returnCode: .cancel) }
         consentAlert = nil; consentRequest = ""; lastAccess = ""; lastAdbGuide = ""
         stageHoverSessions.removeAll();committedStageSessions.removeAll();stageReceivePanel?.close();stageReceivePanel=nil;stageReceiveSignature=""; fileDragEdges?.stop()
@@ -670,11 +678,14 @@ struct Device: Identifiable, Equatable {
             if Task.isCancelled || remoteID != d.id { break }
             if controlConflict || !remotePrepared || (autoControl && !controlling) { try? await Task.sleep(nanoseconds: 500_000_000); continue }
             do {
-                if !legacy && !streaming { let opened = try await call("stream-open", ["id": d.id, "jpegOnly": jpegOnly]); h264Only = opened["h264Only"] as? Bool ?? false; streaming = true }
+                if !legacy && !streaming { let opened = try await call("stream-open", ["id": d.id, "jpegOnly": jpegOnly, "audio": true]); h264Only = opened["h264Only"] as? Bool ?? false; streaming = true }
                 if Task.isCancelled || remoteID != d.id { _ = try? await call("stream-close", ["id": d.id]); break }
                 let frame = try await call(streaming ? "stream-next" : "screen", ["id": d.id])
                 guard !Task.isCancelled, remoteID == d.id else { break }
                 if let text = frame["data"] as? String, let data = Data(base64Encoded: text) { if frame["unchanged"] as? Bool != true { screen = NSImage(data: data) }; if let pixels=screen?.representations.first { screen?.size=NSSize(width:pixels.pixelsWide,height:pixels.pixelsHigh) }; if remotePhone, let picture=screen, !pictureFitted || abs(remoteRatio-picture.size.width/picture.size.height)>0.0001 { let changed=abs(remoteRatio-picture.size.width/picture.size.height)>0.0001;pictureFitted=true;if !remoteGeometryRestored || changed{fitRemote(width: picture.size.width,height: picture.size.height)} }; remoteCodec=streaming ? (frame["codec"] as? String == "h264" ? "H.264":"JPEG"):"截图";remoteBitrate=frame["bitrate"] as? Double ?? 0;showRemoteNotice(streaming ? "\(frame["codec"] as? String == "h264" ? "H.264 串流" : "兼容串流") · \(frame["fps"] as? Int ?? 0) fps" : "截图兼容模式") }
+                if frame["audioStatus"] as? String == "permission-required" {
+                    showRemoteNotice("请在被控设备授权共享系统声音")
+                }
                 if legacy { try? await Task.sleep(nanoseconds: 50_000_000) }
             } catch {
                 if Task.isCancelled || remoteID != d.id { break }
@@ -795,6 +806,7 @@ struct Device: Identifiable, Equatable {
         } catch { notice = error.localizedDescription }
     }
     func refreshRequests() {
+        if appDelegate?.waitingForFirstOpen == true { return }
         let access=state["accessNotice"] as? [String:Any]
         if let current=accessController, !current.ended, !current.completing, current.requestID != access?["requestId"] as? String { current.showEnded("授权请求已结束，请重新请求或返回设备列表。") }
         if let access, let id = access["requestId"] as? String {
@@ -816,9 +828,6 @@ struct Device: Identifiable, Equatable {
                 handlingFallback = false
             }
         }
-        // These notices use sheets attached to the main window. Wait for the
-        // user to open it after login; independent request windows still work.
-        if appDelegate?.waitingForFirstOpen == true { return }
         refreshAdbAuthorization()
         let requests = state["consentRequests"] as? [[String: Any]] ?? []
         if let alert = consentAlert, !requests.contains(where: { $0["requestId"] as? String == consentRequest }) { alert.window.sheetParent?.endSheet(alert.window, returnCode: .cancel); consentAlert = nil }
@@ -851,7 +860,6 @@ struct Device: Identifiable, Equatable {
             hidGuidePresented = true
         } else if hidGuide == nil { hidGuidePresented = false }
 
-        refreshAndroidDisconnectNotice()
     }
     func endAdbAuthorization() {
         let alert = adbAuthorizedAlert; adbAuthorizedAlert = nil; adbAuthorizedRequest = ""
@@ -869,31 +877,6 @@ struct Device: Identifiable, Equatable {
             guard let self, let alert, self.adbAuthorizedAlert === alert else { return }
             self.adbAuthorizedAlert = nil; self.adbAuthorizedRequest = ""
             do { _ = try await self.call("adb-authorization-dismiss", ["requestId": id]) } catch { self.notice = error.localizedDescription }
-        } }
-    }
-    func endAndroidDisconnectNotice() {
-        let alert = androidDisconnectAlert
-        androidDisconnectAlert = nil; androidDisconnectRequest = ""
-        if let alert { alert.window.sheetParent?.endSheet(alert.window, returnCode: .cancel) }
-    }
-    func refreshAndroidDisconnectNotice() {
-        let request = state["androidDisconnectNotice"] as? [String: Any]
-        let id = request?["requestId"] as? String ?? ""
-        if androidDisconnectAlert != nil, androidDisconnectRequest != id { endAndroidDisconnectNotice() }
-        guard let request, !id.isEmpty else { return }
-        let name = request["name"] as? String ?? L("设备")
-        let message = L(request["message"] as? String ?? "")
-        if let alert = androidDisconnectAlert { alert.messageText = L("安卓设备连接中断"); alert.informativeText = name + "\n\n" + message; alert.buttons.first?.title = L("确认"); return }
-        guard !seenAndroidDisconnectRequests.contains(id), let main = appDelegate?.mainWindow, main.attachedSheet == nil else { return }
-        let alert = NSAlert(); alert.alertStyle = .warning; alert.messageText = L("安卓设备连接中断"); alert.informativeText = name + "\n\n" + message
-        alert.addButton(withTitle: L("确认"))
-        androidDisconnectAlert = alert; androidDisconnectRequest = id; seenAndroidDisconnectRequests.insert(id)
-        appDelegate?.showMain(); NSApp.activate(ignoringOtherApps: true)
-        alert.beginSheetModal(for: main) { [weak self, weak alert] response in Task { @MainActor in
-            guard let self, let alert, self.androidDisconnectAlert === alert else { return }
-            self.androidDisconnectAlert = nil; self.androidDisconnectRequest = ""
-            guard response == .alertFirstButtonReturn else { return }
-            do { _ = try await self.call("android-disconnect-dismiss", ["requestId": id]) } catch { self.notice = error.localizedDescription }
         } }
     }
     func closeRemote() { remoteOpenVersion += 1; _ = tearDownRemote() }
@@ -948,7 +931,7 @@ struct GlobalNoticeView: View {
                 } else if model.shutdownNotice.isEmpty {
                     Button { model.notice = "" } label: { Image(systemName: "xmark") }.buttonStyle(.plain).accessibilityLabel(L("关闭提示"))
                 }
-            }.padding(12).background(model.needsServiceRecovery ? Color.orange.opacity(0.12) : Palette.canvas, in: RoundedRectangle(cornerRadius: 12))
+            }.padding(12).background(model.needsServiceRecovery ? Palette.warning.opacity(0.12) : Palette.canvas, in: RoundedRectangle(cornerRadius: 12))
         }
     }
 }
@@ -1008,7 +991,7 @@ struct SidebarItem: View {
             Label(L(title), systemImage: icon).padding(.horizontal, 12).padding(.vertical, 11)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .foregroundStyle(selected ? Palette.accent : hovering ? Palette.ink : Palette.muted)
-                .background(selected ? Color.blue.opacity(0.14) : hovering ? Palette.card.opacity(0.78) : Color.clear, in: RoundedRectangle(cornerRadius: 12))
+                .background(selected ? Palette.accent.opacity(0.14) : hovering ? Palette.card.opacity(0.78) : Color.clear, in: RoundedRectangle(cornerRadius: 12))
                 .contentShape(RoundedRectangle(cornerRadius: 12))
         }.buttonStyle(.plain).onHover { hovering = $0 }
     }
@@ -1034,24 +1017,24 @@ struct DeviceTile: View {
     var isLayoutMaster: Bool { device.id == model.masterID }
     var detail: String { device.id == model.masterID ? (device.local ? "本机 · 主设备" : (device.online ? "主设备" : "主设备 · 离线")) : device.local ? "本机" : model.state["active"] as? String == device.id ? (device.transport=="USB + 局域网" ? "融合控制中":"正在控制") : device.online ? (device.access["status"] as? String ?? "未就绪") : "离线" }
     var mouseHere: Bool { (model.state["active"] as? String ?? "").isEmpty ? device.local : model.state["active"] as? String == device.id }
-    var borderColor: Color { isLayoutMaster ? Color.indigo.opacity(0.65) : model.selected == device.id ? Color.blue.opacity(0.45) : Palette.line }
+    var borderColor: Color { isLayoutMaster ? Palette.master.opacity(0.65) : model.selected == device.id ? Palette.accent.opacity(0.45) : Palette.line }
     var cardSurface: some View {
         Group { if compact { HStack(spacing: 14) { icon; labels } } else { VStack(spacing: canvasSize == nil ? 8 : 4) { badges; icon; labels } } }
             .padding(canvasSize == nil ? (compact ? 16 : 14) : 10)
             .frame(width: canvasSize?.width ?? (compact ? 212 : device.platform == "android" ? 164 : 248),
                    height: canvasSize?.height ?? (compact ? 78 : device.platform == "android" ? 170 : 148))
-            .background(device.local ? Color.blue.opacity(0.075) : Palette.card, in: RoundedRectangle(cornerRadius: 18))
+            .background(device.local ? Palette.accent.opacity(0.075) : Palette.card, in: RoundedRectangle(cornerRadius: 18))
             .overlay(RoundedRectangle(cornerRadius: 16).stroke(borderColor))
     }
     var badges: some View {
         HStack(spacing: 4) {
             if isLayoutMaster {
-                Text(L("主设备")).foregroundStyle(Color.indigo).padding(.horizontal, 6).padding(.vertical, 3)
-                    .background(Color.indigo.opacity(0.08), in: Capsule()).accessibilityIdentifier("layoutMasterBadge")
+                Text(L("主设备")).foregroundStyle(Palette.master).padding(.horizontal, 6).padding(.vertical, 3)
+                    .background(Palette.master.opacity(0.08), in: Capsule()).accessibilityIdentifier("layoutMasterBadge")
             }
             if mouseHere {
-                Label(L("鼠标在此"), systemImage: "cursorarrow").foregroundStyle(Color.blue).padding(.horizontal, 6).padding(.vertical, 3)
-                    .background(Color.blue.opacity(0.08), in: Capsule()).accessibilityIdentifier("layoutMouseBadge")
+                Label(L("鼠标在此"), systemImage: "cursorarrow").foregroundStyle(Palette.accent).padding(.horizontal, 6).padding(.vertical, 3)
+                    .background(Palette.accent.opacity(0.08), in: Capsule()).accessibilityIdentifier("layoutMouseBadge")
             }
         }.font(.system(size: 10)).lineLimit(1).minimumScaleFactor(0.75).frame(minHeight: 20).allowsHitTesting(false)
     }
@@ -1072,7 +1055,7 @@ struct DeviceTile: View {
             .onDrop(of:[UTType.fileURL],delegate:DeviceFileDrop(model:model,device:device))
     }
     var icon: some View { Image(systemName: device.symbol).font(.system(size: canvasSize != nil ? 20 : compact ? 24 : 30, weight: .light)).foregroundStyle(Palette.accent).frame(width: 36, height: canvasSize != nil ? 22 : 32) }
-    var statusColor:Color {switch detail {case "在线":return Color(red:0.21,green:0.53,blue:0.41);case "未就绪":return Color(red:0.71,green:0.54,blue:0.22);case "未授权":return Color(red:0.75,green:0.39,blue:0.44);case "有限授权":return Color(red:0.51,green:0.44,blue:0.73);case "正在控制","融合控制中":return .blue;default:return .gray}}
+    var statusColor:Color {switch detail {case "在线":return Palette.success;case "未就绪":return Palette.warning;case "未授权":return Palette.danger;case "有限授权":return Palette.master;case "正在控制","融合控制中":return Palette.accent;default:return Palette.muted}}
     var labels: some View {
         VStack(alignment: compact ? .leading : .center, spacing: canvasSize == nil ? 6 : 4) {
             Text(device.name).font(.system(size: canvasSize == nil ? 14 : 13, weight: .medium))
@@ -1145,7 +1128,7 @@ struct DeviceActions: View {
 }
 struct DeviceQuickActions: View {
     @ObservedObject var model: Model; let device: Device
-    var statusColor: Color { switch device.layoutOnlineStatus { case "在线": return Color(red: 0.21, green: 0.53, blue: 0.41); case "未授权": return Color(red: 0.75, green: 0.39, blue: 0.44); case "未就绪": return Color(red: 0.71, green: 0.54, blue: 0.22); default: return .secondary } }
+    var statusColor: Color { switch device.layoutOnlineStatus { case "在线": return Palette.success; case "未授权": return Palette.danger; case "未就绪": return Palette.warning; default: return Palette.muted } }
     func action(_ title: String, subtitle: String = "", icon: String, primary: Bool = false, _ perform: @escaping () -> Void) -> some View {
         Button(action: perform) {
             HStack(spacing: 10) {
@@ -1235,7 +1218,7 @@ struct LayoutCanvas: View {
                     for x in layout.minX...layout.maxX { for y in layout.minY...layout.maxY {
                         let point = layout.point(SharedLayoutCell(x: x, y: y))
                         let rect = CGRect(x: point.x - layout.step.width / 2 + 4, y: point.y - layout.step.height / 2 + 4, width: layout.step.width - 8, height: layout.step.height - 8)
-                        ctx.stroke(Path(roundedRect: rect, cornerRadius: 12), with: .color(.blue.opacity(0.10)), style: StrokeStyle(lineWidth: 1, dash: [3, 5]))
+                        ctx.stroke(Path(roundedRect: rect, cornerRadius: 12), with: .color(Palette.accent.opacity(0.10)), style: StrokeStyle(lineWidth: 1, dash: [3, 5]))
                     } }
                 }.allowsHitTesting(false)
                 TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion || (model.state["active"] as? String ?? "").isEmpty)) { timeline in
@@ -1251,8 +1234,8 @@ struct LayoutCanvas: View {
                             for offset in fusion ? [CGFloat(-3), CGFloat(3)] : [CGFloat(0)] {
                                 let endpoints = layout.connection(cell, other, offset: offset)
                                 var line = Path(); line.move(to: endpoints.start); line.addLine(to: endpoints.end)
-                                ctx.stroke(line, with: .color(.blue.opacity(first?.online == true && second?.online == true ? 0.35 : 0.15)), lineWidth: 1.5)
-                                if active { let phase = reduceMotion ? 0 : timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 0.9) / 0.9; ctx.stroke(line, with: .color(.indigo.opacity(0.7)), style: StrokeStyle(lineWidth: 2, dash: [6, 16], dashPhase: -22 * phase)) }
+                                ctx.stroke(line, with: .color(Palette.accent.opacity(first?.online == true && second?.online == true ? 0.35 : 0.15)), lineWidth: 1.5)
+                                if active { let phase = reduceMotion ? 0 : timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 0.9) / 0.9; ctx.stroke(line, with: .color(Palette.accent.opacity(0.7)), style: StrokeStyle(lineWidth: 2, dash: [6, 16], dashPhase: -22 * phase)) }
                             }
                         }
                     }
@@ -1364,7 +1347,7 @@ struct Home: View {
                     }
                 }
             }
-            if let name = model.controlledBy { VStack(alignment: .leading, spacing: 10) { Label(L("正在被控制"), systemImage: "dot.radiowaves.left.and.right").font(.caption.weight(.semibold)); Text(LF("{0} 正在操作或查看本机", name)).font(.caption).fixedSize(horizontal: false, vertical: true); Button(L("取消桌面控制")) { model.perform("stop-inbound") }.buttonStyle(FlatButtonStyle()) }.padding(12).frame(maxWidth: .infinity, alignment: .leading).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16)).overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.green.opacity(0.20))) }
+            if let name = model.controlledBy { VStack(alignment: .leading, spacing: 10) { Label(L("正在被控制"), systemImage: "dot.radiowaves.left.and.right").font(.caption.weight(.semibold)); Text(LF("{0} 正在操作或查看本机", name)).font(.caption).fixedSize(horizontal: false, vertical: true); Button(L("取消桌面控制")) { model.perform("stop-inbound") }.buttonStyle(FlatButtonStyle()) }.padding(12).frame(maxWidth: .infinity, alignment: .leading).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16)).overlay(RoundedRectangle(cornerRadius: 16).stroke(Palette.success.opacity(0.20))) }
             SidebarItem(title: L("我的设备"), icon: "person.crop.circle", selected: model.sidebarPage == "information") {
                 navigate("information")
                 model.registerMyDeviceClick()
@@ -1398,7 +1381,7 @@ struct Home: View {
         GlobalNoticeView(model: model)
         }.frame(width: contentWidth, height: contentHeight, alignment: .topLeading).clipped().overlay(alignment: .topTrailing) {
             if !model.successToast.isEmpty {
-                let tint = model.successToastSymbol == "exclamationmark.triangle.fill" ? Color.orange : Palette.accent
+                let tint = model.successToastSymbol == "exclamationmark.triangle.fill" ? Palette.warning : Palette.accent
                 Label(Model.displayMessage(model.successToast), systemImage: model.successToastSymbol)
                     .font(.caption).fixedSize(horizontal: false, vertical: true)
                     .frame(minWidth: 116, maxWidth: 246, alignment: .leading)
@@ -1628,9 +1611,9 @@ struct DevicePermissionsView: View {
                         HStack(spacing:0) {
                             VStack(alignment:.leading,spacing:7) {
                                 if device["master"] as? Bool == true {
-                                    Text(L("主设备")).font(.caption).foregroundStyle(Color.indigo)
+                                    Text(L("主设备")).font(.caption).foregroundStyle(Palette.master)
                                         .padding(.horizontal,7).padding(.vertical,3)
-                                        .background(Color.indigo.opacity(0.08), in:Capsule())
+                                        .background(Palette.master.opacity(0.08), in:Capsule())
                                 }
                                 Text(device["name"] as? String ?? L("设备")).font(.headline)
                                 Text(L(device["local"] as? Bool == true ? "本机" : device["online"] as? Bool == true ? "在线" : "离线"))
@@ -1710,10 +1693,10 @@ struct HidChannelsView: View {
         Button(action:action) {
             HStack {
                 HidBluetoothGlyph().stroke(style:StrokeStyle(lineWidth:1.4,lineCap:.round,lineJoin:.round))
-                    .frame(width:14,height:17).foregroundStyle(ready ? Color.green : Palette.muted)
+                    .frame(width:14,height:17).foregroundStyle(ready ? Palette.success : Palette.muted)
                 Text(device["name"] as? String ?? L("设备"))
                 Spacer()
-                Text(L(status)).font(.caption).foregroundStyle(ready ? Color.green : Palette.muted)
+                Text(L(status)).font(.caption).foregroundStyle(ready ? Palette.success : Palette.muted)
             }.padding(.horizontal,12).padding(.vertical,9)
                 .background(Palette.card,in:RoundedRectangle(cornerRadius:10))
                 .overlay(RoundedRectangle(cornerRadius:10).stroke(Palette.line))
@@ -1803,7 +1786,7 @@ struct HidTargetGuide: View {
         VStack(alignment:.leading,spacing:14) {
             Text(L("连接 HID 通道")).font(.title2)
             Text(LF("请在本机的系统蓝牙设置中连接 {0}。",request["name"] as? String ?? L("设备")))
-            if !message.isEmpty { Text(message).font(.caption).foregroundStyle(.red) }
+            if !message.isEmpty { Text(message).font(.caption).foregroundStyle(Palette.danger) }
             HStack {
                 Button(L("取消")) { finish(cancel:true) }
                 Spacer()
@@ -1935,7 +1918,7 @@ struct InputTransportView: View {
             targetPicker
             targetSettings
             Text(L("蓝牙控制时按 Control + Option + F12 返回本机。")).font(.caption)
-            if !error.isEmpty { Text(Model.displayMessage(error)).foregroundStyle(.red).font(.caption) }
+            if !error.isEmpty { Text(Model.displayMessage(error)).foregroundStyle(Palette.danger).font(.caption) }
         }.padding(22).frame(width:490).disabled(busy)
         .onAppear { update("input-transport-status") }
     }
@@ -2062,7 +2045,7 @@ struct SwitchDeviceGuideView: View {
     var body: some View {
         VStack(spacing:20) {
             Text(L("请到目标设备操作")).font(.title2);Text(name).font(.headline)
-            HStack(spacing:34) { PermissionGlyph(key:"screen").stroke(lineWidth:1.5).frame(width:54,height:54);Image(systemName:"arrow.right").offset(x:moving ? 10 : -10).opacity(moving ? 1 : 0.4).foregroundStyle(.blue);PermissionGlyph(key:"screen").stroke(lineWidth:1.5).frame(width:54,height:54).foregroundStyle(.blue) }.padding(18)
+            HStack(spacing:34) { PermissionGlyph(key:"screen").stroke(lineWidth:1.5).frame(width:54,height:54);Image(systemName:"arrow.right").offset(x:moving ? 10 : -10).opacity(moving ? 1 : 0.4).foregroundStyle(Palette.accent);PermissionGlyph(key:"screen").stroke(lineWidth:1.5).frame(width:54,height:54).foregroundStyle(Palette.accent) }.padding(18)
             Text(L("权限引导已在该设备打开，请切换观看设备并按提示完成授权。")).foregroundStyle(Palette.muted).multilineTextAlignment(.center)
             Button(L("我知道了")){dismiss()}
         }.padding(28).frame(width:420).buttonStyle(FlatButtonStyle()).onAppear { if !reducedMotion { withAnimation(.easeInOut(duration:1.2).repeatForever(autoreverses:false)){moving=true} } }
@@ -2081,7 +2064,7 @@ struct TargetPermissionGuide: View {
             PermissionGlyph(key:key).stroke(lineWidth:1.6).frame(width:44,height:44).foregroundStyle(Palette.accent)
             Text(request["id"] as? String == model.state["id"] as? String ? L("请在本机完成权限设置") : L("来自 ")+(request["name"] as? String ?? L("设备"))+L(" 的权限设置请求"))
             Text(L("开启后允许请求设备使用此功能。系统权限仍需在本机完成授权。")).font(.callout).foregroundStyle(Palette.muted)
-            if !error.isEmpty { Text(Model.displayMessage(error)).foregroundStyle(.red) }
+            if !error.isEmpty { Text(Model.displayMessage(error)).foregroundStyle(Palette.danger) }
             HStack {
                 Button(L(key=="input" || key=="screen" ? "打开系统设置":"开启权限")) {
                     busy=true;Task { defer {busy=false};do {
@@ -2161,7 +2144,7 @@ struct FirstDevicePermissionGuide: View {
         ScrollView { VStack(alignment: .leading, spacing: 22) {
             HStack(alignment: .top, spacing: 14) {
                 Image(systemName: "checkmark.shield.fill").font(.system(size: 32)).foregroundStyle(Palette.accent)
-                    .frame(width: 54, height: 54).background(Color.blue.opacity(0.12), in: RoundedRectangle(cornerRadius: 16))
+                    .frame(width: 54, height: 54).background(Palette.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 16))
                 VStack(alignment: .leading, spacing: 6) {
                     Text(L(model.upgradePermissionKeys == nil ? "完成 Mac 协作权限设置" : "更新后检查 Mac 权限")).font(.title2.weight(.semibold))
                     Text(L("系统权限决定键鼠、屏幕共享等功能是否可用。现在开启，之后可以随时在“本组设备权限”中调整。"))
@@ -2205,7 +2188,7 @@ struct FirstDevicePermissionGuide: View {
             VStack(alignment: .leading, spacing: 3) { Text(L(title)).font(.headline); Text(L(detail)).font(.caption).foregroundStyle(Palette.muted) }
             Spacer()
             if status == "已就绪" {
-                Label(L("已授予"), systemImage: "checkmark.circle.fill").font(.caption.weight(.medium)).foregroundStyle(.green)
+                Label(L("已授予"), systemImage: "checkmark.circle.fill").font(.caption.weight(.medium)).foregroundStyle(Palette.success)
             } else {
                 Button(L("授予权限"), action: action)
             }
@@ -2213,12 +2196,82 @@ struct FirstDevicePermissionGuide: View {
     }
 }
 extension Dictionary where Key == String, Value == Any { var masterChoiceID:String { self["id"] as? String ?? "" } }
+struct MouseFeelView: View {
+    @ObservedObject var model: Model
+    @Environment(\.dismiss) private var dismiss
+    @State private var selected = ""
+    @State private var drafts: [String: [String: Any]] = [:]
+    @State private var changed = Set<String>()
+    @State private var saving = false
+    @State private var message = "更改后点击保存"
+    private var devices: [[String: Any]] { model.state["mouseDevices"] as? [[String: Any]] ?? [] }
+    private var device: [String: Any] { devices.first { $0["id"] as? String == selected } ?? [:] }
+    private func guide() {
+        let id = selected
+        Task { do { let result = try await model.call("mouse-feel-check", ["id": id]); if result["guideRequired"] as? Bool == true { message = "请到该设备完成键鼠权限授权，授权后设置生效" } } catch { message = error.localizedDescription } }
+    }
+    private func toggle(_ key: String) -> Binding<Bool> {
+        Binding(get: { drafts[selected]?[key] as? Bool ?? false }, set: { value in
+            drafts[selected]?[key] = value; changed.insert(selected)
+            message = "有未保存的更改"; if value { guide() }
+        })
+    }
+    private func option(_ title: String, _ key: String) -> some View {
+        HStack { Text(L(title)); Spacer(); Toggle(L(title), isOn: toggle(key)).labelsHidden() }
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack { VStack(alignment: .leading, spacing: 5) { Text(L("鼠标手感")).font(.title2); Text(L("选择设备，单独调整它的鼠标体验")).font(.caption).foregroundStyle(.secondary) }; Spacer(); Button { dismiss() } label: { Image(systemName: "xmark") }.accessibilityLabel(L("关闭")).disabled(saving) }.padding(24)
+            Divider()
+            HStack(alignment: .top, spacing: 0) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(L("本组设备")).font(.caption).foregroundStyle(.secondary).padding(8)
+                    ForEach(devices.compactMap { $0["id"] as? String }, id: \.self) { id in
+                        if let d = devices.first(where: { $0["id"] as? String == id }) {
+                            Button { selected = id } label: {
+                                HStack { Image(systemName: d["platform"] as? String == "darwin" ? "laptopcomputer" : "desktopcomputer"); VStack(alignment: .leading, spacing: 4) {
+                                    Text((d["name"] as? String ?? "") + (d["master"] as? Bool == true ? L(" · 主设备") : ""))
+                                    Text((d["platform"] as? String == "darwin" ? "macOS" : d["platform"] as? String == "win32" ? "Windows" : d["platform"] as? String ?? "") + L(d["online"] as? Bool == true ? " · 在线" : " · 离线")).font(.caption).foregroundStyle(.secondary)
+                                }; Spacer() }.padding(12).frame(maxWidth: .infinity, alignment: .leading).background(selected == id ? Palette.accent.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 10))
+                            }.buttonStyle(.plain)
+                        }
+                    }
+                    Spacer()
+                }.padding(12).frame(width: 245).background(Palette.card)
+                Divider()
+                VStack(alignment: .leading, spacing: 20) {
+                    Text(device["name"] as? String ?? "").font(.headline)
+                    if device["supported"] as? Bool == true {
+                        option("平滑滚动", "smooth")
+                        Divider()
+                        option("反向鼠标滚轮", "reverse")
+                        Divider()
+                        HStack { Text(L("指针灵敏度")); Spacer(); Text(String(format: "%.1f×", drafts[selected]?["sensitivity"] as? Double ?? 1)).monospacedDigit().foregroundStyle(Palette.accent) }
+                        Slider(value: Binding(get: { drafts[selected]?["sensitivity"] as? Double ?? 1 }, set: { drafts[selected]?["sensitivity"] = ($0 * 10).rounded() / 10; changed.insert(selected) }), in: 0.2...3, onEditingChanged: { editing in if !editing { guide() } })
+                        HStack { Text("0.2×"); Spacer(); Text("3.0×") }.font(.caption).foregroundStyle(.secondary)
+                        if device["platform"] as? String == "darwin" { Divider(); option("关闭鼠标加速度", "disableAcceleration") }
+                        Text(L(device["online"] as? Bool != true ? "设备当前离线，保存后将在上线时同步应用" : device["needsPermission"] as? Bool == true ? "请到该设备完成键鼠权限授权，授权后设置生效" : device["needsUpgrade"] as? Bool == true ? "请升级目标设备以应用鼠标手感设置" : "仅调整所选设备，不影响组内其他设备")).font(.caption).foregroundStyle(.secondary)
+                    } else { Text(L("此设备暂不支持鼠标手感设置")).foregroundStyle(.secondary) }
+                    Spacer(minLength: 0)
+                }.padding(26).frame(maxWidth: .infinity)
+            }.disabled(saving)
+            Divider()
+            HStack { Text(Model.displayMessage(message)).font(.caption).foregroundStyle(.secondary); Spacer(); Button(L("取消")) { dismiss() }; Button(L("保存设置")) {
+                guard !saving else { return }; if changed.isEmpty { dismiss(); return }; saving = true
+                let edits = changed.compactMap { id -> [String: Any]? in guard let settings = drafts[id] else { return nil }; return ["id": id, "settings": settings] }
+                Task { do { _ = try await model.call("mouse-feel-save", ["devices": edits]); dismiss() } catch { message = error.localizedDescription }; saving = false }
+            }.keyboardShortcut(.defaultAction) }.padding(20).disabled(saving)
+        }.frame(width: 800, height: 570).background(Palette.card).toggleStyle(.switch).interactiveDismissDisabled(saving)
+        .onAppear { for d in devices { if let id = d["id"] as? String { drafts[id] = d["settings"] as? [String: Any] ?? [:] } }; selected = devices.first?["id"] as? String ?? "" }
+    }
+}
 struct SettingsView: View {
     @ObservedObject var model: Model; let active: Bool
     @State var name = ""; @State var permissions: [String: Bool] = [:]
     @State var dirty = false; @State var saving = false; @State var status = "修改后点击保存；切换页面会保留草稿"
     @State var logs = false;@State var switchMode="dwell";@State var edgeHotkey="ctrl-alt";@State var dwell=100.0
     @State private var exportingLogs = false
+    @State private var mouseFeel = false
 
     @MainActor private func exportLogs() async {
         exportingLogs = true
@@ -2333,6 +2386,7 @@ struct SettingsView: View {
                 }.padding(22).background(Palette.card, in: RoundedRectangle(cornerRadius: 18))
                 VStack(alignment: .leading, spacing: 16) {
                     Text(L("无界鼠标")).font(.headline)
+                    HStack { VStack(alignment: .leading) { Text(L("鼠标手感")); Text(L("为组内每台设备分别调整滚动与指针体验")).font(.caption).foregroundStyle(.secondary) }; Spacer(); Button(L("调整鼠标手感")) { mouseFeel = true } }
                     Picker(L("键鼠主设备"),selection:model.masterDeviceSelection){
                         if model.masterID.isEmpty { Text(L("尚未选择")).tag("") }
                         ForEach(model.devices.filter { ["darwin","win32"].contains($0.platform) }) { device in
@@ -2363,6 +2417,7 @@ struct SettingsView: View {
         }
         Text(Model.displayMessage(status)).font(.caption).foregroundStyle(.secondary)
     }.buttonStyle(FlatButtonStyle()).toggleStyle(.switch)
+        .sheet(isPresented: $mouseFeel) { MouseFeelView(model: model) }
         .onAppear { load() }.onChange(of: active) { _, shown in if shown && !dirty && !saving { load() } }
         .onChange(of: model.state["groupId"] as? String) { _, _ in if !dirty && !saving { load() } }
     }
@@ -2375,6 +2430,10 @@ struct PairingView: View {
     @State private var showing = true; @State private var busy = false
     @State private var loading = false; @State private var alive = true; @State private var error = ""
     @State private var deadline = Date.distantPast; @State private var now = Date(); @State private var duration = 60.0
+    @State private var directPairing = false
+    @State private var pairingHost = ""
+    @State private var directCode = ""
+    @State private var directError = ""
     @State private var host = ""
     @State private var connecting = false
     @State private var connectionMessage = ""
@@ -2406,6 +2465,32 @@ struct PairingView: View {
             }
         }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .buttonStyle(FlatButtonStyle())
+        .sheet(isPresented: $directPairing) {
+            VStack(alignment: .leading, spacing: 14) {
+                Text(L("通过 IP 配对")).font(.headline)
+                Text(L("请让对方打开添加设备页面")).foregroundStyle(.secondary)
+                TextField(L("对方 IPv4 地址"), text: $pairingHost)
+                TextField(L("八位数字配对码"), text: $directCode)
+                if !directError.isEmpty { Text(L(directError)).foregroundStyle(Palette.danger) }
+                HStack {
+                    Button(L("取消")) { directPairing = false }
+                    Spacer()
+                    Button(L("申请配对")) {
+                        let address = pairingHost.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let parts = address.split(separator: ".", omittingEmptySubsequences: false)
+                        guard parts.count == 4, parts.allSatisfy({ part in
+                            !part.isEmpty && part.count <= 3 && part.utf8.allSatisfy { (48...57).contains($0) }
+                                && (Int(part) ?? 256) <= 255
+                        }) else { directError = "请输入有效的 IPv4 地址"; return }
+                        let code = PairingCode.normalized(directCode)
+                        guard PairingCode.valid(code) else { directError = "请输入完整的八位数字配对码。"; return }
+                        input = code
+                        directPairing = false
+                        Task { await join(address: address) }
+                    }.buttonStyle(.borderedProminent).tint(Palette.accent)
+                }
+            }.padding(24).frame(width: 360)
+        }
         .task { alive = true; await refresh() }
         .onReceive(timer) { value in now = value; if remaining <= 0 { qr = nil }; Task { await refresh() } }
         .onDisappear { alive = false; qr = nil; Task { _ = try? await model.call("pairing-stop") } }
@@ -2427,8 +2512,8 @@ struct PairingView: View {
         card(Palette.canvas) {
             cardHeading("分享本机配对码", icon: "qrcode", hint: "让对方在 LanLink 扫码，或输入下方配对码。")
             Text(formatted).font(.system(size: 36, weight: .semibold, design: .monospaced))
-                .foregroundStyle(Palette.adaptive(0x354CC2, 0xB8C4FF)).textSelection(.enabled)
-            ProgressView(value: min(remaining / duration, 1)).tint(.indigo)
+                .foregroundStyle(Palette.accent).textSelection(.enabled)
+            ProgressView(value: min(remaining / duration, 1)).tint(Palette.accent)
             Text(remaining > 0 ? LF("{0} 秒后刷新 · 每分钟自动更换", String(Int(ceil(remaining)))) : L("正在刷新配对码…"))
                 .font(.caption).foregroundStyle(.secondary)
             ViewThatFits(in: .horizontal) {
@@ -2476,8 +2561,11 @@ struct PairingView: View {
                     }
                 }
             Button(L(busy ? "正在配对…" : groupEstablished ? "配对并合并设备组" : "配对并加入")) { Task { await join() } }
-                .buttonStyle(.borderedProminent).controlSize(.large).disabled(busy || waitingConnection)
+                .buttonStyle(.borderedProminent).tint(Palette.accent).controlSize(.large).disabled(busy || waitingConnection)
             Text(L("双方已有分组会一并合并。")).font(.caption).foregroundStyle(.secondary)
+            Button(L("无法连接？")) { directError = ""; directPairing = true }
+                .font(.caption).buttonStyle(.plain).foregroundStyle(.secondary)
+                .disabled(busy || waitingConnection)
         }
     }
     @ViewBuilder private var pairingStatus: some View {
@@ -2524,7 +2612,7 @@ struct PairingView: View {
             await model.refresh()
         } catch { connectionMessage = Model.readableMessage(error.localizedDescription) + "。请检查地址、同组状态及对方是否在线，再重试。" }
     }
-    private func join() async {
+    private func join(address: String? = nil) async {
         input = PairingCode.normalized(input)
         guard PairingCode.valid(input) else { error = "请输入完整的八位数字配对码。"; return }
         guard !busy, !waitingConnection else { return }
@@ -2545,7 +2633,9 @@ struct PairingView: View {
             }
             guard response == .alertFirstButtonReturn else { error = "已取消加入。"; return }
             error = "正在查找设备并配对…"
-            _ = try await model.call("join", ["code": input, "expectedGroup": state["groupId"] as? String ?? ""])
+            var arguments: [String: Any] = ["code": input, "expectedGroup": state["groupId"] as? String ?? ""]
+            if let address { arguments["host"] = address }
+            _ = try await model.call("join", arguments)
             await model.refresh(); model.showFirstDevicePermissionGuideIfNeeded(wasFirstDevice: wasFirstDevice); waitingConnection = true; initialPeers = []; input = ""; showing = false; qr = nil; error = "已配对，正在同步组内设备…"
         } catch { self.error = error.localizedDescription }
     }
@@ -2592,8 +2682,12 @@ struct PairingView: View {
             DistributedNotificationCenter.default().addObserver(self, selector: #selector(receiveReopen(_:)), name: InstanceLease.reopenNotification, object: lease.directory)
         } catch {
             redirecting = true
-            let alert = NSAlert(); alert.messageText = L("无法启动 LanLink"); alert.informativeText = error.localizedDescription
-            alert.runModal(); NSApp.terminate(nil)
+            if launchedInBackground { NSLog("%@", error.localizedDescription) }
+            else {
+                let alert = NSAlert(); alert.messageText = L("无法启动 LanLink"); alert.informativeText = error.localizedDescription
+                alert.runModal()
+            }
+            NSApp.terminate(nil)
         }
     }
     private func redirectToExistingInstance(_ legacy: NSRunningApplication? = nil) {
@@ -2684,10 +2778,27 @@ struct PairingView: View {
         }
         return true
     }
-    func closeMainWindow() { mainWindow.orderOut(nil); model.releaseAll() }
+    func closeMainWindow() {
+        mainWindow.orderOut(nil)
+        if model.remoteWindow == nil { model.releaseAll() }
+    }
     @objc func showMain() { guard let mainWindow, !model.closing else { return }; openedMain = true; NSApp.unhide(nil); mainWindow.deminiaturize(nil); mainWindow.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
     @objc func releaseControl() { model.releaseAll() }
     @objc func quitApp() { NSApp.terminate(nil) }
+    private var quickPopover: NSPopover?
+    @objc func statusItemClicked(_ sender: NSStatusBarButton) {
+        if NSApp.currentEvent?.type == .rightMouseUp, let item = model.statusItem, let menu = model.statusMenu {
+            quickPopover?.performClose(nil)
+            item.menu = menu; sender.performClick(nil); item.menu = nil
+            return
+        }
+        if let popover = quickPopover, popover.isShown { popover.performClose(nil); return }
+        let popover = NSPopover(); popover.behavior = .transient; popover.animates = true
+        popover.contentViewController = NSHostingController(rootView: QuickPanelView(model: model, close: { [weak popover] in popover?.performClose(nil) }, openMain: { [weak self] in self?.showMain() }))
+        quickPopover = popover
+        NSApp.activate(ignoringOtherApps: true)
+        popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
+    }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showMain(); return true }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply { if redirecting || mainWindow == nil { return .terminateNow }; model.quit(); return .terminateLater }
     func applicationWillTerminate(_ notification: Notification) { DistributedNotificationCenter.default().removeObserver(self); instance?.release() }
@@ -2765,4 +2876,95 @@ final class EdgeGlowDrawing:NSView{
     init(frame:NSRect,edge:String){self.edge=edge;super.init(frame:frame)}
     required init?(coder:NSCoder){return nil}
     override func draw(_ dirtyRect:NSRect){var strip=bounds;if edge=="left"{strip.size.width=thickness};if edge=="right"{strip.origin.x=strip.maxX-thickness;strip.size.width=thickness};if edge=="top"{strip.origin.y=strip.maxY-thickness;strip.size.height=thickness};if edge=="bottom"{strip.size.height=thickness};NSGradient(starting:NSColor.systemPurple.withAlphaComponent(0.9),ending:.clear)?.draw(in:strip,angle:edge=="left" ? 0:edge=="right" ? 180:edge=="top" ? 270:90)}
+}
+// Menu bar quick panel: online devices with their common actions, shown at the status item.
+struct QuickPanelView: View {
+    @ObservedObject var model: Model
+    let close: () -> Void
+    let openMain: () -> Void
+    var online: [Device] { model.devices.filter { !$0.local && $0.online } }
+    var localName: String { model.state["name"] as? String ?? "" }
+    var controllingElsewhere: Bool { !((model.state["active"] as? String) ?? "").isEmpty }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 32, height: 32)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("LanLink").font(.system(size: 14, weight: .semibold))
+                    Text(localName.isEmpty ? L("本机") : localName + " · " + L("本机")).font(.caption).foregroundStyle(Palette.muted).lineLimit(1)
+                }
+                Spacer()
+            }
+            HStack(spacing: 6) {
+                Text(L("在线设备")).font(.caption.weight(.semibold)); Text("\(online.count)").font(.caption)
+            }.foregroundStyle(Palette.muted)
+            if !model.serviceReady { empty(L("正在连接设备服务…")) }
+            else if online.isEmpty { empty(L("暂无在线设备。请打开对方 LanLink，并保持同一网络。")) }
+            else if online.count > 3 { ScrollView { cards }.frame(height: 390) }
+            else { cards }
+            Divider()
+            HStack(spacing: 8) {
+                Button { close(); openMain() } label: { Text(L("打开 LanLink")).frame(maxWidth: .infinity) }
+                    .buttonStyle(.borderedProminent).tint(Palette.accent).controlSize(.large).keyboardShortcut(.defaultAction)
+                iconButton("arrow.uturn.backward", "返回本机键鼠", Palette.accent) { close(); model.releaseAll() }.disabled(!controllingElsewhere)
+                iconButton("power", "退出 LanLink", Palette.danger) { close(); NSApp.terminate(nil) }
+            }
+        }.padding(16).frame(width: 340)
+    }
+    var cards: some View { VStack(spacing: 8) { ForEach(online) { device in QuickPanelDeviceCard(model: model, device: device, close: close) } } }
+    func empty(_ message: String) -> some View {
+        VStack(spacing: 10) {
+            Image(systemName: "desktopcomputer").font(.system(size: 20)).foregroundStyle(Palette.accent).frame(width: 46, height: 46).background(Palette.accentSoft, in: Circle())
+            Text(message).font(.caption).foregroundStyle(Palette.muted).multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+        }.frame(maxWidth: .infinity).padding(.vertical, 10)
+    }
+    func iconButton(_ symbol: String, _ title: String, _ tint: Color, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) { Image(systemName: symbol).font(.system(size: 14, weight: .medium)).foregroundStyle(tint).frame(width: 34, height: 30) }
+            .buttonStyle(.bordered).controlSize(.large).help(L(title)).accessibilityLabel(L(title))
+    }
+}
+struct QuickPanelDeviceCard: View {
+    @ObservedObject var model: Model
+    let device: Device
+    let close: () -> Void
+    var mouseHere: Bool { model.state["active"] as? String == device.id }
+    var statusColor: Color { switch device.layoutOnlineStatus { case "在线": return Palette.success; case "未授权": return Palette.danger; case "未就绪": return Palette.warning; default: return Palette.muted } }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Image(systemName: device.symbol).font(.system(size: 15)).foregroundStyle(Palette.accent).frame(width: 32, height: 32).background(Palette.accentSoft, in: RoundedRectangle(cornerRadius: 9))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(device.name).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                    Text(device.layoutDeviceType + (device.id == model.masterID ? L(" · 主设备") : "")).font(.caption2).foregroundStyle(Palette.muted)
+                }
+                Spacer()
+                HStack(spacing: 5) { Circle().fill(statusColor).frame(width: 6, height: 6); Text(L(device.layoutOnlineStatus)).font(.caption2) }.foregroundStyle(statusColor)
+            }
+            Grid(horizontalSpacing: 6, verticalSpacing: 6) {
+                GridRow {
+                    action("桌面控制", "display", ["input", "screen"]) { NSApp.activate(ignoringOtherApps: true); model.openRemote(device) }
+                    if mouseHere { action("返回本机键鼠", "arrow.uturn.backward", []) { model.releaseAll() } }
+                    else { action("切换键鼠到此设备", "cursorarrow", ["input"]) { model.switchControl(device) } }
+                }
+                GridRow {
+                    action("粘贴共享内容", "doc.on.clipboard", ["input", "clipboard"]) { model.perform("device-paste", ["id": device.id]) }
+                    action("发送文件…", "paperplane", ["clipboard"]) { NSApp.activate(ignoringOtherApps: true); model.sendFiles(device) }
+                }
+            }
+        }.padding(12).background(Palette.card, in: RoundedRectangle(cornerRadius: 12)).overlay(RoundedRectangle(cornerRadius: 12).stroke(Palette.line))
+        .accessibilityElement(children: .contain).accessibilityLabel(device.name)
+    }
+    // Same permission and consent path as the device menu in the main window.
+    func action(_ title: String, _ symbol: String, _ keys: [String], _ run: @escaping () -> Void) -> some View {
+        let restricted = !keys.isEmpty && model.restricted(device, keys)
+        return Button { close(); if keys.isEmpty { run() } else { model.feature(device, keys, run) } } label: {
+            HStack(spacing: 6) {
+                Image(systemName: symbol).font(.system(size: 11, weight: .medium)).foregroundStyle(restricted ? Palette.muted : Palette.accent).frame(width: 14)
+                Text(L(title)).font(.system(size: 12)).foregroundStyle(restricted ? Palette.muted : Palette.ink).lineLimit(1)
+                Spacer(minLength: 0)
+            }.padding(.horizontal, 9).padding(.vertical, 7).frame(maxWidth: .infinity)
+            .background(Palette.surface, in: RoundedRectangle(cornerRadius: 9)).overlay(RoundedRectangle(cornerRadius: 9).stroke(Palette.line))
+            .contentShape(RoundedRectangle(cornerRadius: 9))
+        }.buttonStyle(.plain).help(restricted ? L("尚未就绪或授权 · 点击查看") : L(title)).accessibilityLabel(L(title))
+    }
 }

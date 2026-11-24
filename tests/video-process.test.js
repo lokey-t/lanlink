@@ -2,7 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { stopVideoProcess, createDecoder, chooseEncoder } from '../src/video-codec.js';
+import { AnnexBParser, stopVideoProcess, createDecoder, chooseEncoder } from '../src/video-codec.js';
+import { openVideoSurface } from '../src/video-surface.js';
+import { randomUUID } from 'node:crypto';
+import { createRequire } from 'node:module';
 import { existsSync } from 'node:fs';
 import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
 import os from 'node:os';
@@ -21,6 +24,71 @@ test('owned codec workers stop even when SIGTERM is ignored; repeated close shar
 });
 
 const ffmpeg = process.env.LANLINK_FFMPEG || path.resolve('.tools/video-macos-dist/bin/ffmpeg');
+test('one complete H.264 image decodes while the media connection stays idle', {
+  skip: !existsSync(ffmpeg), timeout: 5000,
+}, async t => {
+  const encoded = spawnSync(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi',
+    '-i', 'color=c=red:size=320x240:rate=30', '-frames:v', '4', '-c:v', 'libopenh264',
+    '-bf', '0', '-bsf:v', 'h264_metadata=aud=insert', '-f', 'h264', 'pipe:1'], { timeout: 2000 });
+  if (String(encoded.stderr).includes('Unknown encoder')) { t.skip('libopenh264 unavailable'); return; }
+  assert.equal(encoded.status, 0, String(encoded.stderr));
+  const frames = [];
+  new AnnexBParser((data, key) => frames.push({data, key})).push(encoded.stdout);
+  assert.ok(frames[0]?.key);
+  for (const raw of [undefined, {width:320, height:240}]) {
+    let decoder, timer;
+    try {
+      const pixels = await new Promise((resolve, reject) => {
+        timer = setTimeout(() => reject(Error('last H.264 image waited for another network packet')), 1000);
+        decoder = createDecoder(ffmpeg, resolve, reject, raw);
+        decoder.push(frames[0]);
+      });
+      if (raw) {
+        assert.equal(pixels.length, 320 * 240 * 4);
+        assert.ok(pixels[2] > 230 && pixels[0] < 16, 'actual red decoded pixels');
+      } else assert.ok(pixels.subarray(0, 2).equals(Buffer.from([255, 216])));
+    } finally { clearTimeout(timer); await decoder?.close(); }
+  }
+});
+
+test('Windows video surface passes real decoded H.264 pixels without JPEG conversion', {
+  skip: process.platform !== 'win32' || !existsSync(ffmpeg), timeout: 10000,
+}, async t => {
+  const require = createRequire(import.meta.url), koffi = require('koffi');
+  const kernel = koffi.load('kernel32.dll');
+  const create = kernel.func('void *CreateFileMappingW(intptr_t file, void *security, uint32_t protection, uint32_t high, uint32_t low, str16 name)');
+  const map = kernel.func('void *MapViewOfFile(void *handle, uint32_t access, uint32_t high, uint32_t low, size_t size)');
+  const unmap = kernel.func('int UnmapViewOfFile(void *address)');
+  const close = kernel.func('int CloseHandle(void *handle)');
+  const size = 4096 * 2048 * 4;
+  const name = 'Local\\LanLinkVideo-' + randomUUID().replaceAll('-', '');
+  const handle = create(-1, null, 4, 0, size, name);
+  assert.ok(handle);
+  t.after(() => close(handle));
+  const read = map(handle, 4, 0, 0, size);
+  assert.ok(read);
+  t.after(() => unmap(read));
+  const surface = openVideoSurface(name);
+  assert.ok(surface);
+  t.after(() => surface.close());
+  const result = spawnSync(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi',
+    '-i', 'color=c=red:size=320x240:rate=30', '-frames:v', '12', '-c:v', 'libopenh264',
+    '-bsf:v', 'h264_metadata=aud=insert', '-f', 'h264', 'pipe:1'], { timeout: 5000 });
+  if (String(result.stderr).includes('Unknown encoder')) { t.skip('libopenh264 unavailable'); return; }
+  assert.equal(result.status, 0, String(result.stderr));
+  const width = 160, height = 120;
+  let decoder;
+  t.after(() => decoder?.close());
+  const pixels = await new Promise((resolve, reject) => {
+    decoder = createDecoder(ffmpeg, resolve, reject, { width, height });
+    new AnnexBParser((data, key) => decoder.push({data, key})).push(result.stdout);
+  });
+  assert.equal(pixels.length, width * height * 4);
+  surface.write(pixels);
+  const [blue, green, red, alpha] = new Uint8Array(koffi.view(read, 4));
+  assert.ok(blue < 16 && green < 16 && red > 230 && alpha === 255);
+});
+
 test('actual idle FFmpeg decoder closes its input and exits without leaving a worker', { skip: !existsSync(ffmpeg), timeout: 5000 }, async () => {
   const decoder = createDecoder(ffmpeg, () => assert.fail('closed decoder must not publish'), () => {});
   const first = decoder.close(); assert.equal(decoder.close(), first); await first;

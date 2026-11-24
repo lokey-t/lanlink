@@ -48,12 +48,12 @@ final class TouchpadDialog extends Dialog {
   private final TextView status;
   private final Button connect;
   private final ProgressBar spinner;
-  private final FrameLayout outer, stage;
-  private final LinearLayout surface, leftRail, rightRail, connection, menu;
+  private final FrameLayout outer, stage, touchArea;
+  private final LinearLayout surface, portrait, portraitLabels, leftRail, rightRail, connection, menu;
   private final ScrollView menuScroll;
   private final View backKey, leftKey, keyboardKey, rightKey;
   private MenuPage menuPage = MenuPage.MAIN;
-  private boolean menuVisible, ready;
+  private boolean menuVisible, ready, fullscreen;
   private int oldOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED;
   private android.window.OnBackInvokedCallback backCallback;
   private long requestSince = System.currentTimeMillis();
@@ -120,12 +120,12 @@ final class TouchpadDialog extends Dialog {
 
     pad = new TouchpadView(activity, event -> service.remoteInput(peer.id, event),
         error -> main.post(() -> failed(error)));
-    pad.setStandaloneDark();
     bindMouseHold(leftKey, 0);
     bindMouseHold(rightKey, 2);
     hideIntroHint = () -> pad.setIntroHintVisible(false);
     pad.setHapticFeedbackEnabled(settings.getBoolean("haptics", true));
     FrameLayout area = new FrameLayout(activity);
+    touchArea = area;
     area.addView(pad, new FrameLayout.LayoutParams(-1, -1));
     surface.addView(area, new LinearLayout.LayoutParams(0, -1, 1));
     surface.addView(rightRail, new LinearLayout.LayoutParams(ui.dp(80), -1));
@@ -177,8 +177,79 @@ final class TouchpadDialog extends Dialog {
     stage.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
       if (r - l != or - ol || b - t != ob - ot) layoutStage();
     });
+    portrait = ui.column();
+    portrait.setPadding(ui.dp(18), ui.dp(12), ui.dp(18), ui.dp(18));
+    portrait.setBackgroundColor(0xff111722);
+    LinearLayout header = ui.row();
+    header.addView(portraitTool("back", "关闭并释放触控板", this::dismiss),
+        new LinearLayout.LayoutParams(ui.dp(48), ui.dp(48)));
+    TextView title = ui.text(peer.info.optString("name", Language.t("触控板")), 18, INK);
+    title.setSingleLine(true);
+    title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+    title.setPadding(ui.dp(12), 0, ui.dp(8), 0);
+    portraitLabels = ui.column();
+    portraitLabels.addView(title);
+    header.addView(portraitLabels, new LinearLayout.LayoutParams(0, -2, 1));
+    header.addView(portraitTool("keyboard", "打开远程键盘", this::showKeyboard),
+        new LinearLayout.LayoutParams(ui.dp(48), ui.dp(48)));
+    portrait.addView(header);
+    ui.gap(portrait, 12);
+    LinearLayout footer = ui.row();
+    TextView hint = ui.text(Language.t("单指移动 · 轻点单击 · 长按拖动") + "\n"
+        + Language.t("双指滚动 · 双指轻点右键"), 12, 0xffaeb8cb);
+    hint.setLineSpacing(ui.dp(5), 1);
+    footer.addView(hint, new LinearLayout.LayoutParams(0, -2, 1));
+    Button expand = ui.button(Language.t("全屏"), false, () -> setFullscreen(true));
+    expand.setContentDescription(Language.t("全屏"));
+    expand.setTextColor(INK);
+    expand.setBackground(ui.touch(0xff303348, 14));
+    footer.addView(expand, new LinearLayout.LayoutParams(ui.dp(88), ui.dp(48)));
+    portrait.addView(footer);
+    stage.addView(portrait, new FrameLayout.LayoutParams(-1, -1));
+    setFullscreen(false);
     setContentView(outer);
     setReady(false);
+  }
+
+  private View portraitTool(String icon, String label, Runnable action) {
+    FrameLayout button = new FrameLayout(activity);
+    button.setContentDescription(Language.t(label));
+    button.setFocusable(true);
+    button.setBackground(ui.touch(0xff262e3f, 16));
+    button.addView(ui.icon(icon, INK),
+        new FrameLayout.LayoutParams(ui.dp(24), ui.dp(24), Gravity.CENTER));
+    button.setOnClickListener(view -> action.run());
+    return button;
+  }
+
+  // Reparent the same input surface: orientation changes never reacquire control.
+  private void setFullscreen(boolean enabled) {
+    hideKeyboard();
+    releaseMouseButtons();
+    pad.cancelGesture();
+    TransitionManager.endTransitions(stage);
+    fullscreen = enabled;
+    menuVisible = false;
+    ((ViewGroup) touchArea.getParent()).removeView(touchArea);
+    if (enabled) surface.addView(touchArea, 1, new LinearLayout.LayoutParams(0, -1, 1));
+    else portrait.addView(touchArea, 2, new LinearLayout.LayoutParams(-1, 0, 1));
+    surface.setVisibility(enabled ? View.VISIBLE : View.GONE);
+    portrait.setVisibility(enabled ? View.GONE : View.VISIBLE);
+    ((ViewGroup) status.getParent()).removeView(status);
+    status.setGravity(enabled ? Gravity.CENTER : Gravity.START);
+    status.setPadding(enabled ? 0 : ui.dp(12), ui.dp(4), 0, 0);
+    if (enabled) connection.addView(status, 1, new LinearLayout.LayoutParams(-1, -2));
+    else portraitLabels.addView(status, new LinearLayout.LayoutParams(-1, -2));
+    pad.setCompactDark(!enabled);
+    pad.setStandaloneDark(enabled);
+    updateInput();
+    layoutStage();
+    if (isShowing()) {
+      activity.setRequestedOrientation(enabled ? ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+          : ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+      immersive();
+      outer.requestApplyInsets();
+    }
   }
 
   private View railKey(LinearLayout rail, String icon, String label, int weight, Runnable action) {
@@ -267,6 +338,7 @@ final class TouchpadDialog extends Dialog {
   }
 
   private void layoutStage() {
+    if (!fullscreen) { menuScroll.setVisibility(View.GONE); return; }
     int width = stage.getWidth(), height = stage.getHeight();
     if (width <= 0 || height <= 0) return;
     int railWidth = Math.min(ui.dp(132), Math.max(ui.dp(64), Math.round(width * .155f)));
@@ -305,6 +377,7 @@ final class TouchpadDialog extends Dialog {
     switch (page) {
       case MAIN:
         menuButton("touchpad", "继续全屏", this::resume);
+        menuButton("back", "退出全屏", () -> setFullscreen(false));
         menuButton("settings", "设置", () -> showMenuPage(MenuPage.SETTINGS));
         menuButton("refresh", "切换设备", () -> showMenuPage(MenuPage.DEVICES));
         menuButton("close", "退出触控板", this::dismiss);
@@ -539,14 +612,15 @@ final class TouchpadDialog extends Dialog {
   }
 
   @Override public void onBackPressed() {
-    if (!menuVisible) showMenu();
+    if (!fullscreen) dismiss();
+    else if (!menuVisible) showMenu();
     else if (menuPage != MenuPage.MAIN) showMenuPage(MenuPage.MAIN);
     else resume();
   }
 
   @Override public void show() {
     oldOrientation = activity.getRequestedOrientation();
-    activity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+    activity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
     super.show();
     Window window = getWindow();
     if (window != null) {
@@ -563,7 +637,8 @@ final class TouchpadDialog extends Dialog {
       if (Build.VERSION.SDK_INT >= 30) {
         window.setDecorFitsSystemWindows(false);
         outer.setOnApplyWindowInsetsListener((view, insets) -> {
-          Insets safe = insets.getInsets(WindowInsets.Type.ime());
+          Insets safe = insets.getInsets(WindowInsets.Type.ime()
+              | (fullscreen ? 0 : WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout()));
           view.setPadding(safe.left, safe.top, safe.right, safe.bottom);
           styleRails(insets, safe);
           return insets;
@@ -590,10 +665,11 @@ final class TouchpadDialog extends Dialog {
     if (Build.VERSION.SDK_INT >= 30) {
       WindowInsetsController controller = window.getInsetsController();
       if (controller != null) {
-        controller.hide(WindowInsets.Type.systemBars());
+        if (fullscreen) controller.hide(WindowInsets.Type.systemBars());
+        else controller.show(WindowInsets.Type.systemBars());
         controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
       }
-    } else window.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+    } else window.getDecorView().setSystemUiVisibility(!fullscreen ? View.SYSTEM_UI_FLAG_VISIBLE : View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
         | View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
         | View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
         | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);

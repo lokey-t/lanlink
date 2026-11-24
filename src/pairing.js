@@ -102,12 +102,13 @@ export class Pairing {
       send({ kind: 'joined', proof: session.serverProof, body: seal(session.key, 0, { token: this.service.config.token, port: this.service.port, group: this.service.group?.export() }) }); socket.end();
     }, error => this.service.log('配对失败：' + error.message));
   }
-  async join(code, targetId, dissolveCurrentGroup = false) {
+  async join(code, targetId, dissolveCurrentGroup = false, host) {
     if (typeof code !== 'string' || !/^\d{8}$/.test(code)) throw new Error('请输入八位数字配对码');
     if (this.joining) throw new Error('正在配对，请稍候');
     this.joining = true;
     try {
-      const offers = await discover(targetId, this.service.options.pairingDestinations ?? broadcasts(), this.service.options.pairingDiscoveryPort ?? PAIR_PORT);
+      if (host !== undefined && (typeof host !== 'string' || net.isIP(host.trim()) !== 4)) throw new Error('请输入有效的 IPv4 地址');
+      const offers = await discover(targetId, host === undefined ? this.service.options.pairingDestinations ?? broadcasts() : [host.trim()], this.service.options.pairingDiscoveryPort ?? PAIR_PORT);
       const candidates = offers.filter(o => o.id !== this.invite?.id);
       if (!candidates.length) throw new Error('未找到待配对设备，请在同一局域网的另一台设备打开“添加设备”');
       // All matching account responses must agree; never pick an arbitrary code collision.

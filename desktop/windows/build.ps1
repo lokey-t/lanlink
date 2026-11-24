@@ -35,7 +35,7 @@ using System.Reflection;
 [assembly: AssemblyFileVersion("$version.0")]
 [assembly: AssemblyInformationalVersion("$informationalVersion")]
 "@ | Set-Content -LiteralPath $versionFile -Encoding UTF8
-    & (Join-Path $framework 'csc.exe') /nologo /target:winexe /platform:x64 /optimize+ "/out:$outputPath" "/win32manifest:$PSScriptRoot/app.manifest" "/win32icon:$root/assets/icons/LanLink.ico" @refs $versionFile (Join-Path $PSScriptRoot 'Client.cs') (Join-Path $PSScriptRoot 'Main.cs') (Join-Path $PSScriptRoot 'Remote.cs') (Join-Path $PSScriptRoot 'WindowShell.cs') (Join-Path $PSScriptRoot 'Pairing.cs') (Join-Path $PSScriptRoot 'Adb.cs') (Join-Path $PSScriptRoot 'AdbGuide.cs') (Join-Path $PSScriptRoot 'Access.cs') (Join-Path $PSScriptRoot 'WindowSize.cs') (Join-Path $PSScriptRoot 'Permissions.cs')
+    & (Join-Path $framework 'csc.exe') /nologo /target:winexe /platform:x64 /optimize+ "/out:$outputPath" "/win32manifest:$PSScriptRoot/app.manifest" "/win32icon:$root/assets/icons/LanLink.ico" @refs $versionFile (Join-Path $PSScriptRoot 'Client.cs') (Join-Path $PSScriptRoot 'Main.cs') (Join-Path $PSScriptRoot 'TrayPanel.cs') (Join-Path $PSScriptRoot 'MouseFeel.cs') (Join-Path $PSScriptRoot 'Remote.cs') (Join-Path $PSScriptRoot 'WindowShell.cs') (Join-Path $PSScriptRoot 'Pairing.cs') (Join-Path $PSScriptRoot 'Adb.cs') (Join-Path $PSScriptRoot 'AdbGuide.cs') (Join-Path $PSScriptRoot 'Access.cs') (Join-Path $PSScriptRoot 'WindowSize.cs') (Join-Path $PSScriptRoot 'Permissions.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Native desktop build failed' }
 } finally {
     Remove-Item -LiteralPath $versionFile -ErrorAction SilentlyContinue

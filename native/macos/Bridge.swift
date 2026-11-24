@@ -23,6 +23,11 @@ func emit(_ value: [String: Any]) { output.emit(value) }
 let bluetoothHid = BluetoothHid()
 let commandCapacity = DispatchSemaphore(value: 128)
 let screenCapacity = DispatchSemaphore(value: 2)
+var mouseSmooth = false, mouseReverse = false, mouseDisableAcceleration = false
+var mouseSensitivity = 1.0, wheelPending = 0.0
+var wheelModifiers: CGEventFlags = []
+func wheelPost(_ delta: Int32) { let e=CGEvent(scrollWheelEvent2Source:nil,units:.pixel,wheelCount:1,wheel1:delta,wheel2:0,wheel3:0); e?.flags=wheelModifiers;post(e) }
+func wheelInput(_ delta: Double, _ modifiers: CGEventFlags? = nil) { wheelModifiers=modifiers ?? flags();let d=mouseReverse ? -delta:delta;if mouseSmooth {if wheelPending*d<0 {wheelPending=0};wheelPending+=d}else{wheelPost(Int32(d))} }
 var remote = false
 var remoteBluetooth = false
 var inputSessionActive = true
@@ -58,7 +63,7 @@ func mouseButton(_ button: Int, _ down: Bool) {
  let e = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: p, mouseButton: b); e?.flags = flags(); post(e)
  if down { buttons.insert(button) } else { buttons.remove(button) }
 }
-func releaseAll() { for k in Array(held) { key(k, false) }; for b in Array(buttons) { mouseButton(b, false) } }
+func releaseAll() { wheelPending=0; for k in Array(held) { key(k, false) }; for b in Array(buttons) { mouseButton(b, false) } }
 func stopCapture() {
  bluetoothHid.reset()
  remote = false
@@ -80,7 +85,20 @@ let callback: CGEventTapCallBack = { _, type, event, _ in
   let flag:CGEventFlags = code==57 ? .maskAlphaShift:[54,55].contains(code) ? .maskCommand:[56,60].contains(code) ? .maskShift:[58,61].contains(code) ? .maskAlternate:.maskControl
   if f.contains(flag){physicalModifiers.insert(code)}else{physicalModifiers.remove(code)}
  }
- guard remote else { return Unmanaged.passUnretained(event) }
+ guard remote else {
+  if type == .scrollWheel && event.getIntegerValueField(.scrollWheelEventIsContinuous)==0 && (mouseSmooth || mouseReverse) {
+   let delta=event.getDoubleValueField(.scrollWheelEventPointDeltaAxis1)
+   wheelInput(delta != 0 ? delta:event.getDoubleValueField(.scrollWheelEventDeltaAxis1)*10,event.flags);return nil
+  }
+  if [.mouseMoved,.leftMouseDragged,.rightMouseDragged,.otherMouseDragged].contains(type) && (mouseSensitivity != 1 || mouseDisableAcceleration) {
+   // Core Graphics unaccelerated pointer fields (170/171) avoid changing global system preferences.
+   let old=CGEvent(source:nil)?.location ?? event.location
+   let dx=mouseDisableAcceleration ? event.getDoubleValueField(CGEventField(rawValue:170)!):event.getDoubleValueField(.mouseEventDeltaX)
+   let dy=mouseDisableAcceleration ? event.getDoubleValueField(CGEventField(rawValue:171)!):event.getDoubleValueField(.mouseEventDeltaY)
+   event.location=CGPoint(x:old.x+dx*mouseSensitivity,y:old.y+dy*mouseSensitivity)
+  }
+  return Unmanaged.passUnretained(event)
+ }
  if type == .keyDown || type == .keyUp || type == .flagsChanged {
   var down = type == .keyDown
   if type == .flagsChanged { down = physicalModifiers.contains(code) }
@@ -109,7 +127,7 @@ func injectInput(_ a: [String:Any], _ bounds: CGRect) -> Bool {
   case "relative":
    syntheticCursor = true
    let cursor = CGEvent(source: nil)?.location ?? CGPoint(x: bounds.midX, y: bounds.midY)
-   let p = CGPoint(x: max(bounds.minX,min(bounds.maxX-1,cursor.x+(a["dx"] as? Double ?? 0))), y: max(bounds.minY,min(bounds.maxY-1,cursor.y+(a["dy"] as? Double ?? 0))))
+   let p = CGPoint(x: max(bounds.minX,min(bounds.maxX-1,cursor.x+(a["dx"] as? Double ?? 0)*mouseSensitivity)), y: max(bounds.minY,min(bounds.maxY-1,cursor.y+(a["dy"] as? Double ?? 0)*mouseSensitivity)))
    let type: CGEventType = buttons.contains(0) ? .leftMouseDragged : buttons.contains(2) ? .rightMouseDragged : .mouseMoved
    post(CGEvent(mouseEventSource:nil,mouseType:type,mouseCursorPosition:p,mouseButton:buttons.contains(2) ? .right : .left))
   case "move":
@@ -119,7 +137,7 @@ func injectInput(_ a: [String:Any], _ bounds: CGRect) -> Bool {
    post(CGEvent(mouseEventSource:nil,mouseType:type,mouseCursorPosition:p,mouseButton:buttons.contains(2) ? .right : .left))
   case "key": if let name = a["code"] as? String, let code = keyCodes[name] { key(code,a["down"] as? Bool ?? false) }
   case "button": mouseButton(a["button"] as? Int ?? 0,a["down"] as? Bool ?? false)
-  case "wheel": post(CGEvent(scrollWheelEvent2Source:nil,units:.pixel,wheelCount:1,wheel1:Int32(a["delta"] as? Int ?? 0),wheel2:0,wheel3:0))
+  case "wheel": wheelInput((a["delta"] as? NSNumber)?.doubleValue ?? 0)
   default: return false
   }
  return true
@@ -160,8 +178,11 @@ func command(_ message: [String: Any]) {
    if sent { reply(id) } else { failure(id, "蓝牙键鼠报告无法发送") }
   }
  case "compactMotion": motionOutputLock.lock();compactMotionOutput=a["enabled"] as? Bool ?? false;motionOutputLock.unlock();reply(id)
- case "capabilities": ensureInputTap(); reply(id,["inputBatch":1,"compactMotion":1,"relativeInput":true,"host":AXIsProcessTrusted() && (tap.map { CGEvent.tapIsEnabled(tap: $0) } ?? false),"input":AXIsProcessTrusted(),"inputMonitoring":CGPreflightListenEventAccess(),"screen":CGPreflightScreenCaptureAccess(),"clipboard":true,"shutdown":true,"width":bounds.width,"height":bounds.height])
+ case "mouse-feel":
+  mouseSmooth=a["smooth"] as? Bool ?? false;mouseReverse=a["reverse"] as? Bool ?? false;mouseDisableAcceleration=a["disableAcceleration"] as? Bool ?? false;mouseSensitivity=max(0.2,min(3,(a["sensitivity"] as? NSNumber)?.doubleValue ?? 1));wheelPending=0;reply(id)
+ case "capabilities": ensureInputTap(); reply(id,["mouseFeel":1,"inputBatch":1,"compactMotion":1,"relativeInput":true,"host":AXIsProcessTrusted() && (tap.map { CGEvent.tapIsEnabled(tap: $0) } ?? false),"input":AXIsProcessTrusted(),"inputMonitoring":CGPreflightListenEventAccess(),"screen":CGPreflightScreenCaptureAccess(),"clipboard":true,"shutdown":true,"width":bounds.width,"height":bounds.height])
  case "mode":
+  wheelPending=0
   if a["remote"] as? Bool == true {
    ensureInputTap()
    if !remote {
@@ -245,7 +266,19 @@ func ensureInputTap() {
 
 @main struct BridgeMain {
 static func main() {
+if CommandLine.arguments.dropFirst().first == "--video-capture" { StreamVideo.run(CommandLine.arguments.dropFirst(2)) }
+if CommandLine.arguments.contains("--audio-capture") { StreamAudio.capture() }
+if CommandLine.arguments.contains("--audio-play") {
+ do { try StreamAudio.play() } catch { exit(1) }
+ return
+}
 _ = NSApplication.shared
+let wheelTimer=Timer(timeInterval:0.016,repeats:true){_ in
+ guard wheelPending != 0 else{return}
+ var step=Int32(wheelPending*0.32);if step==0{step=Int32(wheelPending)}
+ if step==0{wheelPending=0;return};wheelPending-=Double(step);wheelPost(step)
+}
+RunLoop.main.add(wheelTimer,forMode:.common)
 ensureInputTap()
 let workspace = NSWorkspace.shared.notificationCenter
 let workspaceObservers = [

@@ -24,7 +24,7 @@ try { await service.start(); if(!process.argv.includes("--simulate"))service.upd
   write({ fatal: e.code === 'EADDRINUSE' ? 'LanLink 的连接端口已被占用。请打开已运行的 LanLink；若刚刚退出，请稍后重新启动。' : e.message, code: e.code });
   await close(1);
 }
-const invoke = createActions(service);
+const invoke = createActions(service, { nativeVideoSurface: true });
 service.on('edge-feedback', feedback => write({event:'edge-feedback',feedback}));
 write({ ready: true });
 createInterface({ input: process.stdin }).on('line', line => {

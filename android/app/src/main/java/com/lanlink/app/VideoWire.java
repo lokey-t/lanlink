@@ -11,6 +11,7 @@ import org.json.JSONObject;
 /** Binary video v1: challenge authentication, per-session AES-GCM, strict frame sequence. */
 public final class VideoWire implements AutoCloseable {
   static final int MAX = 4 * 1024 * 1024;
+  static final int PCM_PACKET_BYTES = 3840;
   final Socket socket;
   final DataInputStream input;
   final DataOutputStream output;
@@ -20,7 +21,7 @@ public final class VideoWire implements AutoCloseable {
   public static final class Frame {
     public byte[] data;
     public int width, height;
-    public boolean h264, key, heartbeat;
+    public boolean h264, key, heartbeat, audio;
     public long time;
     long queuedAt; // Local monotonic arrival time; never serialized.
 
@@ -120,14 +121,15 @@ public final class VideoWire implements AutoCloseable {
         || f.width > 4096
         || f.height > 4096
         || (long) f.width * f.height > 8388608
-        || f.data.length > MAX - 64) throw new IOException("视频帧尺寸无效");
+        || f.data.length > MAX - 64
+        || f.audio && f.data.length != PCM_PACKET_BYTES) throw new IOException("媒体帧尺寸无效");
   }
 
   public synchronized void send(Frame f) throws Exception {
     validate(f);
     byte[] plain =
         ByteBuffer.allocate(14 + f.data.length)
-            .put((byte) (f.heartbeat ? 3 : f.h264 ? 2 : 1))
+            .put((byte) (f.audio ? 4 : f.heartbeat ? 3 : f.h264 ? 2 : 1))
             .put((byte) (f.key ? 1 : 0))
             .putShort((short) f.width)
             .putShort((short) f.height)
@@ -142,15 +144,20 @@ public final class VideoWire implements AutoCloseable {
   }
 
   public Frame next() throws Exception {
+    return next(false);
+  }
+
+  Frame next(boolean audioOnly) throws Exception {
     int size = input.readInt();
-    if (size < 38 || size > MAX || input.readLong() != sequence)
+    if (size < 38 || size > (audioOnly ? PCM_PACKET_BYTES + 38 : MAX) || input.readLong() != sequence)
       throw new IOException("视频帧序号或长度无效");
     byte[] bytes = new byte[size - 8];
     input.readFully(bytes);
     ByteBuffer b = ByteBuffer.wrap(cipher(Cipher.DECRYPT_MODE).doFinal(bytes));
     sequence++;
     int codec = b.get() & 255;
-    if (codec != 1 && codec != 2 && codec != 3) throw new IOException("视频编码无效");
+    if (audioOnly ? codec != 3 && codec != 4 : codec < 1 || codec > 3)
+      throw new IOException("媒体编码无效");
     boolean keyframe = b.get() == 1;
     int w = b.getShort() & 65535, h = b.getShort() & 65535;
     long time = b.getLong();
@@ -158,6 +165,7 @@ public final class VideoWire implements AutoCloseable {
     b.get(data);
     Frame frame = new Frame(data, w, h, codec == 2, keyframe);
     frame.heartbeat = codec == 3;
+    frame.audio = codec == 4;
     frame.time = time;
     validate(frame);
     return frame;

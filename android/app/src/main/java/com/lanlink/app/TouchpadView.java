@@ -76,6 +76,11 @@ final class TouchpadView extends View implements AutoCloseable {
   }
 
   void setStandaloneDark() {
+    setStandaloneDark(true);
+  }
+
+  void setStandaloneDark(boolean enabled) {
+    if (!enabled) { contactGlow = null; invalidate(); return; }
     glowRadius = 82 * getResources().getDisplayMetrics().density;
     contactGlow = new RadialGradient(0, 0, glowRadius,
         new int[] {0x42e5e5ef, 0x1ee5e5ef, 0x06e5e5ef, 0x00e5e5ef},
@@ -172,11 +177,11 @@ final class TouchpadView extends View implements AutoCloseable {
     canvas.drawRoundRect(inset, inset, getWidth() - inset, getHeight() - inset, radius, radius, paint);
     paint.setStyle(Paint.Style.STROKE);
     paint.setStrokeWidth(density);
-    paint.setColor(compactDark ? touching ? 0xffb5a6ff : 0xff566078 : Ui.LINE);
+    paint.setColor(compactDark ? touching ? 0xffb8c1f7 : 0xff566078 : Ui.LINE);
     canvas.drawRoundRect(inset, inset, getWidth() - inset, getHeight() - inset, radius, radius, paint);
     paint.setStyle(Paint.Style.FILL);
     if (compactDark) {
-      paint.setColor(touching ? 0xffa69ccf : 0xff69728a);
+      paint.setColor(touching ? 0xffa9b4f5 : 0xff69728a);
       for (int row = -1; row <= 1; row++)
         for (int col = -1; col <= 1; col++)
           canvas.drawCircle(getWidth() / 2f + col * 10 * density,

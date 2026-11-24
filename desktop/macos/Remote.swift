@@ -1,8 +1,81 @@
 import SwiftUI
 import AppKit
 
+struct PhoneDisplayState {
+    let interactive: Bool
+    let locked: Bool
+    init?(_ info: [String: Any]) {
+        guard info["supported"] as? Bool == true else { return nil }
+        interactive = info["interactive"] as? Bool ?? false
+        locked = info["locked"] as? Bool ?? false
+    }
+}
+
 struct RemoteView: View {
     @ObservedObject var model:Model;@State var text="";@State var textPopover=false; @State var sendingText=false; @State var textError=""
+    @State private var phoneDisplay: PhoneDisplayState?
+    @State private var displayBusy = false
+    @State private var displayRevision = 0
+    @State private var displayError = ""
+
+    private func wakePhone() {
+        guard let id = model.remoteID, !displayBusy else { return }
+        displayBusy = true
+        displayRevision += 1
+        displayError = ""
+        Task {
+            defer { displayBusy = false }
+            do {
+                if !model.controlling, !model.controlConflict {
+                    model.resumeRemote = false
+                    model.autoControl = true
+                    if model.preparingControl { await model.remoteControlTask?.value }
+                    else { await model.beginRemoteControl() }
+                }
+                guard model.remoteID == id else { return }
+                let info = try await model.call("remote-display", ["id": id, "operation": "wake"])
+                if model.remoteID == id {
+                    phoneDisplay = PhoneDisplayState(info)
+                    if phoneDisplay?.interactive == false {
+                        try await Task.sleep(nanoseconds: 2_000_000_000)
+                        guard model.remoteID == id else { return }
+                        let current = try await model.call("remote-display", ["id": id, "operation": "status"])
+                        if model.remoteID == id { phoneDisplay = PhoneDisplayState(current) }
+                    }
+                }
+            } catch {
+                if model.remoteID == id { displayError = Model.readableMessage(error.localizedDescription) }
+            }
+        }
+    }
+
+    private func pollPhoneDisplay() async {
+        guard model.remotePhone, let id = model.remoteID else { return }
+        while !Task.isCancelled && model.remoteID == id {
+            if !displayBusy {
+                let revision = displayRevision
+                let info = try? await model.call("remote-display", ["id": id, "operation": "status"])
+                if !Task.isCancelled && model.remoteID == id && revision == displayRevision {
+                    phoneDisplay = info.flatMap(PhoneDisplayState.init)
+                    if phoneDisplay?.interactive == true { displayError = "" }
+                }
+            }
+            try? await Task.sleep(nanoseconds: 750_000_000)
+        }
+    }
+
+    private var lockIcon: some View {
+        Path { path in
+            path.move(to: CGPoint(x: 7, y: 10))
+            path.addLine(to: CGPoint(x: 7, y: 7))
+            path.addCurve(to: CGPoint(x: 17, y: 7), control1: CGPoint(x: 7, y: 1), control2: CGPoint(x: 17, y: 1))
+            path.addLine(to: CGPoint(x: 17, y: 10))
+            path.addRoundedRect(in: CGRect(x: 4, y: 10, width: 16, height: 12), cornerSize: CGSize(width: 2, height: 2))
+            path.move(to: CGPoint(x: 12, y: 15))
+            path.addLine(to: CGPoint(x: 12, y: 17))
+        }.stroke(style: StrokeStyle(lineWidth: 1.55, lineCap: .round, lineJoin: .round))
+            .frame(width: 24, height: 24).accessibilityHidden(true)
+    }
     func start(){model.autoControl=true;model.freshControl=true;model.fallbackAccepted=false;model.controlConflict=false;Task{await model.beginRemoteControl()}}
     func paste(){if let id=model.remoteID{model.perform("paste",["id":id], remoteSession: true)}}
     func sendText() {
@@ -15,6 +88,18 @@ struct RemoteView: View {
         VStack(spacing:4){
             RemoteSurface(model:model).frame(maxWidth:.infinity,maxHeight:.infinity).background(.black).clipped()
                 .overlay { if (model.screen == nil && model.autoControl) || model.controlConflict || !model.serviceError.isEmpty { VStack(spacing: 14) { if !model.controlConflict && model.serviceError.isEmpty { ProgressView() }; Text(L(model.controlConflict || !model.serviceError.isEmpty ? "控制连接已中断" : "正在连接设备画面")).font(.headline); Text(Model.displayMessage(model.serviceError.isEmpty ? model.remoteNotice : model.serviceError)).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true); if model.controlConflict { Button(L("重新请求"), action: start) }; if !model.serviceError.isEmpty { Button(L("重启设备服务")) { Task { await model.restartService() } }.disabled(model.serviceRestarting) } }.padding(24).frame(maxWidth: 300).background(.black.opacity(0.8), in: RoundedRectangle(cornerRadius: 14)) } }
+                .overlay {
+                    if let display = phoneDisplay, !display.interactive, !displayBusy {
+                        VStack(spacing: 10) {
+                            lockIcon
+                            Text(L(display.locked ? "设备已锁屏" : "手机屏幕已关闭")).font(.headline)
+                            Button(L("点击亮屏"), action: wakePhone)
+                            Text(L("可在设置中开启控制期间禁止自动锁定"))
+                                .font(.caption2).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                            if !displayError.isEmpty { Text(displayError).font(.caption).foregroundStyle(Palette.warning) }
+                        }.padding(18).frame(maxWidth: 250).background(.black.opacity(0.92), in: RoundedRectangle(cornerRadius: 14))
+                    }
+                }
             ZStack(alignment:.trailing){
                 if model.remotePhone{HStack(spacing:4){ForEach(["back","home","recents"],id:\.self){action in RemoteNavigationTool(symbol:["back":"chevron.left","home":"circle","recents":"square"][action]!,title:["back":"返回","home":"主页","recents":"最近任务"][action]!){model.sendInput(["kind":"navigation","action":action])}.disabled(!model.controlling)}}.frame(maxWidth:.infinity)}
                 Button(action:model.toggleRemoteSidebar){Image(systemName:model.remoteSidebarCollapsed ? "chevron.right":"chevron.left").frame(width:28,height:40)}.buttonStyle(.plain).foregroundStyle(.gray).help(L(model.remoteSidebarCollapsed ? "展开侧栏":"收起侧栏"))
@@ -24,11 +109,12 @@ struct RemoteView: View {
             RemoteTool(symbol:"play",title:L("开始控制"),action:start)
             RemoteTool(symbol:"pause",title:L("停止键鼠控制"),action:model.release)
             RemoteTool(symbol:"doc.on.clipboard",title:L("粘贴"),action:paste).disabled(!model.controlling)
-            RemoteTool(symbol:"keyboard",title:L("输入文字")){textPopover=true}.disabled(!model.controlling).popover(isPresented:$textPopover){VStack(alignment:.leading,spacing:12){Text(L("发送文字")).font(.headline);TextField(L("输入文本"),text:$text).disabled(sendingText); if !textError.isEmpty { Text(Model.displayMessage(textError)).font(.caption).foregroundStyle(.orange) }; Button(L(sendingText ? "正在发送…" : "发送"),action:sendText).disabled(sendingText || text.isEmpty)}.padding(18).frame(width:260)}
+            RemoteTool(symbol:"keyboard",title:L("输入文字")){textPopover=true}.disabled(!model.controlling).popover(isPresented:$textPopover){VStack(alignment:.leading,spacing:12){Text(L("发送文字")).font(.headline);TextField(L("输入文本"),text:$text).disabled(sendingText); if !textError.isEmpty { Text(Model.displayMessage(textError)).font(.caption).foregroundStyle(Palette.warning) }; Button(L(sendingText ? "正在发送…" : "发送"),action:sendText).disabled(sendingText || text.isEmpty)}.padding(18).frame(width:260)}
             if model.remotePhone{RemoteTool(symbol:"cable.connector",title:L("ADB 授权")){if let id=model.remoteID{model.perform("adb-guide-open",["id":id], remoteSession: true)}}}
             Spacer(minLength:8);metrics.padding(.bottom,6)
         }.frame(width:64).padding(.bottom,model.remotePhone ? 52:44).frame(width:model.remoteSidebarExtent,alignment:.leading).clipped().disabled(model.remoteSidebarCollapsed).accessibilityHidden(model.remoteSidebarCollapsed)
-    }.padding(4).frame(minWidth:(model.remotePhone ? 270:320)+model.remoteSidebarExtent,minHeight:360).background(.black).preferredColorScheme(.dark)}
+    }.padding(4).frame(minWidth:(model.remotePhone ? 270:320)+model.remoteSidebarExtent,minHeight:360).background(.black).preferredColorScheme(.dark)
+        .task(id: model.remoteID) { await pollPhoneDisplay() }}
 }
 struct RemoteNavigationTool: View {
     let symbol: String; let title: String; let action: () -> Void

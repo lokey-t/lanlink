@@ -19,31 +19,28 @@ import android.provider.Settings;
 import java.util.UUID;
 import org.json.JSONObject;
 
-/** Persists the service session before it can be killed, then reports evidence on the next start. */
+/** Persists the service session before it can be killed, then offers local guidance on the next start. */
 final class BackgroundRecovery {
   private static final long MAX_GUIDE_AGE = 7 * 24 * 60 * 60 * 1000L;
   private final Context context;
   private final SharedPreferences prefs;
-  final String sessionId = UUID.randomUUID().toString();
   private JSONObject recovery;
-  private JSONObject policy;
-  private boolean foreground, connected, stopped;
+  private boolean foreground, stopped;
   private long lastSample;
 
   BackgroundRecovery(Context context) {
     this.context = context.getApplicationContext();
     prefs = context.getSharedPreferences("background-recovery", Context.MODE_PRIVATE);
-    policy = readPolicy(this.context);
+    JSONObject policy = readPolicy(this.context);
     recovery = previousRecovery();
     if (prefs.getBoolean("running", false)) detectPreviousSession();
     long now = System.currentTimeMillis();
-    // commit is intentional: the session must exist on disk before a peer can receive its ID.
-    prefs.edit().putString("session", sessionId).putInt("pid", Process.myPid())
+    // commit is intentional: the session must survive abrupt process termination.
+    prefs.edit().putString("session", UUID.randomUUID().toString()).putInt("pid", Process.myPid())
         .putLong("startedAt", now).putLong("lastSeen", now)
         .putLong("elapsed", SystemClock.elapsedRealtime()).putInt("boot", bootCount())
-        .putBoolean("running", true).putBoolean("foreground", false).putBoolean("connected", false)
+        .putBoolean("running", true).putBoolean("foreground", false)
         .putBoolean("restricted", policy.optBoolean("backgroundRestricted"))
-        .putBoolean("batteryExempt", policy.optBoolean("batteryExempt"))
         .putString("recovery", recovery == null ? "" : recovery.toString()).commit();
   }
 
@@ -82,13 +79,11 @@ final class BackgroundRecovery {
     }
     boolean restricted = prefs.getBoolean("restricted", false);
     String reason = BackgroundRecoveryPolicy.reason(exitReason, background, restricted && !rebooted);
-    recovery = obj("id", UUID.randomUUID().toString(), "previousSessionId", previous,
-        "reason", reason, "at", at, "detectedAt", now, "wasBackground", background,
-        "evidence", exitReason == -1 ? "unclean-session" : "android-exit-info",
-        "exitReason", exitReason, "backgroundRestrictedAtExit", restricted,
-        "batteryExemptAtExit", prefs.getBoolean("batteryExempt", false), "rebooted", rebooted,
-        "guide", now - at < MAX_GUIDE_AGE && BackgroundRecoveryPolicy.offerGuide(reason, exitReason,
-            background, prefs.getBoolean("connected", false), rebooted));
+    if (now - at < MAX_GUIDE_AGE
+        && BackgroundRecoveryPolicy.offerGuide(reason, exitReason, background, rebooted)) {
+      recovery = obj("id", UUID.randomUUID().toString(), "reason", reason,
+          "detectedAt", now, "guide", true);
+    }
   }
 
   static JSONObject readPolicy(Context context) {
@@ -105,11 +100,10 @@ final class BackgroundRecovery {
     long elapsed = SystemClock.elapsedRealtime();
     if (!force && elapsed - lastSample < 30_000) return;
     lastSample = elapsed;
-    policy = readPolicy(context);
+    JSONObject policy = readPolicy(context);
     prefs.edit().putLong("lastSeen", System.currentTimeMillis()).putLong("elapsed", elapsed)
-        .putBoolean("foreground", foreground).putBoolean("connected", connected)
-        .putBoolean("restricted", policy.optBoolean("backgroundRestricted"))
-        .putBoolean("batteryExempt", policy.optBoolean("batteryExempt")).apply();
+        .putBoolean("foreground", foreground)
+        .putBoolean("restricted", policy.optBoolean("backgroundRestricted")).apply();
   }
 
   synchronized void foreground(boolean value) {
@@ -118,19 +112,10 @@ final class BackgroundRecovery {
     sample(true);
   }
 
-  synchronized void connected(boolean value) {
-    if (connected == value) return;
-    connected = value;
-    sample(true);
-  }
-
   synchronized void stopped() {
     stopped = true;
     prefs.edit().putBoolean("running", false).commit();
   }
-
-  synchronized JSONObject policy() { return policy; }
-  synchronized JSONObject recovery() { return recovery; }
 
   synchronized JSONObject pendingGuide() {
     if (recovery == null || !recovery.optBoolean("guide")
@@ -157,8 +142,8 @@ final class BackgroundRecovery {
   }
 
   static boolean openBatterySettings(Activity activity) {
-    return launch(activity, new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
-        || openAppSettings(activity);
+    return launch(activity, appDetails(activity))
+        || launch(activity, new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
   }
 
   static boolean openStartupSettings(Activity activity) {
@@ -182,8 +167,12 @@ final class BackgroundRecovery {
   }
 
   private static boolean openAppSettings(Activity activity) {
-    return launch(activity, new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-        Uri.parse("package:" + activity.getPackageName()))) || launch(activity, new Intent(Settings.ACTION_SETTINGS));
+    return launch(activity, appDetails(activity)) || launch(activity, new Intent(Settings.ACTION_SETTINGS));
+  }
+
+  private static Intent appDetails(Activity activity) {
+    return new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+        Uri.parse("package:" + activity.getPackageName()));
   }
 
   private static boolean launch(Activity activity, Intent intent) {

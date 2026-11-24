@@ -1,3 +1,4 @@
+import {saveMouseFeel,checkMousePermission} from './mouse-feel.js';
 import { parseToken, saveConfig } from './identity.js';
 import { ConnectionQuality, analyzeConnection } from './connection-quality.js';
 import { startDiscovery } from './discovery.js';
@@ -12,7 +13,7 @@ import {exportLogs} from './log-export.js';
 
 // Shared application operations. Desktop calls them directly through restricted IPC;
 // the optional developer HTTP harness delegates to the same implementation.
-export function createActions(service) {
+export function createActions(service, { nativeVideoSurface = false } = {}) {
   const adb = service.adb || new AdbManager(service);
   const quality = new ConnectionQuality(service);
   const qualityAction = run => async args => { await quality.load(); return run(args); };
@@ -63,6 +64,8 @@ export function createActions(service) {
     'permission-guide-enable': a => enablePermissionGuide(service, a.requestId),
     'adb-forget': a => adb.forget(a.id),
     'adb-authorization-dismiss': a => adb.dismissAuthorization(a.requestId),
+    'mouse-feel-check': a => checkMousePermission(service,a.id),
+    'mouse-feel-save': a => service.configure(()=>saveMouseFeel(service,a.devices)),
     settings: a => service.settings(a),
     'layout-place':a=>service.configure(()=>applySettings(service,{layoutPositions:editLayoutPositions(service,a)})),
     'layout-remove':a=>service.configure(()=>applySettings(service,{layoutPositions:editLayoutPositions(service,{id:a.id,remove:true})})),
@@ -105,7 +108,6 @@ export function createActions(service) {
     'consent-revoke': a => service.revokeConsent(a.id),
     'consent-set': a => service.setConsent(a.id,a.permissions),
     'permission-dismiss': a => { if (!a?.requestId || service.permissionNotice?.requestId === a.requestId) service.permissionNotice = null; },
-    'android-disconnect-dismiss': a => service.androidRecovery.dismiss(a.requestId),
     pairing: a => {
       const info = { ...service.pairing.show(), groupId: service.group.data.id, groupEstablished: service.group.established };
       if (a.reveal) {
@@ -121,7 +123,7 @@ export function createActions(service) {
     join: async a => {
       const previousGroup = service.group.data.id;
       if (a.expectedGroup && a.expectedGroup !== previousGroup) throw Error('组已发生变化，请重新打开添加设备');
-      const result = a.code !== undefined ? await service.pairing.join(a.code, a.id, a.dissolveCurrentGroup === true) : { token: a.token };
+      const result = a.code !== undefined ? await service.pairing.join(a.code, a.id, a.dissolveCurrentGroup === true, a.host) : { token: a.token };
       parseToken(result.token);
       if (service.group.data.id !== previousGroup) throw Error('组已发生变化，请重新配对');
       if (result.group?.id === previousGroup) { if (result.host) service.connect(result.host, result.port); return { alreadyInGroup: true }; }
@@ -140,9 +142,21 @@ export function createActions(service) {
     input: a => { if (service.active !== a.id) throw new Error('请先开始控制'); if(service.activeSession?.transport==='bluetooth')throw Error('此会话使用蓝牙键鼠，请使用本机键鼠'); return service.getPeer(a.id).request('input', a.input); },
     text: a => { if (service.active !== a.id) throw new Error('请先开始控制'); if(service.activeSession?.transport==='bluetooth')throw Error('此会话使用蓝牙键鼠，请使用本机键鼠'); return service.getPeer(a.id).request('text', { text: a.text }); },
     screen: a => service.screenFrom(a.id),
-    'stream-open': a => service.openStream(a.id, a.jpegOnly === true),
+    'stream-open': a => service.openStream(a.id, a.jpegOnly === true, nativeVideoSurface ? a.surface : undefined, nativeVideoSurface && a.audio === true),
     'stream-next': a => service.videoViewer.next(a.id),
     'stream-close': a => service.closeStream(a.id),
+    'remote-display': a => {
+      const {operation, enabled} = a;
+      if (!['status', 'wake', 'set'].includes(operation) || operation === 'set' && typeof enabled !== 'boolean')
+        throw new Error('无效的屏幕操作');
+      const peer = service.getPeer(a.id);
+      if (peer.info?.capabilities?.remoteDisplay !== 1) {
+        if (operation === 'status') return {};
+        throw new Error('请升级被控端 LanLink');
+      }
+      if (operation !== 'status' && service.active !== a.id) throw new Error('请先开始桌面控制');
+      return peer.request('remote-display', operation === 'set' ? {operation, enabled} : {operation}, 2000);
+    },
     paste: a => service.pasteTo(a.id),
     clipboard: async a => {
       await service.native.call('clipboardSet', { text: String(a.text || '').slice(0, 1000000) });

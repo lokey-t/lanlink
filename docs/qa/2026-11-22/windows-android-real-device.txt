@@ -1,0 +1,61 @@
+LanLink 当前工作树实机测试记录
+日期：2026-11-22，Asia/Shanghai
+
+结论
+本轮覆盖的 Windows 启动、原生界面、Android 保留数据升级、局域网认证、ADB 输入、H.264 画面及关闭重开通过。不能据此认定全部平台、全部功能或长期稳定性已验收。未修改业务源码。
+
+版本与环境
+- 工作树：0.92.1 / versionCode 94，基于 08a55b1，包含测试前已有的未提交修改。
+- 本轮 Android 构建源码指纹：ff66d8856151d2fc6a233e0eb0065eaf33d3b5ee1ec554fe0ad87ad89a729820。
+- Windows：NT 10.0.26300.0；Node v26.13.1。
+- 真机：小米 24129PN74C（dada），Android 16；USB 已连接，应用通信与画面测试走局域网。
+- 控制后端：ADB。Root=false，Shizuku=false；未把这两个后端列为通过。
+
+构建与自动检查
+- npm test：374 项，353 通过、21 跳过、0 失败；耗时 20.83 秒。跳过项不计通过。
+- npm run check：JavaScript 语法检查通过。
+- desktop/windows/build.ps1：当前 Windows C# 原生界面编译通过。
+- Android assembleDebug、assembleDebugAndroidTest、lintDebug 全部通过，lint 为 0 errors / 70 warnings。仅构建了 instrumentation APK，没有在个人真机上运行其完整测试套件。
+- Windows --self-test 在独立数据目录通过：设置 IPC、配对二维码解码与页面、布局、离线菜单、导航/草稿/保存、紧凑尺寸、最大化还原、托盘、ADB 状态、远控窗口比例/折叠/配置恢复、文件暂存及分享界面等。该自检使用标记的示例设备，不等于相应功能均已跨设备实测。
+
+真机测试
+1. 安装前备份原 APK 和应用内部 shared_prefs/files，随后 adb install -r 当前 debug APK 成功；没有卸载或清空数据，原有组身份继续可用。
+2. 当前 Node Service 与手机经实际局域网完成加密认证；独立测试目录复用已有身份，不创建新组，不执行重新配对/解散组。
+3. permission-status 返回 input/screen 已启用、系统已授权、对端已允许；ADB engine 持久通道 ready。查询时未申请输入控制。
+4. 获取非指针输入控制成功；发送 Home 导航成功，并通过 dumpsys activity 确认前台进入系统 Launcher。
+5. 当前 Android 实际采集 -> H.264/TCP -> Windows FFmpeg 实际解码：35,030 ms 内取到 633 个新画面，712 x 1600，首帧 955 ms。约 18.1 个消费帧/秒；这是短时静态/少量动画画面的实际消费数量，不能当作最大帧率、输入到显示延迟或负载测试成绩。
+6. 关闭串流并释放输入成功，再次打开后重新得到 H.264 712 x 1600 画面。
+7. 另行启动当前编译的 Windows WPF 程序及原生 Windows bridge，实际发现手机，设备菜单显示在线；选择鼠标控制后显示“融合控制中 / 网络”。
+8. WPF 原生远控窗口实际显示手机 LanLink 页面；点击窗口自带“主页”按钮后实际画面变成系统桌面，dumpsys activity 再次确认 Launcher。画面指标实际显示 H.264，动态画面曾显示 19 fps / 8.0 Mbps；不把瞬时值当作持续性能结论。
+9. 点击远控窗口标题栏关闭按钮后窗口消失，主窗口恢复“键鼠控制：本机”，手机仍在线；末次检查无残留 ffmpeg 解码进程。
+10. 安装与测试期间抽查 Android 最近 logcat，未发现 com.lanlink 的 FATAL EXCEPTION 或 ANR；这是有限时间窗口检查。
+
+测试过程中的限制与处理
+- 初始安装版 Windows 程序以高完整性运行，自动化无法可靠访问。后续使用独立目录中的当前源码编译版本完成原生界面测试。
+- 测试目录通过目录联接复用源码，Node 按真实路径解析模块，初次 WPF 串流未找到 FFmpeg，提示需要 H.264。补齐测试进程的 LANLINK_FFMPEG 后同一源码正常显示真机画面；该次失败属于测试运行目录配置，未判定为产品缺陷。
+- 实际全局鼠标控制期间光标被限制在原位；Windows bridge 排除注入键盘事件，自动化发送 Ctrl+Alt+F12 没有触发物理紧急返回分支。结束该轮测试进程后确认输入已释放；物理紧急快捷键本轮未验收。远控窗口关闭释放则已实际验收。
+- 第一段自动串流测试的桌面 Native 为禁止本机输入/屏幕/剪贴板的测试适配器，手机为实际生产路径；随后 WPF 测试使用实际 Windows NativeBridge 与真实手机，补充验证原生呈现和导航。
+- 本轮测试配置关闭桌面剪贴板自动上传/下载，不修改用户原配置中的开关。
+
+尚未覆盖
+- 当前 macOS 源码在 Mac 上的编译与运行；仅发现同组在线 Mac，不计入当前源码实测。
+- 真机 Root/Shizuku 后端、音频实际听感、熄屏控制与亮屏恢复。
+- 真机双向剪贴板、文件/文件夹传输与保存、USB 拔插/网络切换、QUIC/WebRTC 实机链路。
+- 物理鼠标边缘跨屏/回切、物理紧急快捷键、真实弱网、旋转、休眠、重启恢复、多控制者竞争及长时间负载。
+- 正式签名包升级、安装器、自动更新及真实关机。
+
+证据（均为仓库相对路径）
+- .tools/real-device-20261122-node-tests.log
+- .tools/real-device-20261122-check.log
+- .tools/real-device-20261122-windows-build.log
+- .tools/real-device-20261122-android-build.log
+- .tools/real-device-20261122/ui-selftest/passed.txt 与 native-*.png
+- .tools/real-device-20261122/physical-smoke.mjs
+- .tools/real-device-20261122/physical-smoke.log
+- .tools/real-device-20261122/physical-results.json
+- .tools/real-device-20261122/phone-permission-status.json
+- .tools/real-device-20261122/phone-first-frame.jpg
+- android/app/build/reports/lint-results-debug.html
+
+结束状态
+Android 已安装本轮当前源码的 debug APK并保留应用数据；原 APK 与数据备份留在本地测试目录。Windows 原安装目录未覆盖；源码测试版主窗口保留运行供查看，远控窗口已关闭，键鼠控制在本机。没有发布或执行真实关机。

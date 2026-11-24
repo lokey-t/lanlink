@@ -2,7 +2,7 @@
     <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:windowAnimationStyle">@style/PageMotion</item>
         <item name="android:fontFamily">sans</item>
-        <item name="android:colorAccent">#7163C8</item>
+        <item name="android:colorAccent">#5B6BD5</item>
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:windowLightNavigationBar">true</item>
         <item name="android:statusBarColor">#F7F8FB</item>
@@ -14,7 +14,7 @@
     <style name="AppThemeDark" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:windowAnimationStyle">@style/PageMotion</item>
         <item name="android:fontFamily">sans</item>
-        <item name="android:colorAccent">#AA9CF2</item>
+        <item name="android:colorAccent">#A9B4F5</item>
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowLightNavigationBar">false</item>
         <item name="android:statusBarColor">#141B27</item>

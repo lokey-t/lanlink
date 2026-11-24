@@ -71,6 +71,7 @@ cat > "$BUNDLE/Contents/Info.plist" <<EOF
 <key>LanLinkInstanceProtocol</key><integer>1</integer>
 <key>CFBundleName</key><string>LanLink</string>
 <key>NSBluetoothAlwaysUsageDescription</key><string>LanLink uses Bluetooth to share your keyboard and mouse with targets you bind.</string>
+<key>NSAudioCaptureUsageDescription</key><string>LanLink shares system playback audio during an authorized remote screen session.</string>
 <key>CFBundleExecutable</key><string>LanLink</string>
 <key>CFBundleIconFile</key><string>LanLink</string>
 <key>CFBundlePackageType</key><string>APPL</string>

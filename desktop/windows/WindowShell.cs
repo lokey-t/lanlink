@@ -20,13 +20,13 @@ namespace LanLink.Desktop {
         var root = menu.Template.FindName("GlassRoot", menu) as Grid;
         var sample = menu.Template.FindName("GlassSample", menu) as Rectangle;
         var tint = menu.Template.FindName("GlassTint", menu) as Border;
-        if (source == null || root == null || sample == null || tint == null || menu.ActualWidth <= 0 || menu.ActualHeight <= 0) return;
-        root.Clip = new RectangleGeometry(new Rect(0, 0, menu.ActualWidth, menu.ActualHeight), 16, 16);
+        if (source == null || root == null || sample == null || tint == null || root.ActualWidth <= 0 || root.ActualHeight <= 0) return;
+        root.Clip = new RectangleGeometry(new Rect(0, 0, root.ActualWidth, root.ActualHeight), 16, 16);
         if (SystemParameters.HighContrast) { sample.Fill = null; tint.Background = MainWindow.Brush("#FFFFFF"); return; }
-        Point origin = source.PointFromScreen(menu.PointToScreen(new Point(0, 0)));
-        sample.Fill = new VisualBrush(source) { ViewboxUnits = BrushMappingMode.Absolute, Viewbox = new Rect(origin.X, origin.Y, menu.ActualWidth, menu.ActualHeight), Stretch = Stretch.Fill, AlignmentX = AlignmentX.Left, AlignmentY = AlignmentY.Top };
-        sample.Effect = new BlurEffect { KernelType = KernelType.Gaussian, Radius = 18, RenderingBias = RenderingBias.Performance };
-        tint.Background = MainWindow.Brush("#C7F8FAFF");
+        Point origin = source.PointFromScreen(root.PointToScreen(new Point(0, 0)));
+        sample.Fill = new VisualBrush(source) { ViewboxUnits = BrushMappingMode.Absolute, Viewbox = new Rect(origin.X, origin.Y, root.ActualWidth, root.ActualHeight), Stretch = Stretch.Fill, AlignmentX = AlignmentX.Left, AlignmentY = AlignmentY.Top };
+        sample.Effect = new BlurEffect { KernelType = KernelType.Gaussian, Radius = 28, RenderingBias = RenderingBias.Performance };
+        tint.Background = MainWindow.Brush("#9EF8FAFF");
       };
       menu.Opened += delegate { menu.Dispatcher.BeginInvoke(update, DispatcherPriority.Loaded); };
       menu.SizeChanged += delegate { if (menu.IsOpen) menu.Dispatcher.BeginInvoke(update, DispatcherPriority.Loaded); };
@@ -62,6 +62,7 @@ namespace LanLink.Desktop {
         case "file": geometry = "M6,3 L14,3 L19,8 L19,21 L6,21 Z M14,3 L14,8 L19,8"; break;
         case "paste": geometry = "M8,6 L5,6 L5,21 L19,21 L19,6 L16,6 M9,3 L15,3 L15,8 L9,8 Z"; break;
         case "power": geometry = "M12,2 L12,12 M7,5 A8,8 0 1 0 17,5"; break;
+        case "lock": geometry = "M7,10 L7,7 C7,1 17,1 17,7 L17,10 M6,10 L18,10 Q20,10 20,12 L20,20 Q20,22 18,22 L6,22 Q4,22 4,20 L4,12 Q4,10 6,10 Z M12,15 L12,17"; break;
         case "layout": geometry = "M3,4 L10,4 L10,11 L3,11 Z M14,4 L21,4 L21,11 L14,11 Z M3,15 L10,15 L10,22 L3,22 Z M14,15 L21,15 L21,22 L14,22 Z"; break;
         case "pointer": geometry = "M6,3 L6,20 L11,15 L15,21 L18,19 L14,13 L21,12 Z"; break;
         case "keyboard": geometry = "M2,6 L22,6 L22,19 L2,19 Z M5,9 L6,9 M9,9 L10,9 M13,9 L14,9 M17,9 L19,9 M5,12 L6,12 M9,12 L10,12 M13,12 L14,12 M17,12 L19,12 M7,16 L17,16"; break;
@@ -69,7 +70,15 @@ namespace LanLink.Desktop {
         case "bluetooth": geometry = "M5,5 L19,17 L12,22 L12,2 L19,7 L5,19"; break;
         default: geometry = "M3,4 L21,4 L21,17 L3,17 Z M12,17 L12,21 M7,21 L17,21"; break;
       }
-      return new Viewbox { Width = size, Height = size, Child = new System.Windows.Shapes.Path { Data = Geometry.Parse(geometry), Stroke = MainWindow.Brush(name=="clipboard-upload"||name=="clipboard-download"||name=="plus"?"#4169CE":"#637596"), StrokeThickness = 1.55, StrokeLineJoin = PenLineJoin.Round, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round, Width = 24, Height = 24 } };
+      return new Viewbox { Width = size, Height = size, Child = new System.Windows.Shapes.Path { Data = Geometry.Parse(geometry), Stroke = MainWindow.Brush(name=="clipboard-upload"||name=="clipboard-download"||name=="plus"?"#5B6BD5":"#65748B"), StrokeThickness = 1.55, StrokeLineJoin = PenLineJoin.Round, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round, Width = 24, Height = 24 } };
+    }
+    // Recolors glyphs and labels inside a button that uses the solid "Primary" style.
+    public static T OnAccent<T>(T content) where T : class {
+      var path = content as System.Windows.Shapes.Path; if (path != null) path.Stroke = MainWindow.Brush("#FFFFFF");
+      var text = content as TextBlock; if (text != null) text.Foreground = MainWindow.Brush("#FFFFFF");
+      var panel = content as Panel; if (panel != null) foreach (UIElement child in panel.Children) OnAccent<object>(child);
+      var decorator = content as Decorator; if (decorator != null) OnAccent<object>(decorator.Child);
+      return content;
     }
     public static object Label(string text, string icon) {
       var row = new StackPanel { Orientation = Orientation.Horizontal };
@@ -88,12 +97,12 @@ namespace LanLink.Desktop {
       window.UseLayoutRounding = true; window.SnapsToDevicePixels = true;
       TextOptions.SetTextFormattingMode(window, TextFormattingMode.Display);
       WindowChrome.SetWindowChrome(window, new WindowChrome { CaptionHeight = 0, ResizeBorderThickness = new Thickness(resize ? 6 : 0), GlassFrameThickness = new Thickness(0), CornerRadius = new CornerRadius(20), UseAeroCaptionButtons = false });
-      var frame = new Border { CornerRadius = new CornerRadius(20), BorderThickness = new Thickness(1), BorderBrush = dark ? Brushes.Black : MainWindow.Brush("#E0E6F0"), Background = dark ? Brushes.Black : MainWindow.Brush("#F1F5FB") };
+      var frame = new Border { CornerRadius = new CornerRadius(20), BorderThickness = new Thickness(1), BorderBrush = dark ? Brushes.Black : MainWindow.Brush("#DFE5EF"), Background = dark ? Brushes.Black : MainWindow.Brush("#F1F5FB") };
       var root = new Grid(); root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(compact ? 38 : 52) }); root.RowDefinitions.Add(new RowDefinition()); frame.Child = root;
       var caption = new Grid { Background = Brushes.Transparent, Margin = new Thickness(18, 0, 10, 0) };
       caption.ColumnDefinitions.Add(new ColumnDefinition()); caption.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); root.Children.Add(caption);
       var label = new DockPanel { VerticalAlignment = VerticalAlignment.Center };
-      if (!compact) { var brand = Glyph("brand", 23); brand.Margin = new Thickness(0, 0, 10, 0); DockPanel.SetDock(brand, Dock.Left); label.Children.Add(brand); } var captionText=MainWindow.Text(window.Title, compact ? 12 : 14,dark?"#DCE0E8":"#233957");if(dark)captionText.Foreground=new SolidColorBrush(Color.FromRgb(220,224,232));captionText.SetBinding(TextBlock.TextProperty,new System.Windows.Data.Binding("Title"){Source=window});captionText.TextTrimming=TextTrimming.CharacterEllipsis;label.Children.Add(captionText); caption.Children.Add(label);
+      if (!compact) { var brand = Glyph("brand", 23); brand.Margin = new Thickness(0, 0, 10, 0); DockPanel.SetDock(brand, Dock.Left); label.Children.Add(brand); } var captionText=MainWindow.Text(window.Title, compact ? 12 : 14,dark?"#DCE0E8":"#202C43");if(dark)captionText.Foreground=new SolidColorBrush(Color.FromRgb(220,224,232));captionText.SetBinding(TextBlock.TextProperty,new System.Windows.Data.Binding("Title"){Source=window});captionText.TextTrimming=TextTrimming.CharacterEllipsis;label.Children.Add(captionText); caption.Children.Add(label);
       caption.MouseLeftButtonDown += delegate(object sender, MouseButtonEventArgs e) {
         if (e.ClickCount == 2 && resize) window.WindowState = window.WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
         else if (e.LeftButton == MouseButtonState.Pressed) window.DragMove();

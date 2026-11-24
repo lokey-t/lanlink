@@ -32,7 +32,7 @@ struct AdbAuthorizationView: View {
             Text(LF("为「{0}」准备 ADB 连接", device.name)).font(.headline)
             Text(L("01  开启 USB 调试\n手机设置 → 关于手机，连续点击系统版本开启开发者选项，再打开 USB 调试。\n\n02  用数据线连接电脑\n解锁手机，允许 USB 调试并勾选始终允许此电脑，保持手机 LanLink 在线。\n\n03  自动匹配，点击连接\n核对组内设备身份后，点击连接自动配置 ADB，无需选择调试设备。")).lineSpacing(7)
             Text(L("小米等机型如出现系统输入失败，还需开启 USB 调试（安全设置）。")).font(.caption).foregroundStyle(.secondary)
-            Text(L("助手就绪后，同组其他电脑可直接使用，无需重复连接数据线。手机重启后，连接已信任的电脑恢复助手即可。系统 USB 调试信任按电脑分别保存，新电脑恢复助手时仍需手机确认。")).font(.callout).padding(16).background(Color.blue.opacity(0.06),in:RoundedRectangle(cornerRadius:14))
+            Text(L("助手就绪后，同组其他电脑可直接使用，无需重复连接数据线。手机重启后，连接已信任的电脑恢复助手即可。系统 USB 调试信任按电脑分别保存，新电脑恢复助手时仍需手机确认。")).font(.callout).padding(16).background(Palette.accent.opacity(0.06),in:RoundedRectangle(cornerRadius:14))
         }.frame(maxWidth:.infinity,alignment:.leading)}
         Text(Model.displayMessage(message)).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal:false,vertical:true)
         if message.contains("Platform-Tools") {

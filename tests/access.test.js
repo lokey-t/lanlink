@@ -18,6 +18,19 @@ function fixture(r=report()){
   s.peers=new Map([['phone',peer]]);s.getPeer=id=>s.peers.get(id);s.edge={waitForLeave(){}};
   const access=new Access(s);return {s,peer,access,calls,r};
 }
+test('screen-only access works with projection permission while the input helper is offline',async()=>{
+  const f=fixture(report(true));
+  f.r.permissions.input.systemGranted=false;
+  f.r.engine={ready:false};
+  assert.deepEqual(await f.access.prepare('phone',['screen']),{ready:true,allowed:true});
+  assert.deepEqual(f.calls,['permission-status']);
+});
+test('an unsupported input executor blocks acquisition even with cached grants',async()=>{
+  const f=fixture(report(true));
+  f.r.permissions.input.supported=false;
+  await assert.rejects(f.access.check(f.peer,{id:'phone'}),/不支持/);
+  assert.deepEqual(f.calls,['permission-status']);
+});
 test('feature preflight is read-only until explicit consent and blocks before opening a viewer',async()=>{
   const f=fixture();f.s.adbGuide={check:async()=>{throw Error('ADB_SETUP_REQUIRED: setup');}};
   assert.deepEqual(await f.access.prepare('phone',['input','screen']),{ready:false,guide:true});

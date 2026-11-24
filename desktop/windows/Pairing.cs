@@ -16,10 +16,10 @@ namespace LanLink.Desktop {
     readonly Func<Task> joined;
     readonly DispatcherTimer timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
     readonly System.Diagnostics.Stopwatch elapsed = new System.Diagnostics.Stopwatch();
-    readonly TextBlock code = MainWindow.Text("···· ····", 36, "#354CC2");
-    readonly TextBlock countdown = MainWindow.LText("正在生成配对码…", 12, "#7B879D");
-    readonly TextBlock status = MainWindow.Text("", 12, "#71819A");
-    readonly Border progress = new Border { Background = MainWindow.Brush("#798CEC"), CornerRadius = new CornerRadius(3), HorizontalAlignment = HorizontalAlignment.Left };
+    readonly TextBlock code = MainWindow.Text("···· ····", 36, "#5B6BD5");
+    readonly TextBlock countdown = MainWindow.LText("正在生成配对码…", 12, "#65748B");
+    readonly TextBlock status = MainWindow.Text("", 12, "#65748B");
+    readonly Border progress = new Border { Background = MainWindow.Brush("#5B6BD5"), CornerRadius = new CornerRadius(3), HorizontalAlignment = HorizontalAlignment.Left };
     readonly Image qr = new Image { Width = 168, Height = 168 };
     readonly Border qrFrame;
     readonly TextBox input = new TextBox { MaxLength = 8, FontSize = 24, FontFamily = new FontFamily("Consolas"), MinHeight = 52, Margin = new Thickness(0, 8, 0, 14) };
@@ -37,7 +37,7 @@ namespace LanLink.Desktop {
       Resources = owner.Resources;
       MaxWidth = 900; HorizontalAlignment = HorizontalAlignment.Stretch;
       var panel = new StackPanel();
-      var hint = MainWindow.LText("让两台设备连接同一局域网，并打开 LanLink。", 14, "#63728C");
+      var hint = MainWindow.LText("让两台设备连接同一局域网，并打开 LanLink。", 14, "#65748B");
       hint.Margin = new Thickness(0, 0, 0, 16);
       panel.Children.Add(hint);
       status.TextWrapping = TextWrapping.Wrap;
@@ -70,7 +70,7 @@ namespace LanLink.Desktop {
       code.FontWeight = FontWeights.SemiBold;
       code.Margin = new Thickness(0, 14, 0, 8);
       share.Children.Add(code);
-      var track = new Border { Height = 4, CornerRadius = new CornerRadius(3), Background = MainWindow.Brush("#E1E8F7"), Child = progress };
+      var track = new Border { Height = 4, CornerRadius = new CornerRadius(3), Background = MainWindow.Brush("#ECEEFC"), Child = progress };
       track.SizeChanged += delegate { UpdateCountdown(); };
       share.Children.Add(track);
       countdown.Margin = new Thickness(0, 8, 0, 12);
@@ -97,7 +97,7 @@ namespace LanLink.Desktop {
       share.Children.Add(qrFrame);
 
       AddCardHeading(joinPanel, "输入对方配对码", "keyboard", "输入对方「添加设备」页面的八位数字");
-      var inputLabel = MainWindow.LText("八位数字配对码", 12, "#63728C");
+      var inputLabel = MainWindow.LText("八位数字配对码", 12, "#65748B");
       inputLabel.Margin = new Thickness(0, 16, 0, 0);
       joinPanel.Children.Add(inputLabel);
       System.Windows.Automation.AutomationProperties.SetName(input, Locale.T("其他设备的八位数字配对码")); input.PreviewTextInput += delegate(object sender, TextCompositionEventArgs e) { e.Handled = !Regex.IsMatch(e.Text, "^[0-9]+$"); if(e.Handled)status.Text=Locale.T("配对码只能包含八位数字，可粘贴带空格的分组码。"); };
@@ -118,19 +118,60 @@ namespace LanLink.Desktop {
       joinButton.Style = (Style)FindResource("Primary");
       joinButton.HorizontalAlignment = HorizontalAlignment.Left;
       joinPanel.Children.Add(joinButton);
-      var note = MainWindow.LText("双方已有分组会一并合并。", 12, "#63728C");
+      var note = MainWindow.LText("双方已有分组会一并合并。", 12, "#65748B");
       note.Margin = new Thickness(0, 12, 0, 0);
       joinPanel.Children.Add(note);
       var manual = new StackPanel { Margin = new Thickness(0, 10, 0, 0) };
       var address = new TextBox { Margin = new Thickness(0, 0, 0, 8) }; System.Windows.Automation.AutomationProperties.SetName(address, Locale.T("已配对设备的局域网 IP"));
-      manual.Children.Add(MainWindow.LText("输入已配对设备的局域网 IP", 12, "#7B879D")); manual.Children.Add(address);
+      manual.Children.Add(MainWindow.LText("输入已配对设备的局域网 IP", 12, "#65748B")); manual.Children.Add(address);
       var connect = MainWindow.LButton("手动连接", delegate { }); connect.Click += async delegate {
         if(!connect.IsEnabled)return;connect.IsEnabled=false;address.IsEnabled=false;status.Text=Locale.T("正在连接设备并验证身份…");
         try { var result=await client.Call("connect", new { host = address.Text.Trim(), port = 45831 }); status.Text=string.IsNullOrWhiteSpace(Json.Text(result,"message"))?Locale.T("设备已连接。"):Json.Text(result,"message"); }
         catch (Exception e) { status.Text = MainWindow.DisplayError(e.Message)+Locale.T(" 可检查地址后重试。"); }
         finally {connect.IsEnabled=true;address.IsEnabled=true;}
       }; manual.Children.Add(connect);
-      panel.Children.Add(new Expander { Header=UiLocale.Content("已配对设备无法自动连接？"), Content = manual, FontSize = 12, Foreground = MainWindow.Brush("#8390A5"), Margin = new Thickness(0, 12, 0, 0) });
+      panel.Children.Add(new Expander { Header=UiLocale.Content("已配对设备无法自动连接？"), Content = manual, FontSize = 12, Foreground = MainWindow.Brush("#65748B"), Margin = new Thickness(0, 12, 0, 0) });
+      var directPair = MainWindow.LButton("无法连接？", delegate { });
+      directPair.FontSize = 12;
+      directPair.HorizontalAlignment = HorizontalAlignment.Left;
+      directPair.Click += delegate {
+        if (joining || waitingConnection) return;
+        var fields = new StackPanel { Margin = new Thickness(24) };
+        fields.Children.Add(MainWindow.LText("请让对方打开添加设备页面", 13));
+        fields.Children.Add(MainWindow.LText("对方 IPv4 地址", 12));
+        var ip = new TextBox { MinWidth = 280, Margin = new Thickness(0, 8, 0, 12) };
+        fields.Children.Add(ip);
+        fields.Children.Add(MainWindow.LText("八位数字配对码", 12));
+        var codeInput = new TextBox { MaxLength = 8, Margin = new Thickness(0, 8, 0, 12) };
+        fields.Children.Add(codeInput);
+        var feedback = MainWindow.Text("", 12);
+        feedback.TextWrapping = TextWrapping.Wrap;
+        fields.Children.Add(feedback);
+        var dialog = new Window { Owner = owner, Title = Locale.T("通过 IP 配对"), Content = fields,
+          SizeToContent = SizeToContent.WidthAndHeight, WindowStartupLocation = WindowStartupLocation.CenterOwner,
+          ResizeMode = ResizeMode.NoResize, Resources = owner.Resources };
+        var request = MainWindow.LButton("申请配对", delegate { });
+        request.Click += async delegate {
+          System.Net.IPAddress parsed;
+          string pairingAddress = ip.Text.Trim();
+          if (!Regex.IsMatch(pairingAddress, @"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$") ||
+              !System.Net.IPAddress.TryParse(pairingAddress, out parsed)) {
+            feedback.Text = Locale.T("请输入有效的 IPv4 地址"); return;
+          }
+          if (!Regex.IsMatch(codeInput.Text, "^[0-9]{8}$")) {
+            feedback.Text = Locale.T("请输入完整的八位数字配对码。"); return;
+          }
+          request.IsEnabled = false;
+          input.Text = codeInput.Text;
+          await Join(pairingAddress);
+          request.IsEnabled = true;
+          if (waitingConnection) dialog.Close();
+          else feedback.Text = status.Text;
+        };
+        fields.Children.Add(request);
+        dialog.ShowDialog();
+      };
+      joinPanel.Children.Add(directPair);
       Child = panel;
       InitialLoad = Task.FromResult(0);
       IsVisibleChanged += async delegate {
@@ -142,7 +183,7 @@ namespace LanLink.Desktop {
 
     }
     static Border Card(StackPanel content, string background) {
-      return new Border { Child = content, Background = MainWindow.Brush(background), BorderBrush = MainWindow.Brush("#DDE5F2"),
+      return new Border { Child = content, Background = MainWindow.Brush(background), BorderBrush = MainWindow.Brush("#DFE5EF"),
         BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(16), Padding = new Thickness(20) };
     }
     static void AddCardHeading(StackPanel card, string title, string icon, string description) {
@@ -157,7 +198,7 @@ namespace LanLink.Desktop {
       Grid.SetColumn(label, 1);
       heading.Children.Add(label);
       card.Children.Add(heading);
-      var hint = MainWindow.LText(description, 13, "#63728C");
+      var hint = MainWindow.LText(description, 13, "#65748B");
       hint.Margin = new Thickness(0, 8, 0, 0);
       card.Children.Add(hint);
     }
@@ -196,10 +237,10 @@ namespace LanLink.Desktop {
       } catch (Exception e) { CurrentCode = null; remaining = 0; UpdateCountdown(); copyCode.IsEnabled=false; status.Text = Locale.T("无法刷新配对码：") + MainWindow.DisplayError(e.Message); }
       finally { loading = false; reveal.IsEnabled = true; nextFetch = DateTime.UtcNow.AddSeconds(1); }
     }
-    public async Task Join() {
+    public async Task Join(string host = null) {
       if (joining || waitingConnection) return; if (!Regex.IsMatch(input.Text, "^[0-9]{8}$")) { status.Text = Locale.T("请输入完整的八位数字配对码。"); return; }
       joining = true; joinButton.IsEnabled = false; input.IsEnabled = false;
-      try { var state = await client.Call("state"); groupEstablished = Json.Flag(state, "groupEstablished"); UpdateJoinLabel(); if (!confirm(groupEstablished)) return; status.Text = Locale.T("正在查找设备并配对…"); await client.Call("join", new { code = input.Text, expectedGroup = Json.Text(state, "groupId") }); waitingConnection=true; initialPeers=new HashSet<string>(); status.Text=Locale.T("已配对，正在同步组内设备…"); input.Text = ""; SetQRShown(false); }
+      try { var state = await client.Call("state"); groupEstablished = Json.Flag(state, "groupEstablished"); UpdateJoinLabel(); if (!confirm(groupEstablished)) return; status.Text = Locale.T("正在查找设备并配对…"); await client.Call("join", host == null ? (object)new { code = input.Text, expectedGroup = Json.Text(state, "groupId") } : new { code = input.Text, host = host, expectedGroup = Json.Text(state, "groupId") }); waitingConnection=true; initialPeers=new HashSet<string>(); status.Text=Locale.T("已配对，正在同步组内设备…"); input.Text = ""; SetQRShown(false); }
       catch (Exception e) { status.Text = MainWindow.DisplayError(e.Message); }
       finally { joining = false; joinButton.IsEnabled = !waitingConnection; input.IsEnabled = !waitingConnection; }
     }

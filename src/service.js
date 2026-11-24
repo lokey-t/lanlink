@@ -1,3 +1,4 @@
+import {mouseDevices,mouseRecords,mouseExchange,receiveMouseFeel,applyLocalMouse,checkLocalMousePermission} from './mouse-feel.js';
 import {Updater} from './updater.js';
 import {buildInfo} from './build-info.js';
 import {qualityBuild,qualityTransfer} from './connection-quality.js';
@@ -30,7 +31,6 @@ import { LinkManager } from './links.js';
 import {QuicManager} from './quic.js';
 import { AdbGuide } from './adb-guide.js';
 import { Access } from './access.js';
-import { AndroidRecovery } from './android-recovery.js';
 
 const CHUNK = 192 * 1024, MAX_FILE = 2 * 1024 ** 3;
 export function safeName(name) {
@@ -55,7 +55,6 @@ export class Service extends EventEmitter {
     this.adb = new AdbManager(this); this.links = new LinkManager(this);this.quic=new QuicManager(this); this.adbGuide = new AdbGuide(this); this.access = new Access(this);
     this.outgoingIntents = new Set(); this.screenViewers = new Map(); this.screenTargets = new Map(); this.returning = 0; this.messageTasks = new Set();
     this.videoHost = new VideoHost(this); this.videoViewer = new VideoViewer(this);this.bulk=new BulkHost(this);
-    this.androidRecovery = new AndroidRecovery(this);
     this.inputTransport = new InputTransport(this);
     if (this.config.master === undefined && Object.values(this.config.edges || {}).some(Boolean)) this.config.master = true;
     this.native.on('event', e => this.nativeEvent(e).catch(err => this.log(err.message)));
@@ -63,7 +62,7 @@ export class Service extends EventEmitter {
   }
   log(message) { this.logs.unshift({ time: Date.now(), message: String(message).slice(0, 300) }); this.logs.length = Math.min(this.logs.length, runtimeLogLimit); this.emit('change'); }
   trackTask(task) { this.messageTasks.add(task); const done = () => this.messageTasks.delete(task); task.then(done, done); return task; }
-  identity() { return { id: this.config.id, name: this.config.name, platform: process.platform, masterSelection:masterSelection(this),layout:layoutSelection(this),capabilities: { ...this.native.capabilities,qualityProbe:1,qualityBuild,staging:1,quic:this.quic.enabled?1:0,motionV2:this.quic.native?.binaryMotion?2:0,bulk:1,rtcVideo:1, controlPrepare: true, bluetoothControl: 1, hidCursorSession: 1, hidSettings: 1, autoHidMaster: ['darwin','win32'].includes(process.platform) ? 1 : 0, autoHidTarget:this.native.capabilities.hidDirectPairing === true ? 1 : 0, dualLink: true, memberKey: this.group.own.key } }; }
+  identity() { return { id: this.config.id, name: this.config.name, platform: process.platform, masterSelection:masterSelection(this),mouseFeel:mouseExchange(this),layout:layoutSelection(this),capabilities: { ...this.native.capabilities,qualityProbe:1,qualityBuild,staging:1,quic:this.quic.enabled?1:0,motionV2:this.quic.native?.binaryMotion?2:0,bulk:1,rtcVideo:1, controlPrepare: true, bluetoothControl: 1, hidCursorSession: 1, hidSettings: 1, autoHidMaster: ['darwin','win32'].includes(process.platform) ? 1 : 0, autoHidTarget:this.native.capabilities.hidDirectPairing === true ? 1 : 0, dualLink: true, memberKey: this.group.own.key } }; }
   async start() {
     this.updater=new Updater(this);
     await this.updater.loadResult();
@@ -80,7 +79,7 @@ export class Service extends EventEmitter {
       this.config.knownDevices = {}; this.config.deviceGrants = {}; this.config.edges = {};delete this.config.layout;delete this.config.masterSelection;this.config.master=false;this.consent.reset(this.config.deviceGrants);
     }
     delete this.config.pendingGroupJoin;
-    await initializeMaster(this);await initializeLayout(this);await saveConfig(this.dir, this.config);await this.staging.load(); this.group.start(); await this.native.start();
+    await initializeMaster(this);await initializeLayout(this);await saveConfig(this.dir, this.config);await this.staging.load(); this.group.start(); await this.native.start();await applyLocalMouse(this);
     if (Object.keys(this.inputTransport.records).some(id => {
       const record = this.inputTransport.record(id);
       return record.host && (record.external || this.inputTransport.groupEnabled());
@@ -120,7 +119,6 @@ export class Service extends EventEmitter {
     peer.on('closed', () => {
       this.sockets.delete(peer);
       if (this.peers.get(peer.remote?.id) !== peer) return;
-      this.androidRecovery.disconnected(peer);
       this.peers.delete(peer.remote.id);this.staging.disconnected(peer.remote.id);
       this.screenViewers.delete(peer.remote.id); this.screenTargets.delete(peer.remote.id);
       for (const intent of this.outgoingIntents) if (intent.id === peer.remote.id) intent.cancelled = true;
@@ -180,7 +178,7 @@ export class Service extends EventEmitter {
     catch (e) { if (intent.cancelled) await this.peers.get(id)?.request('screenStop', {}, 1500).catch(() => {}); throw e; }
     finally { this.endOutgoing(intent); }
   }
-  openStream(id, jpegOnly = false) { return this.videoViewer.open(id, jpegOnly); }
+  openStream(id, jpegOnly = false, surface, audio = false) { return this.videoViewer.open(id, jpegOnly, surface, audio); }
   async closeStream(id) { const hadScreen = this.screenTargets.delete(id); for (const intent of this.outgoingIntents) if (intent.id === id) intent.cancelled = true; await this.videoViewer.close(id); if (hadScreen) await this.peers.get(id)?.request('screenStop', {}, 1500).catch(() => {}); }
   showFallback(id, edge, capture) { this.fallbackNotice = { id, edge, capture }; this.edge.reset(); this.emit('change'); }
   async motionInputs(peer,inputs){
@@ -279,18 +277,19 @@ export class Service extends EventEmitter {
     }
     if(m.type==='identity')queueMicrotask(()=>this.quic.connect(peer).catch(()=>{}));
     if (m.type === 'identity') {
-      peer.info={name:String(m.name).slice(0,80),platform:String(m.platform).slice(0,30),capabilities:m.capabilities||{}};this.androidRecovery.identity(peer);
+      peer.info={name:String(m.name).slice(0,80),platform:String(m.platform).slice(0,30),capabilities:m.capabilities||{}};
       if(this.active===peer.remote.id&&this.activeSession?.transport!=='bluetooth'&&this.needsFallback(peer)&&!this.fallbackAccepted){const edge=this.enteredEdge,capture=this.capture;await this.returnLocal();if(!this.currentPeer(peer))return;this.showFallback(peer.remote.id,edge,capture);}
       this.config.knownDevices||={};const old=this.config.knownDevices[peer.remote.id],info={name:peer.info.name,platform:peer.info.platform};this.config.knownDevices[peer.remote.id]=info;
       if(JSON.stringify(old)!==JSON.stringify(info))await saveConfig(this.dir,this.config);
       if(!this.currentPeer(peer))return;
       if(this.group.learn({id:peer.remote.id,...info,key:m.capabilities?.memberKey})){await saveConfig(this.dir,this.config);if(!this.currentPeer(peer))return;this.group.publish();}
       await initializeMaster(this);if(!this.currentPeer(peer))return;await initializeLayout(this);if(!this.currentPeer(peer))return;
-      if(m.masterSelection)await applyMaster(this,m.masterSelection);if(m.layout)await applyLayout(this,m.layout);this.emit('change');return;
+      if(m.mouseFeel)await receiveMouseFeel(this,m.mouseFeel);if(m.masterSelection)await applyMaster(this,m.masterSelection);if(m.layout)await applyLayout(this,m.layout);this.emit('change');return;
     }
+    if(m.type==='mouse-feel'){await receiveMouseFeel(this,m.mouseFeel);return;}
     if(m.type==='master-selection'){await applyMaster(this,m.choice);return;}
     if(m.type==='layout-update'){await applyLayout(this,m.layout);return;}
-    if (m.type === 'ping'||m.type==='pong') { rememberLayoutVersion(this,peer,m.layoutVersion);if(m.masterSelection)await applyMaster(this,m.masterSelection);if(m.layout)await applyLayout(this,m.layout);if(m.type==='ping'&&this.currentPeer(peer))peer.send({ type: 'pong',masterSelection:masterSelection(this),...layoutExchange(this,peer) });return; }
+    if (m.type === 'ping'||m.type==='pong') { rememberLayoutVersion(this,peer,m.layoutVersion);if(m.mouseFeel)await receiveMouseFeel(this,m.mouseFeel);if(m.masterSelection)await applyMaster(this,m.masterSelection);if(m.layout)await applyLayout(this,m.layout);if(m.type==='ping'&&this.currentPeer(peer))peer.send({ type: 'pong',mouseFeel:mouseExchange(this),masterSelection:masterSelection(this),...layoutExchange(this,peer) });return; }
     if(m.type==='clipboard'){await this.clipboardSync.receive(peer,m.offer);return;}
     if(m.type==='clipboard-inventory'){await this.clipboardSync.inventory(peer,m.ids);return;}
     if(m.type==='clipboard-record'){await this.clipboardSync.record(peer,m.record);return;}
@@ -316,6 +315,7 @@ export class Service extends EventEmitter {
     if (method === 'bluetooth-offer') return this.inputTransport.offer(peer);
     if (method === 'bluetooth-claim') return this.inputTransport.claim(peer,a);
     if (method === 'runtime-logs') return { logs: this.logs.slice() };
+    if (method === 'mouse-feel-check') return checkLocalMousePermission(this,peer.remote.id,peer.info?.name);
     if (method === 'permission-guide-open') return showPermissionGuide(this, a.permission, peer.remote.id, peer.info?.name);
     if (method === 'permission-toggle') return receivePermissionToggle(this, peer, a.permission, a.enabled);
     if(method==='permission-request') { const keys = Array.isArray(a.permissions) ? [...new Set(a.permissions.filter(key => permissionNames.includes(key)))] : permissionNames; if (!keys.length) throw Error('请选择需要的权限'); const ready = this.consent.request(peer.remote.id,peer.info?.name,Date.now(),keys) === true;this.emit('change');return {ready}; }
@@ -535,7 +535,7 @@ export class Service extends EventEmitter {
     const p = this.getPeer(this.active);
     if (e.kind === 'move') {
       const width = p.info?.capabilities?.width || 1920, height = p.info?.capabilities?.height || 1080;
-      this.position.x = Math.max(0, Math.min(1, this.position.x + e.dx / width)); this.position.y = Math.max(0, Math.min(1, this.position.y + e.dy / height));
+      this.position.x = Math.max(0, Math.min(1, this.position.x + e.dx * (p.info?.capabilities?.mouseFeel===1 ? mouseRecords(this)[this.active]?.settings.sensitivity??1:1) / width)); this.position.y = Math.max(0, Math.min(1, this.position.y + e.dy * (p.info?.capabilities?.mouseFeel===1 ? mouseRecords(this)[this.active]?.settings.sensitivity??1:1) / height));
       const intent=this.controlIntent;
       if(intent?.fromSession===this.activeSession && intent.edgeTrigger && !intent.committed && !this.positionTouches(intent.edge,width,height))this.cancelPendingEdge();
       // The per-peer input queue coalesces movement and adapts its rate. Enqueue
@@ -782,7 +782,7 @@ export class Service extends EventEmitter {
       this.hostProbeAt = Date.now();
       this.refreshCapabilities().catch(() => {});
     }
-    for (const p of this.peers.values()) { if(!this.currentPeer(p))continue;if (Date.now() - p.lastSeen > 10000) p.close(); else p.send({ type: 'ping',masterSelection:masterSelection(this),...layoutExchange(this,p) }); }
+    for (const p of this.peers.values()) { if(!this.currentPeer(p))continue;if (Date.now() - p.lastSeen > 10000) p.close(); else p.send({ type: 'ping',mouseFeel:mouseExchange(this),masterSelection:masterSelection(this),...layoutExchange(this,p) }); }
     if (this.inputTransport.started && this.activeSession?.transport !== 'bluetooth') this.inputTransport.refresh().catch(() => {});
     if (this.active) {
       const session = this.activeSession, id = this.active, edge = this.enteredEdge, capture = this.capture;
@@ -809,7 +809,7 @@ export class Service extends EventEmitter {
   }
   configure(run){const work=(this.configurationWork||Promise.resolve()).catch(()=>{}).then(run);this.configurationWork=work;return work;}
   settings(a) {return this.configure(()=>applySettings(this,a));}
-  state() { return { inputTransport:this.inputTransport.state(), update:this.updater?.state(),updateChannel:this.updater?.channel()??'stable',autoCheckUpdates:this.config.autoCheckUpdates!==false, buildInfo, language:languagePreference(this.config.language), theme:['system','dark','light'].includes(this.config.theme)?this.config.theme:'system', clipboardSettings:this.clipboardSync.state(), masterId:masterSelection(this)?.id||(this.config.master?this.config.id:""), masterDevices:masterChoices(this), edgeGlowHideAway:!!this.config.edgeGlowHideAway, switchMode:this.config.switchMode||"dwell", edgeHotkey:this.config.edgeHotkey||"ctrl-alt", edgeGlowEnabled: this.config.edgeGlow !== false, edgeTransition: this.edgeTransition, id: this.config.id, name: this.config.name, groupId: this.group.data.id, groupEstablished: this.group.established, groupMemberCount: Object.keys(this.group.data.members).length, account: this.group.data.id, controlEnded: this.controlEnded, androidDisconnectNotice: this.androidRecovery.notice, fallbackNotice: this.fallbackNotice, stageIncoming:this.staging.incoming(), adbGuide: this.adbGuide.notice, adbAuthorization: this.adb.authorizationNotice(), accessNotice: this.access.notice, viewers: [...new Set([...this.videoHost.sessions.values()].map(s => s.peer.remote.id).concat(this.liveScreens(this.screenViewers)))], port: this.port, dwell: this.config.dwell ?? 100, edges: layoutEdges(this), reachableEdges:reachableLayoutEdges(this), layout:layoutSelection(this),layoutDevices:layoutDevices(this),consentRequests: this.consent.list(), deviceGrants: this.config.deviceGrants, permissionNotice: this.permissionNotice, permissions: this.config.permissions, master: !!this.config.master, capabilities: this.native.capabilities, knownDevices: this.config.knownDevices || {}, peers: [...this.peers].map(([id, p]) => ({ id, ...p.info, address: p.socket.remoteAddress, transport: this.links.status(p), access: p.access || {status:"未就绪",permissions:{}} })), active: this.active, pendingControl: this.controlIntent?.id, owner: this.owner?.id, shutdownAt: this.shutdownAt, transfer: this.transfer, clipboard: this.clipboard ? { source: this.clipboard.source, files: this.clipboard.files.length, textLength: this.clipboard.text.length } : null, logs: this.logs }; }
+  state() { return { mouseDevices:mouseDevices(this),inputTransport:this.inputTransport.state(), update:this.updater?.state(),updateChannel:this.updater?.channel()??'stable',autoCheckUpdates:this.config.autoCheckUpdates!==false, buildInfo, language:languagePreference(this.config.language), theme:['system','dark','light'].includes(this.config.theme)?this.config.theme:'system', clipboardSettings:this.clipboardSync.state(), masterId:masterSelection(this)?.id||(this.config.master?this.config.id:""), masterDevices:masterChoices(this), edgeGlowHideAway:!!this.config.edgeGlowHideAway, switchMode:this.config.switchMode||"dwell", edgeHotkey:this.config.edgeHotkey||"ctrl-alt", edgeGlowEnabled: this.config.edgeGlow !== false, edgeTransition: this.edgeTransition, id: this.config.id, name: this.config.name, groupId: this.group.data.id, groupEstablished: this.group.established, groupMemberCount: Object.keys(this.group.data.members).length, account: this.group.data.id, controlEnded: this.controlEnded, fallbackNotice: this.fallbackNotice, stageIncoming:this.staging.incoming(), adbGuide: this.adbGuide.notice, adbAuthorization: this.adb.authorizationNotice(), accessNotice: this.access.notice, viewers: [...new Set([...this.videoHost.sessions.values()].map(s => s.peer.remote.id).concat(this.liveScreens(this.screenViewers)))], port: this.port, dwell: this.config.dwell ?? 100, edges: layoutEdges(this), reachableEdges:reachableLayoutEdges(this), layout:layoutSelection(this),layoutDevices:layoutDevices(this),consentRequests: this.consent.list(), deviceGrants: this.config.deviceGrants, permissionNotice: this.permissionNotice, permissions: this.config.permissions, master: !!this.config.master, capabilities: this.native.capabilities, knownDevices: this.config.knownDevices || {}, peers: [...this.peers].map(([id, p]) => ({ id, ...p.info, address: p.socket.remoteAddress, transport: this.links.status(p), access: p.access || {status:"未就绪",permissions:{}} })), active: this.active, pendingControl: this.controlIntent?.id, owner: this.owner?.id, shutdownAt: this.shutdownAt, transfer: this.transfer, clipboard: this.clipboard ? { source: this.clipboard.source, files: this.clipboard.files.length, textLength: this.clipboard.text.length } : null, logs: this.logs }; }
   async stopInbound() {
     if(this.stoppingInbound)return;
     this.stoppingInbound=true;
@@ -835,11 +835,11 @@ export class Service extends EventEmitter {
     } finally { this.stoppingInbound=false;this.emit('change'); }
   }
   async groupChanged() {
-    this.changingGroup = true;this.inputTransport.masterChanged();await initializeMaster(this);await initializeLayout(this);await this.quic.reset();this.bulk.closeAll();
+    this.changingGroup = true;await applyLocalMouse(this);this.inputTransport.masterChanged();await initializeMaster(this);await initializeLayout(this);await this.quic.reset();this.bulk.closeAll();
     try {
     if (this.controlIntent) this.controlIntent.cancelled = true; for (const intent of this.outgoingIntents) intent.cancelled = true; this.screenTargets.clear(); this.screenViewers.clear(); this.fallbackNotice = null;
     this.secret = parseToken(this.config.token);this.staging.clearExports(); this.stopDiscovery?.(); this.videoHost.closeAll(); await this.videoViewer.closeAll(); await this.returnLocal(); this.clearInboundEdge();this.owner = null; await this.native.call('release'); this.offers.clear(); this.clipboard = null;this.clipboardSync.clear(); this.permissionNotice = null; this.cancelShutdown(); this.consent.reset(this.config.deviceGrants);
-    const old = [...this.sockets]; for (const peer of old) peer.intentionalClose = true; setTimeout(() => old.forEach(p => p.close()), 100);
+    const old = [...this.sockets]; setTimeout(() => old.forEach(p => p.close()), 100);
     if (!this.options.noDiscovery) this.stopDiscovery = startDiscovery(this.identity(), this.secret, this.port, (b, host) => {
       if (!this.group.excluded(b.id) && this.config.id < b.id) {
         if (!this.peers.has(b.id)) this.connect(host, b.port);

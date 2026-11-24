@@ -68,9 +68,13 @@ export class LinkManager {
       && this.service.peers.get(primary.remote.id) === primary && !this.service.group.excluded(primary.remote.id);
   }
   activate(primary, link) {
+    if (!this.links.has(link) || link.peer.closed) throw Error('INPUT_ROUTE_CLOSED');
     if (!this.valid(primary)) throw Error('设备连接已结束');
     this.wrap(primary);
-    if (primary.fastLink !== link) primary.routeVersion = (primary.routeVersion || 0) + 1;
+    if (primary.fastLink !== link) {
+      primary.routeVersion = (primary.routeVersion || 0) + 1;
+      link.slowSamples = link.fastSamples = 0;
+    }
     primary.fastLink = link; this.service.emit('change');
   }
   async dispatch(primary, link, m) {
@@ -140,14 +144,24 @@ export class LinkManager {
       await new Promise((resolve, reject) => { peer.once('ready', resolve); peer.once('closed', () => reject(Error('辅助通道连接失败'))); });
       if (peer.remote.id !== id || !this.valid(primary)) throw Error('辅助设备身份不匹配');
       const measure = async fn => { const start = performance.now(); await fn(); return performance.now() - start; };
+      const routeVersion = primary.routeVersion;
       let fast = 0, lan = 0;
       for (let i = 0; i < 3; i++) {
         fast += await measure(() => peer.request('linkPing', {}, 1500));
         lan += await measure(() => primary.lanRequest('linkPing', {}, 1500));
       }
       link.rtt = fast / 3; link.lanRtt = lan / 3;
-      if (fast <= lan + 6 && (!primary.fastLink || primary.fastLink.peer.closed || link.rtt <= primary.fastLink.rtt + 1)) {
-        await peer.request('linkUse', {}, 1500); this.activate(primary, link);
+      if (!this.valid(primary) || primary.routeVersion !== routeVersion || !this.links.has(link)) {
+        await this.drop(link);
+        return;
+      }
+      if (fast <= lan + 6 && (!primary.fastLink || primary.fastLink.peer.closed || link.rtt + 2 < primary.fastLink.rtt)) {
+        await peer.request('linkUse', {}, 1500);
+        if (!this.valid(primary) || primary.routeVersion !== routeVersion || !this.links.has(link)) {
+          await this.drop(link);
+          return;
+        }
+        this.activate(primary, link);
       }
       this.service.emit('change');
     } catch { if (link) await this.drop(link); else await tunnel?.close(); }
@@ -192,15 +206,35 @@ export class LinkManager {
       for (const link of [...this.links]) {
         if (!this.valid(link.primary)) { await this.drop(link); continue; }
         try {
+          const routeVersion = link.primary.routeVersion;
           const start = performance.now(); await link.peer.request('linkPing', {}, 1200);
           link.rtt = performance.now() - start;
-          if (link.primary.fastLink === link) {
-            const lanStart = performance.now(); await link.primary.lanRequest('linkPing', {}, 1200);
-            if (link.rtt > (performance.now() - lanStart) * 1.5 + 5) await this.drop(link);
-          } else if (!link.primary.fastLink) {
-            const lanStart = performance.now(); await link.primary.lanRequest('linkPing', {}, 1200);
-            if (link.rtt <= performance.now() - lanStart + 2) {
-              await link.peer.request('linkUse', {}, 1200); this.activate(link.primary, link);
+          if (!this.valid(link.primary) || !this.links.has(link) || link.primary.routeVersion !== routeVersion) continue;
+          const active = link.primary.fastLink;
+          if (active && active !== link) continue;
+          const lanStart = performance.now();
+          try { await link.primary.lanRequest('linkPing', {}, 1200); }
+          catch {
+            // Missing comparison data says nothing about the auxiliary path just probed.
+            link.slowSamples = link.fastSamples = 0;
+            continue;
+          }
+          if (!this.valid(link.primary) || link.primary.fastLink !== active ||
+              link.primary.routeVersion !== routeVersion || !this.links.has(link)) continue;
+          link.lanRtt = performance.now() - lanStart;
+          if (active === link) {
+            link.slowSamples = link.rtt > link.lanRtt * 1.5 + 5 ? (link.slowSamples || 0) + 1 : 0;
+            if (link.slowSamples >= 3) await this.drop(link);
+          } else {
+            link.fastSamples = link.rtt <= link.lanRtt + 2 ? (link.fastSamples || 0) + 1 : 0;
+            if (link.fastSamples >= 3) {
+              link.fastSamples = 0;
+              await link.peer.request('linkUse', {}, 1200);
+              if (!this.valid(link.primary) || link.primary.routeVersion !== routeVersion || !this.links.has(link)) {
+                await this.drop(link);
+                continue;
+              }
+              this.activate(link.primary, link);
             }
           }
         } catch (error) { if (error.code !== 'QUIC_BUSY') await this.drop(link); }
@@ -219,14 +253,14 @@ export class LinkManager {
       }
     } finally { this.scanning = false; }
   }
-  async videoEndpoint(primary, info) {
+  async videoEndpoint(primary, info, optional = false) {
     const link = primary.fastLink;
     if (!link || link.peer.closed) return null;
     if (!link.serial) return { host: link.host, info, close: async () => {}, failed: () => this.drop(link) };
     try {
       const tunnel = await this.forward(link.serial, info.port);
       return { host: '127.0.0.1', info: { ...info, port: tunnel.port }, close: tunnel.close, failed: () => this.drop(link) };
-    } catch { await this.drop(link); return null; }
+    } catch { if (!optional) await this.drop(link); return null; }
   }
   async reverseVideo(primary, info) {
     const link = primary.fastLink;
@@ -236,7 +270,15 @@ export class LinkManager {
       const session = this.service.videoHost.sessions.get(info.id);
       if (!session) { await tunnel.close(); return info; }
       session.tunnel = tunnel;
-      return { ...info, usbPort: tunnel.port };
+      let audio = info.audio;
+      if (audio) try {
+        const soundTunnel = await this.forward(link.serial, audio.port, true);
+        if (this.service.videoHost.sessions.get(info.id) === session) {
+          session.audioTunnel = soundTunnel;
+          audio = { ...audio, usbPort: soundTunnel.port };
+        } else await soundTunnel.close();
+      } catch { /* Audio can still use the LAN if its USB tunnel is unavailable. */ }
+      return { ...info, usbPort: tunnel.port, ...(audio ? {audio} : {}) };
     } catch { await this.drop(link); return info; }
   }
   status(primary) {

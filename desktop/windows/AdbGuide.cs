@@ -15,9 +15,9 @@ namespace LanLink.Desktop {
   public sealed class AdbGuideWindow : Window {
     readonly MainWindow main; readonly object request;
     readonly DispatcherTimer timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
-    readonly TextBlock status = MainWindow.LText("等待手机连接…", 13, "#677C98");
+    readonly TextBlock status = MainWindow.LText("等待手机连接…", 13, "#65748B");
     readonly ListBox phones = new ListBox { MinWidth=210, MinHeight=42, MaxHeight=110, BorderThickness=new Thickness(0), Background=MainWindow.Brush("#FFFFFF"), DisplayMemberPath="Label", SelectedValuePath="Serial" };
-    readonly TextBlock empty = MainWindow.LText("等待已信任的 USB 设备",12,"#8493AA");
+    readonly TextBlock empty = MainWindow.LText("等待已信任的 USB 设备",12,"#65748B");
     readonly Button scan, authorize;
     readonly StackPanel normalGuide, revokedGuide;
     bool revoked, restorePending;
@@ -46,7 +46,7 @@ namespace LanLink.Desktop {
       status.TextWrapping=TextWrapping.Wrap; status.LineHeight=21;
       var tip=new StackPanel(); AddText(tip,Locale.T("每次开机，只需连接一次"),14);
       AddText(tip,Locale.T("助手就绪后，同组其他电脑可直接使用，无需重复连接数据线。手机重启后，连接已信任的电脑恢复助手即可。系统 USB 调试信任按电脑分别保存，新电脑恢复助手时仍需手机确认。"),12);
-      panel.Children.Add(new Border { Background=MainWindow.Brush("#EDF4FF"),CornerRadius=new CornerRadius(14),Padding=new Thickness(16,6,16,12),Margin=new Thickness(0,16,0,18),Child=tip });
+      panel.Children.Add(new Border { Background=MainWindow.Brush("#ECEEFC"),CornerRadius=new CornerRadius(14),Padding=new Thickness(16,6,16,12),Margin=new Thickness(0,16,0,18),Child=tip });
       revokedGuide=new StackPanel {Visibility=Visibility.Collapsed};
       AddText(revokedGuide,Locale.T("请在手机上允许 ADB 授权"),24);
       revokedGuide.Children.Add(Motion("adb-allow.svg"));
@@ -63,7 +63,7 @@ namespace LanLink.Desktop {
       Loaded+=async delegate { if(!preview) { timer.Start(); await Scan(); await Check(); } };
       Closed+=delegate { closed=true; timer.Stop(); if(!completed && !preview) { main.CancelFeature(DeviceId); foreach(var remote in Application.Current.Windows.OfType<RemoteWindow>().Where(w=>w.DeviceId==DeviceId)) remote.CancelAdbGuide(); main.Run(async()=> { await main.Client.Call("adb-guide-cancel",new { requestId=RequestId }); }); } };
     }
-    static void AddText(StackPanel panel,string value,int size) { var t=MainWindow.Text(value,size,size>=15?"#233957":"#657895"); t.TextWrapping=TextWrapping.Wrap;t.LineHeight=size+8;t.Margin=new Thickness(0,8,0,0);panel.Children.Add(t); }
+    static void AddText(StackPanel panel,string value,int size) { var t=MainWindow.Text(value,size,size>=15?"#202C43":"#65748B"); t.TextWrapping=TextWrapping.Wrap;t.LineHeight=size+8;t.Margin=new Thickness(0,8,0,0);panel.Children.Add(t); }
     void SetRevoked(bool value){revoked=value;if(value){restorePending=true;status.Text=Locale.T("等待手机允许 ADB 授权…");}normalGuide.Visibility=value?Visibility.Collapsed:Visibility.Visible;revokedGuide.Visibility=value?Visibility.Visible:Visibility.Collapsed;authorize.Visibility=value?Visibility.Collapsed:Visibility.Visible;}
     public static FrameworkElement Motion(string asset="adb-connect.svg") {
       var canvas=new Canvas { Width=400,Height=110 };

@@ -6,13 +6,16 @@ export function accessState(report, platform) {
   const values = Object.values(permissions).filter(p => p.supported !== false);
   const ready = values.length > 0 && values.every(p => p.appEnabled === true && p.systemGranted === true);
   const allowed = values.filter(p => p.peerAllowed === true).length;
-  return { status: !ready ? '未就绪' : !allowed ? '未授权' : allowed < values.length ? '有限授权' : '在线', ready, permissions };
+  const inputBackend = platform === 'android' && ['adb','root','shizuku'].includes(report?.engine?.backend)
+    ? report.engine.backend : undefined;
+  return { status: !ready ? '未就绪' : !allowed ? '未授权' : allowed < values.length ? '有限授权' : '在线', ready, permissions, inputBackend };
 }
 
 export class Access {
   constructor(service) { this.service=service;this.notice=null;this.generation=0; }
   async read(peer) {
     const report=await peer.request('permission-status',{},4000);
+    peer.bluetoothInputEnabled = report.inputTransport?.bluetoothEnabled;
     peer.access=accessState(report,peer.info?.platform);peer.accessAt=Date.now();return report;
   }
   async poll() {
@@ -33,7 +36,7 @@ export class Access {
     const bluetooth = hasHid && report.inputTransport?.bluetoothEnabled !== false;
     if (keyboardMouse && preference === 'bluetooth_only' && !bluetooth)
       throw Error('蓝牙键鼠尚未就绪，请检查配对及通道设置');
-    if(!bluetooth && (keys.includes('input') || keys.includes('screen'))) {
+    if(!bluetooth && keys.includes('input')) {
       try {await this.service.adbGuide.check(peer,{id,feature:true,screen:keys.includes('screen')});}
       catch(error){if(error.message.startsWith('ADB_SETUP_REQUIRED:'))return {ready:false,guide:true};throw error;}
     }
@@ -63,6 +66,7 @@ export class Access {
     if(!report.permissions){if(intent.transport==='bluetooth')throw Error('蓝牙键鼠授权状态未知');return;}
     if(intent.transport==='bluetooth' && report.inputTransport?.bluetoothEnabled===false)throw Error('BLUETOOTH_NOT_READY: 对方已停用蓝牙键鼠');
     const keys=intent.screen?['input','screen']:['input'];
+    if(keys.some(k=>report.permissions[k]?.supported===false))throw Error('对方设备不支持此功能');
     if(keys.some(k=>report.permissions[k]?.appEnabled===false || !(intent.transport==='bluetooth' && k==='input') && report.permissions[k]?.systemGranted===false)) {
       await peer.request('permission-prepare',{permissions:keys},4000);
       throw Error('PERMISSION_REQUIRED: 设备未就绪，请在被控设备完成权限设置');

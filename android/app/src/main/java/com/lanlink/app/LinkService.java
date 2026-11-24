@@ -38,6 +38,8 @@ public class LinkService extends Service implements Wire.Listener {
   private final ScheduledExecutorService clock = Executors.newScheduledThreadPool(2);
   private final Handler main = new Handler(Looper.getMainLooper());
   private SharedPreferences prefs;
+  ShizukuAuthorization shizuku;
+  private RemoteDisplay remoteDisplay;
   BackgroundRecovery backgroundRecovery;
   GroupKeys group;
   final GroupLayout groupLayout = new GroupLayout(this);
@@ -75,6 +77,10 @@ public class LinkService extends Service implements Wire.Listener {
         && getSharedPreferences("adb-helper", 0).getBoolean("adb_authorized", false);
   }
 
+  boolean nonRootAuthorized() {
+    return adbAuthorized() || shizuku != null && shizuku.authorized();
+  }
+
   public void enableAdbAuthorization() {
     prefs.edit().putBoolean("adb_revoked", false).putBoolean("allow_input", true).apply();
     status = "已允许电脑授权，请在电脑安卓授权页选择本机";
@@ -82,6 +88,12 @@ public class LinkService extends Service implements Wire.Listener {
 
   public synchronized void revokeAdbAuthorization() {
     prefs.edit().putBoolean("adb_revoked", true).apply();
+    shell.revokeAdb();
+    if (!rootEnabled() && shell.shizukuReady()) {
+      status = "ADB 授权已解除，已切换至 Shizuku";
+      dismissPermissionNotice();
+      return;
+    }
     String previous = owner;
     owner = null;
     releaseInput();
@@ -94,9 +106,21 @@ public class LinkService extends Service implements Wire.Listener {
         }
     }
     if (!rootEnabled()) stopProjection();
-    shell.revokeAdb();
     dismissPermissionNotice();
     status = "已解除本应用的 ADB 授权";
+  }
+
+  synchronized void onShizukuDisabled() {
+    if (rootEnabled() || shell.ready()) return;
+    String previous = owner;
+    owner = null;
+    releaseInput();
+    stopProjection();
+    if (previous != null) {
+      Wire peer = peers.get(previous);
+      if (peer != null) try { peer.send(obj("type", "control-ended")); } catch (Exception ignored) {}
+    }
+    dismissPermissionNotice();
   }
 
   public void rename(String value) throws IOException {
@@ -182,6 +206,7 @@ public class LinkService extends Service implements Wire.Listener {
 
   private String notifiedController, lastCapabilities;
   private volatile long ownerUntil;
+  private long displayControlSession;
   private String outgoingPending, outgoingViewer;
   private boolean outgoingCancelled, outgoingReleasing;
   private String outgoingSession;
@@ -249,16 +274,36 @@ public class LinkService extends Service implements Wire.Listener {
     return projection != null || privilegedScreenReady();
   }
 
+  boolean adbAudioAvailable() { return Build.VERSION.SDK_INT >= 31 && shell != null && shell.adbAudioReady(); }
+
+  boolean ownsRemoteAudio(Wire peer) {
+    return peer.id.equals(owner) && !ownerPointer && ownerUntil > System.currentTimeMillis();
+  }
+
+  synchronized RootCapture requireRemoteAudio(Wire peer) throws IOException {
+    requireScreen(peer);
+    RootCapture source = rootCapture;
+    if (!adbAudioAvailable() || !ownsRemoteAudio(peer) || source == null || !source.running()
+        || !allowed("input") || !consent.allowed(peer.id, "input"))
+      throw new IOException("ADB 声音仅在已授权的桌面控制期间可用");
+    return source;
+  }
+
   public void dismissPermissionNotice() {
     permissionNotice.dismiss();
-    getSystemService(NotificationManager.class).cancel(2);
+    cancelPermissionNotifications();
+  }
+
+  void cancelPermissionNotifications() {
+    NotificationManager notifications = getSystemService(NotificationManager.class);
+    notifications.cancel(2);
   }
 
   public void clearResolvedPermissionNotice() {
     PermissionNotice.Request request = permissionNotice.peek(System.currentTimeMillis());
     if (request == null || request.explicit || request.needs.contains("consent")) return;
     for (String need : request.needs) {
-      if (need.equals("adb") && !rootEnabled() && (adbRevoked() || !adbAuthorized())) return;
+      if (need.equals("adb") && !rootEnabled() && !nonRootAuthorized()) return;
       if (need.equals("input")
           && (!allowed("input") || !shell.ready() || shell.lastInputError != null)) return;
       if (need.equals("screen") && (!allowed("screen") || !screenReady())) return;
@@ -278,7 +323,8 @@ public class LinkService extends Service implements Wire.Listener {
     status = device + (need.equals("consent") ? Language.t(" 请求首次控制，请在手机确认") : Language.t(" 请求协作，请在手机上开启所需权限"));
     main.post(
         () -> {
-          if (uiVisible || permissionNotice.peek(System.currentTimeMillis()) == null) return;
+          PermissionNotice.Request pending = permissionNotice.peek(System.currentTimeMillis());
+          if (uiVisible || pending == null || !pending.peer.equals(peer.id) || !pending.needs.contains(need)) return;
           Intent open =
               new Intent(this, MainActivity.class)
                   .setAction("com.lanlink.app.PERMISSIONS")
@@ -286,12 +332,13 @@ public class LinkService extends Service implements Wire.Listener {
           PendingIntent target =
               PendingIntent.getActivity(
                   this, 2, open, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+          String explanation = need.equals("consent") ? Language.t("首次控制需要你同意，点击选择允许的功能")
+                  : Language.t("需要开启手机权限，点击查看并设置");
           Notification n =
               new Notification.Builder(this, "lanlink-permissions")
                   .setSmallIcon(R.drawable.lanlink_notification)
                   .setContentTitle(device + Language.t(" 请求协作"))
-                  .setContentText(
-                      need.equals("consent") ? Language.t("首次控制需要你同意，点击选择允许的功能") : Language.t("需要开启手机权限，点击查看并设置"))
+                  .setContentText(explanation)
                   .setStyle(
                       new Notification.BigTextStyle()
                           .bigText(
@@ -317,7 +364,7 @@ public class LinkService extends Service implements Wire.Listener {
   private void requireInputPermission(Wire p) throws IOException {
     requireConsent(p, "input");
     if (rootModeChanging()) throw new IOException("INPUT_RECOVERING: 权限模式正在切换，请稍候");
-    if (adbRevoked() && !rootEnabled())
+    if (adbRevoked() && !rootEnabled() && !nonRootAuthorized())
       throw new IOException("CONSENT_DENIED: 手机已解除 ADB 授权，请在手机重新开启");
     if (!allowed("input") || !shell.ready() || shell.lastInputError != null) {
       if (allowed("input") && shell.recovering())
@@ -451,6 +498,7 @@ public class LinkService extends Service implements Wire.Listener {
     captureHandler = new Handler(captureThread.getLooper());
     instance = this;
     prefs = getSharedPreferences("identity", MODE_PRIVATE);
+    remoteDisplay = new RemoteDisplay(this);
     backgroundRecovery = new BackgroundRecovery(this);
     if (prefs.contains("paused_peers")) prefs.edit().remove("paused_peers").apply();
     consent = new DeviceConsent(prefs.getString("device_grants", "{}"));
@@ -468,6 +516,7 @@ public class LinkService extends Service implements Wire.Listener {
     clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
     clipboard.addPrimaryClipChangedListener(clipListener);
     shell = new ShellChannel(this);
+    shizuku = new ShizukuAuthorization(this);
     staging=new StagingFiles(this);
     if (rootEnabled())
       jobs.execute(
@@ -518,6 +567,7 @@ public class LinkService extends Service implements Wire.Listener {
   private void createNotificationChannels() {
     getSystemService(NotificationManager.class).createNotificationChannel(new NotificationChannel("lanlink-files",Language.t("收到文件"),NotificationManager.IMPORTANCE_HIGH));
     NotificationManager nm = getSystemService(NotificationManager.class);
+    nm.deleteNotificationChannel("lanlink-audio-permission");
     nm.createNotificationChannel(
         new NotificationChannel("lanlink", Language.t("局域网协作"), NotificationManager.IMPORTANCE_LOW));
     nm.createNotificationChannel(
@@ -579,23 +629,20 @@ public class LinkService extends Service implements Wire.Listener {
   public JSONObject capabilities() {
     if (qualityBuild.isEmpty()) {
       try (java.io.InputStream input = getAssets().open("build-info.json")) {
-        qualityBuild = new JSONObject(new String(input.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8))
+        qualityBuild = new JSONObject(AssetText.read(input))
             .optString("buildId", "unknown");
       } catch (Exception ignored) { qualityBuild = "unknown"; }
     }
     android.util.DisplayMetrics m = displayMetrics();
     boolean inputReady = shell != null && shell.ready();
     boolean privilegedScreen = privilegedScreenReady();
-    JSONObject recovery = backgroundRecovery == null ? null : backgroundRecovery.recovery();
     return obj(
-        "backgroundSessionId", backgroundRecovery == null ? "" : backgroundRecovery.sessionId,
-        "backgroundPolicy", backgroundRecovery == null ? JSONObject.NULL : backgroundRecovery.policy(),
-        "backgroundRecovery", recovery == null ? JSONObject.NULL : recovery,
         "qualityProbe",1,"qualityBuild",qualityBuild,
         "staging",1,"quic",quic.enabled?1:0,"bulk",1,"rtcVideo",1,"dualLink",
         true,
         "controlPrepare",
         true,
+        "remoteDisplay", 1,
         "networkInputReady", inputReady,
         "input", inputReady,
         "host",
@@ -614,7 +661,7 @@ public class LinkService extends Service implements Wire.Listener {
         m.heightPixels,
         "motionV2", quic!=null&&quic.nativeEngine!=null&&quic.nativeEngine.binaryMotion?2:0,
         "inputMode",
-        inputReady ? "adb/root" : "unavailable",
+          inputReady ? shell.backend().equals("shizuku") ? "shizuku" : "adb/root" : "unavailable",
         "inputWarning",
         inputReady ? "" : "请在电脑端启用 ADB 键鼠授权，或启动 Root 助手");
   }
@@ -719,7 +766,7 @@ public class LinkService extends Service implements Wire.Listener {
   public void join(String value, JSONObject meta) throws Exception {
     Wire.parseToken(value);
     permissionNotice.reset();
-    getSystemService(NotificationManager.class).cancel(2);
+    cancelPermissionNotifications();
     releaseControl();
     for (Wire p : sockets) p.close();
     token = value;
@@ -912,7 +959,6 @@ public class LinkService extends Service implements Wire.Listener {
         return;
       }
     } else peers.put(p.id, p);
-    backgroundRecovery.connected(true);
     status = "已连接同组设备";
     runtimeLogs.add("已建立加密连接 (" + p.id + ")");
     try{groupClipboard.inventory(p);JSONObject current=groupClipboard.latest();if(current!=null && canShareClipboard(p.id) && deviceId.equals(current.optString("source")))p.send(obj("type","clipboard","offer",current));}catch(Exception ignored){}
@@ -940,7 +986,6 @@ public class LinkService extends Service implements Wire.Listener {
     synchronized (this) {
       removed = p.id != null && peers.remove(p.id, p);
       if (removed) {
-        if (backgroundRecovery != null) backgroundRecovery.connected(!peers.isEmpty());
         screenViewers.remove(p.id);
         endViewing(p.id);
         if (p.id.equals(outgoingPending)) outgoingCancelled = true;
@@ -957,7 +1002,7 @@ public class LinkService extends Service implements Wire.Listener {
       permissionNotice.removePeer(p.id);
       consent.disconnect(p.id);
       if (permissionNotice.peek(System.currentTimeMillis()) == null)
-        getSystemService(NotificationManager.class).cancel(2);
+        cancelPermissionNotifications();
     }
   }
 
@@ -1151,7 +1196,7 @@ public class LinkService extends Service implements Wire.Listener {
     if(method.equals("stage-begin")){requireClipboardPermission(p);return staging.begin(p,a.optString("id"),a.optBoolean("resume"));}
     if (method.equals("adb-permission-request")) {
       if (peers.get(p.id) != p) throw new IOException("设备连接已结束");
-      if (!rootEnabled() && adbRevoked()) needPermission(p, "adb");
+      if (!rootEnabled() && !nonRootAuthorized()) needPermission(p, "adb");
       return obj();
     }
     if (method.equals("permission-request")) {
@@ -1179,7 +1224,7 @@ public class LinkService extends Service implements Wire.Listener {
     if (method.equals("permission-status")) {
       if (peers.get(p.id) != p) throw new IOException("设备连接已结束");
       JSONObject entries = obj();
-      boolean inputReady = shell != null && shell.healthy() && shell.lastInputError == null && (rootEnabled() || adbAuthorized());
+      boolean inputReady = shell != null && shell.healthy() && shell.lastInputError == null && (rootEnabled() || nonRootAuthorized());
       for (String key : new String[] {"input", "screen", "clipboard", "shutdown"})
         entries.put(
             key,
@@ -1211,15 +1256,18 @@ public class LinkService extends Service implements Wire.Listener {
               "root",
               rootEnabled(),
               "revoked",
-              adbRevoked(),
+              adbRevoked() && !nonRootAuthorized(),
               "authorized",
-              adbAuthorized(),
+              nonRootAuthorized(),
+              "adbAuthorized", adbAuthorized(),
+              "shizukuAuthorized", shizuku != null && shizuku.authorized(),
+              "backend", shell.backend(),
               "recovering",
               shell != null && shell.recovering(),
               "message",
               shell != null && shell.lastInputError != null
                   ? shell.lastInputError
-                  : inputReady ? "ADB / Root 助手已连接" : "等待已信任的 USB / 无线调试连接恢复"));
+                  : inputReady ? "控制通道已连接：" + shell.backend() : "等待 ADB 或 Shizuku 控制通道恢复"));
     }
     if (method.equals("group-dissolve")) {
       group.acceptDissolution(a.getJSONObject("notice"));
@@ -1268,7 +1316,7 @@ public class LinkService extends Service implements Wire.Listener {
       VideoHost stream = null;
       try {
         // RTC negotiation may take seconds; never hold the input/screen service monitor here.
-        stream = new VideoHost(this, p, ticket.h264, a == null ? null : a.optString("rtc", null), a == null ? 0 : a.optLong("quic"));
+        stream = new VideoHost(this, p, ticket.h264, a == null ? null : a.optString("rtc", null), a == null ? 0 : a.optLong("quic"), a != null && a.optInt("audio") == 1, a == null ? 30 : a.optInt("maxFps",30));
         synchronized (this) {
           if (openingVideoHosts.get(p.id) != ticket || peers.get(p.id) != p)
             throw new IOException("CONTROL_ENDED: 屏幕请求已取消或设备连接已改变");
@@ -1296,12 +1344,12 @@ public class LinkService extends Service implements Wire.Listener {
     if (a == null) a = new JSONObject();
     switch (method) {
       case "adbBootstrap":
-        requireAdbPermission(p);
+          requireAdbPermission(p, true);
         return shell.bootstrap();
       case "adbStatus":
-        requireAdbPermission(p);
+          requireAdbPermission(p, false);
         boolean ready = shell.healthy() && shell.lastInputError == null;
-        return obj("ready", ready, "inputMode", capabilities().optString("inputMode"));
+          return obj("ready", ready, "adbReady", shell.adbReady(), "backend", shell.backend(), "inputMode", capabilities().optString("inputMode"));
       case "prepare":
       case "acquire": {
         String session = a.optString("edgeSession", null);
@@ -1327,8 +1375,10 @@ public class LinkService extends Service implements Wire.Listener {
           groupLayout.requireMaster(p.id, a.optBoolean("pointer", !a.optBoolean("screen")));
           if (owner != null && !owner.equals(p.id) && ownerUntil > System.currentTimeMillis())
             throw new IOException("CONTROL_CONFLICT: 本设备正在被另一台设备控制");
-          if (!p.id.equals(owner) || ownerPointer != pointerMode)
+          if (!p.id.equals(owner) || ownerPointer != pointerMode) {
             shell.request(obj("method", "release"));
+            displayControlSession++;
+          }
           owner = p.id;
           ownerFallbackAccepted = a.optBoolean("fallbackAccepted");
           ownerPointer = pointerMode;
@@ -1346,6 +1396,7 @@ public class LinkService extends Service implements Wire.Listener {
               throw new IOException("系统虚拟键鼠暂不可用，请恢复 ADB / Root 助手后重试");
             }
           }
+          refreshRemoteDisplay();
         }
         main.post(
             () -> {
@@ -1376,7 +1427,10 @@ public class LinkService extends Service implements Wire.Listener {
             ownerNativePointer = nativePointer;
           } else shell.request(obj("method", "heartbeat"));
         }
+        refreshRemoteDisplay();
         return obj();
+      case "remote-display":
+        return handleRemoteDisplay(p, a);
       case "input":
         requireOwner(p);
         try {
@@ -1488,6 +1542,10 @@ public class LinkService extends Service implements Wire.Listener {
   }
   private void releaseInput(){releaseInput(false);}
   private void releaseInput(boolean preserveGlow) {
+    if (remoteDisplay != null) remoteDisplay.release();
+    for (VideoHost stream : videoHosts.values()) stream.stopAudio();
+    RootCapture capture = rootCapture;
+    if (capture != null) capture.keepDim(-1);
     if(!preserveGlow)clearEdgeGlow();
     ownerNativePointer = false;
     main.post(this::updateProjectionIdle);
@@ -1502,6 +1560,45 @@ public class LinkService extends Service implements Wire.Listener {
             } catch (Exception ignored) {
             }
           });
+  }
+
+  synchronized void keepRemoteDisplay(Wire peer) {
+    RootCapture capture = rootCapture;
+    if (capture != null && peer.id.equals(owner) && !ownerPointer
+        && ownerUntil > System.currentTimeMillis() && displayControlSession > 0)
+      capture.keepDim(remoteDisplay.interactive() && !remoteDisplay.locked() ? displayControlSession : -1);
+  }
+
+  boolean preventRemoteAutoLock() { return prefs.getBoolean("remote_prevent_auto_lock", false); }
+
+  synchronized void setPreventRemoteAutoLock(boolean enabled) {
+    prefs.edit().putBoolean("remote_prevent_auto_lock", enabled).apply();
+    refreshRemoteDisplay();
+  }
+
+  private synchronized void refreshRemoteDisplay() {
+    if (remoteDisplay != null) remoteDisplay.keepAwake(preventRemoteAutoLock()
+        && owner != null && !ownerPointer && ownerUntil > System.currentTimeMillis());
+  }
+
+  private synchronized JSONObject handleRemoteDisplay(Wire peer, JSONObject args) throws Exception {
+    if (!allowed("screen") || !consent.allowed(peer.id, "screen"))
+      throw new IOException("未授权查看手机屏幕状态");
+    String operation = args.optString("operation");
+    boolean controls = peer.id.equals(owner) && !ownerPointer && ownerUntil > System.currentTimeMillis();
+    if (!operation.equals("status")) {
+      if (!controls) throw new IOException("请先开始桌面控制");
+      requireOwner(peer);
+      if (operation.equals("wake")) {
+        RootCapture capture = rootCapture;
+        if (capture != null) capture.keepDim(-1);
+        remoteDisplay.wake();
+      } else if (operation.equals("set") && args.opt("enabled") instanceof Boolean) {
+        setPreventRemoteAutoLock(args.getBoolean("enabled"));
+      } else throw new IOException("无效的屏幕操作");
+    }
+    return obj("supported", true, "interactive", remoteDisplay.interactive(),
+        "locked", remoteDisplay.locked(), "preventAutoLock", preventRemoteAutoLock(), "canControl", controls);
   }
 
   private synchronized void requireIncomingDirection() throws IOException {
@@ -1529,8 +1626,8 @@ public class LinkService extends Service implements Wire.Listener {
     if (id.equals(outgoingViewer)) outgoingViewer = null;
   }
 
-  private void requireAdbPermission(Wire peer) throws IOException {
-    if (adbRevoked() && !rootEnabled()) throw new IOException("CONSENT_DENIED: 手机已解除 ADB 授权，请在手机重新开启");
+  private void requireAdbPermission(Wire peer, boolean provisioning) throws IOException {
+    if (adbRevoked() && !rootEnabled() && (provisioning || !nonRootAuthorized())) throw new IOException("CONSENT_DENIED: 手机已解除 ADB 授权，请在手机重新开启");
     // Preparing a local helper does not grant this peer input or screen access.
     // The computer still needs trusted USB debugging, and acquire enforces consent.
     if (peers.get(peer.id) != peer || group.excluded(peer.id)) throw new IOException("设备连接已结束");
@@ -1693,6 +1790,7 @@ public class LinkService extends Service implements Wire.Listener {
   }
 
   private void tick() {
+    if (shizuku != null) shizuku.poll();
     if(staging!=null)staging.poll();
     groupClipboard.poll();for(Wire peer:peers.values())try{groupClipboard.inventory(peer);}catch(Exception ignored){}
     if (!running) return;
@@ -2033,6 +2131,7 @@ public class LinkService extends Service implements Wire.Listener {
     status = "屏幕共享已授权";
   }
 
+
   private void resizeCapture(int width, int height) {
     if (width < 1 || height < 1) return;
     float scale = Math.min(1f, 1280f / Math.max(width, height));
@@ -2225,7 +2324,7 @@ public class LinkService extends Service implements Wire.Listener {
       getSystemService(android.net.ConnectivityManager.class)
           .unregisterNetworkCallback(networkCallback);
     permissionNotice.reset();
-    getSystemService(NotificationManager.class).cancel(2);
+    cancelPermissionNotifications();
     if (pairing != null) pairing.close();
     releaseControl();
     owner = null;
@@ -2240,6 +2339,7 @@ public class LinkService extends Service implements Wire.Listener {
     }
     if (discovery != null) discovery.close();
     if (multicast != null && multicast.isHeld()) multicast.release();
+    if (shizuku != null) shizuku.close();
     if (shell != null) shell.close();
     clock.shutdownNow();
     jobs.shutdownNow();
@@ -2336,10 +2436,9 @@ public class LinkService extends Service implements Wire.Listener {
         } else {
           if (projection == null || display == null) throw new IOException("屏幕共享已结束");
           if (projectionJpegFallback) throw new IOException("当前查看会话正在使用兼容画面共享");
-          VideoEncoder encoder = new VideoEncoder(screenWidth, screenHeight, shared);
+          ProjectionEncoder encoder = new ProjectionEncoder(shared);
+          encoder.switchCadence(30);
           shared.bind(encoder);
-          videoEncoder = encoder;
-          display.setSurface(encoder.surface);
         }
         sharedVideoSource = shared;
         return shared.attach(output);
@@ -2352,6 +2451,62 @@ public class LinkService extends Service implements Wire.Listener {
         throw error;
       }
     });
+  }
+
+  private final class ProjectionEncoder implements VideoSource {
+    private final SharedVideoSource shared;
+    private volatile VideoEncoder current;
+    private volatile Object generation;
+    private volatile boolean closed;
+    private volatile int rate = 4_000_000;
+    private volatile int requested = 30;
+    private int activeFps;
+
+    ProjectionEncoder(SharedVideoSource shared) { this.shared = shared; }
+
+    void switchCadence(int fps) throws Exception {
+      final Object nextGeneration = new Object();
+      VideoEncoder next = VideoEncoder.start(screenWidth, screenHeight, fps, new VideoEncoder.Output() {
+        @Override public void frame(VideoWire.Frame frame) { if (!closed && generation == nextGeneration) shared.frame(frame); }
+        @Override public void failed() { if (!closed && generation == nextGeneration) shared.failed(); }
+      });
+      try {
+        if (closed) { next.close(); return; }
+        display.setSurface(next.surface);
+      } catch (Exception error) { next.close(); throw error; }
+      VideoEncoder previous = current;
+      generation = nextGeneration;
+      current = videoEncoder = next;
+      activeFps = fps;
+      next.setBitrate(rate);
+      if (previous != null) previous.close();
+    }
+
+    @Override public void setFrameRate(int fps) {
+      requested = fps;
+      main.post(() -> {
+        if (closed || requested != fps || fps == activeFps || sharedVideoSource != shared || display == null) return;
+        try { switchCadence(fps); }
+        catch (Exception unavailable) { android.util.Log.w("LanLinkVideo", "Frame-rate change unavailable", unavailable); }
+      });
+    }
+
+    @Override public void setBitrate(int bitrate) {
+      rate = bitrate;
+      VideoEncoder encoder = current;
+      if (encoder != null) encoder.setBitrate(bitrate);
+    }
+
+    @Override public void requestKey() {
+      VideoEncoder encoder = current;
+      if (encoder != null) encoder.requestKey();
+    }
+
+    @Override public void close() {
+      closed = true;
+      VideoEncoder encoder = current;
+      if (encoder != null) encoder.close();
+    }
   }
 
   void stopVideoEncoder(VideoSource encoder) {

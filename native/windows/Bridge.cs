@@ -55,6 +55,12 @@ namespace LanLink {
   static Hook MouseCallback = MouseHook, KeyCallback = KeyHook;
   static IntPtr MouseHandle,KeyHandle;
   static bool Remote = false;
+  static bool SmoothWheel, ReverseWheel;
+  static double MouseSensitivity=1, WheelPending, LocalFractionX, LocalFractionY;
+  static void WheelSend(int delta){if(delta==0)return;INPUT i=new INPUT();i.u.mi.flags=0x800;i.u.mi.data=unchecked((uint)delta);Send(i);}
+  static void WheelInput(int delta){delta=ReverseWheel?-delta:delta;if(SmoothWheel){if(WheelPending*delta<0)WheelPending=0;WheelPending+=delta;}else WheelSend(delta);}
+  static void WheelTick(){if(WheelPending==0)return;int step=(int)(WheelPending*.32);if(step==0)step=(int)WheelPending;WheelPending-=step;WheelSend(step);}
+
   const uint InputMarker=0x4c414e4c;
   static bool SyntheticCursor;
   static POINT SyntheticPoint;
@@ -116,6 +122,10 @@ namespace LanLink {
   }
   static IntPtr MouseHook(int n,IntPtr w,IntPtr l) {
    if(n>=0 && w.ToInt32()==0x200){MOUSE motion=(MOUSE)Marshal.PtrToStructure(l,typeof(MOUSE));if((motion.flags&1)==0 && motion.extra.ToUInt64()!=InputMarker && (motion.pt.x!=SyntheticPoint.x || motion.pt.y!=SyntheticPoint.y))SyntheticCursor=false;}
+   if(n>=0 && !Remote && !DesktopBlocked){MOUSE local=(MOUSE)Marshal.PtrToStructure(l,typeof(MOUSE));if((local.flags&1)==0 && local.extra.ToUInt64()!=InputMarker){
+    if(w.ToInt32()==0x20A && (SmoothWheel||ReverseWheel)){WheelInput((short)(local.data>>16));return (IntPtr)1;}
+    if(w.ToInt32()==0x200 && MouseSensitivity!=1){POINT old;if(GetCursorPos(out old)){double dx=(local.pt.x-old.x)*MouseSensitivity+LocalFractionX,dy=(local.pt.y-old.y)*MouseSensitivity+LocalFractionY;int ix=(int)dx,iy=(int)dy;LocalFractionX=dx-ix;LocalFractionY=dy-iy;Rectangle bounds=SystemInformation.VirtualScreen;INPUT move=new INPUT();move.u.mi.flags=0xC001;move.u.mi.dx=(int)(Math.Max(0,Math.Min(bounds.Width-1,old.x+ix-bounds.Left))*65535.0/Math.Max(1,bounds.Width-1));move.u.mi.dy=(int)(Math.Max(0,Math.Min(bounds.Height-1,old.y+iy-bounds.Top))*65535.0/Math.Max(1,bounds.Height-1));Send(move);return (IntPtr)1;}}
+   }}
    if(n>=0 && Remote) { MOUSE m=(MOUSE)Marshal.PtrToStructure(l,typeof(MOUSE)); if((m.flags&1)==0) {
     int msg=w.ToInt32();
     // Let raw motion reach WM_INPUT. The one-pixel clip keeps the desktop cursor still.
@@ -128,16 +138,17 @@ namespace LanLink {
   static void Send(INPUT input) { if(input.type==0)input.u.mi.extra=new UIntPtr(InputMarker);if(SendInput(1,new INPUT[]{input},Marshal.SizeOf(typeof(INPUT)))!=1) throw new Exception("系统拒绝输入，请检查目标窗口权限"); }
   static void KeyInput(int vk,bool down) { if(vk==0) return; INPUT i=new INPUT(); i.type=1; i.u.ki.vk=(ushort)vk; i.u.ki.flags=down?0u:2u; if(vk>=33&&vk<=46 || vk==163||vk==165||vk==91||vk==92) i.u.ki.flags|=1; Send(i); if(down)Held.Add(vk);else Held.Remove(vk); }
   static void MouseInput(int button,bool down) { INPUT i=new INPUT(); i.u.mi.flags=button==0?(down?2u:4u):button==2?(down?8u:16u):(down?32u:64u); Send(i); if(down)Buttons.Add(button);else Buttons.Remove(button); }
-  static void Release() { foreach(int key in new List<int>(Held)) try{KeyInput(key,false);}catch{} foreach(int b in new List<int>(Buttons))try{MouseInput(b,false);}catch{} }
+  static void Release() { WheelPending=0; foreach(int key in new List<int>(Held)) try{KeyInput(key,false);}catch{} foreach(int b in new List<int>(Buttons))try{MouseInput(b,false);}catch{} }
   static double Num(Dictionary<string,object> a,string key,double fallback) { object v;return a.TryGetValue(key,out v)?Convert.ToDouble(v):fallback; }
   static string Str(Dictionary<string,object> a,string key) { object v; return a.TryGetValue(key,out v)?Convert.ToString(v):""; }
   static bool Bool(Dictionary<string,object>a,string key) { object v;return a.TryGetValue(key,out v)&&Convert.ToBoolean(v); }
   static object Execute(string method,Dictionary<string,object>a) {
    Rectangle r=Screen.PrimaryScreen.Bounds;
+   if(method=="mouse-feel"){SmoothWheel=Bool(a,"smooth");ReverseWheel=Bool(a,"reverse");MouseSensitivity=Math.Max(.2,Math.Min(3,Num(a,"sensitivity",1)));WheelPending=LocalFractionX=LocalFractionY=RelativeX=RelativeY=0;return new {};}
    if(method=="compactMotion"){CompactMotion=Bool(a,"enabled");return new {}; }
-   if(method=="capabilities")return new {inputBatch=1,compactMotion=1,relativeInput=true,input=MouseHandle!=IntPtr.Zero&&KeyHandle!=IntPtr.Zero,screen=true,clipboard=true,shutdown=true,host=MouseHandle!=IntPtr.Zero&&KeyHandle!=IntPtr.Zero,width=r.Width,height=r.Height};
+   if(method=="capabilities")return new {mouseFeel=1,inputBatch=1,compactMotion=1,relativeInput=true,input=MouseHandle!=IntPtr.Zero&&KeyHandle!=IntPtr.Zero,screen=true,clipboard=true,shutdown=true,host=MouseHandle!=IntPtr.Zero&&KeyHandle!=IntPtr.Zero,width=r.Width,height=r.Height,singleDisplay=Screen.AllScreens.Length==1};
    if(method=="cursor") { POINT cursor; if(!GetCursorPos(out cursor)) throw new IOException("无法读取鼠标位置"); return new {x=cursor.x,y=cursor.y,width=r.Width,height=r.Height}; }
-   if(method=="mode") { bool capture=Bool(a,"remote");
+   if(method=="mode") { bool capture=Bool(a,"remote");WheelPending=0;
     if(capture && !Remote){LocalModifierUps.Clear();foreach(int vk in PhysicalModifiers)LocalModifierUps.Add(vk);}
     if(capture && (DesktopBlocked || !InputDesktopAvailable()))throw new IOException("CONTROL_ENDED: 系统弹窗正在接管输入，键鼠已返回本机");
     if(capture && !Remote) { if(Raw==null)Raw=new RawWindow();if(!GetCursorPos(out Anchor)||!GetClipCursor(out OriginalClip))throw new IOException("无法准备键鼠跨屏，请确认当前桌面可操作");var point=new RECT{left=Anchor.x,top=Anchor.y,right=Anchor.x+1,bottom=Anchor.y+1};if(!ClipCursor(ref point))throw new IOException("无法固定本机鼠标位置");Clipped=true;AbsoluteMouse.Clear(); }
@@ -153,12 +164,12 @@ namespace LanLink {
    }
    if(method=="input") {
     InputLease=DateTime.UtcNow.AddSeconds(3);string kind=Str(a,"kind");
-     if(kind=="relative") { RelativeX+=Num(a,"dx",0);RelativeY+=Num(a,"dy",0);int dx=(int)RelativeX,dy=(int)RelativeY;RelativeX-=dx;RelativeY-=dy;if(dx!=0||dy!=0){INPUT movement=new INPUT();movement.u.mi.dx=dx;movement.u.mi.dy=dy;movement.u.mi.flags=1;Send(movement);} }
+     if(kind=="relative") { RelativeX+=Num(a,"dx",0)*MouseSensitivity;RelativeY+=Num(a,"dy",0)*MouseSensitivity;int dx=(int)RelativeX,dy=(int)RelativeY;RelativeX-=dx;RelativeY-=dy;if(dx!=0||dy!=0){INPUT movement=new INPUT();movement.u.mi.dx=dx;movement.u.mi.dy=dy;movement.u.mi.flags=1;Send(movement);} }
     if(kind=="move")SetCursorPos(r.Left+(int)(Num(a,"x",0.5)*(r.Width-1)),r.Top+(int)(Num(a,"y",0.5)*(r.Height-1)));
     if(kind=="move"||kind=="relative"){SyntheticCursor=true;GetCursorPos(out SyntheticPoint);}
     if(kind=="key")KeyInput(Vk(Str(a,"code")),Bool(a,"down"));
     if(kind=="button")MouseInput((int)Num(a,"button",0),Bool(a,"down"));
-    if(kind=="wheel") {INPUT i=new INPUT();i.u.mi.flags=0x800;i.u.mi.data=unchecked((uint)(int)Num(a,"delta",0));Send(i);}
+    if(kind=="wheel")WheelInput((int)Num(a,"delta",0));
     return new {};
    }
    if(method=="text") {string s=Str(a,"text");foreach(char c in s) {INPUT i=new INPUT();i.type=1;i.u.ki.scan=c;i.u.ki.flags=4;Send(i);i.u.ki.flags=6;Send(i);}return new {};}
@@ -208,6 +219,7 @@ namespace LanLink {
    Thread reader=new Thread(delegate() {string line;while((line=Console.ReadLine())!=null){CommandCapacity.WaitOne();string request=line;commands.Post(delegate{Request(request);});}commands.Post(delegate{Request("EXIT");});});reader.IsBackground=true;reader.Start();
    var timer=new System.Windows.Forms.Timer();timer.Interval=16;timer.Tick+=delegate {
     UpdateDesktopAvailability(InputDesktopAvailable());
+    if(DesktopBlocked)WheelPending=0;else try{WheelTick();}catch{WheelPending=0;}
     if(Remote){RECT clip;if(!GetClipCursor(out clip)||clip.left!=Anchor.x||clip.top!=Anchor.y||clip.right!=Anchor.x+1||clip.bottom!=Anchor.y+1){StopCapture();Emit(new{type="input-interrupted",blocked=false,reason="系统已解除鼠标捕获"});}}
     if(Remote&&DateTime.UtcNow>Lease){StopCapture();Emit(new {type="emergency"});}
     if((Held.Count>0||Buttons.Count>0)&&DateTime.UtcNow>InputLease)Release();

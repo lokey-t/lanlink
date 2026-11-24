@@ -50,6 +50,57 @@
     }
   ],
   "messages": {
+    "Shizuku 运行身份不受支持": {"en": "Unsupported Shizuku identity", "zh-Hant": "Shizuku 執行身分不受支援"},
+    "Shizuku 已授权，但用户服务启动超时，请重启 Shizuku 后重试或使用 ADB 授权。": {"en": "Shizuku is authorized, but its user service timed out. Restart Shizuku and retry, or use ADB authorization.", "zh-Hant": "Shizuku 已授權，但使用者服務啟動逾時，請重新啟動 Shizuku 後重試或使用 ADB 授權。"},
+    "Shizuku 已授权，但控制通道连接超时，可使用 ADB 授权。": {"en": "Shizuku is authorized, but the control connection timed out. You can use ADB authorization.", "zh-Hant": "Shizuku 已授權，但控制通道連線逾時，可使用 ADB 授權。"},
+    "启动中": {"en": "Starting", "zh-Hant": "啟動中"},
+    "启动失败": {"en": "Startup failed", "zh-Hant": "啟動失敗"},
+    "1. 安装并启动 Shizuku，支持无线调试、ADB 或 Root 启动。\n2. 点击下方按钮，允许 LanLink 使用 Shizuku。\n3. 可同时保留 ADB 授权，任一通道不可用时自动使用另一通道。\nRoot 启动的 Shizuku 也可在本应用非 Root 模式下使用。手机重启后需确保 Shizuku 已运行。设备控制权限仍由你单独决定。": {"en": "1. Install and start Shizuku using wireless debugging, ADB, or Root.\n2. Tap below and allow LanLink to use Shizuku.\n3. Keep ADB authorization enabled for automatic fallback when either connection fails.\nRoot-started Shizuku also works in this app's non-root mode. Ensure Shizuku is running after a reboot. Device control permissions remain under your control.", "zh-Hant": "1. 安裝並啟動 Shizuku，支援無線偵錯、ADB 或 Root 啟動。\n2. 點擊下方按鈕，允許 LanLink 使用 Shizuku。\n3. 可同時保留 ADB 授權，任一通道不可用時自動使用另一通道。\nRoot 啟動的 Shizuku 也可在本應用程式非 Root 模式下使用。手機重新啟動後需確保 Shizuku 已執行。裝置控制權限仍由你單獨決定。"},
+    "Shizuku 授权": {"en": "Shizuku authorization", "zh-Hant": "Shizuku 授權"},
+    "通过 Shizuku 启用控制，与 ADB 自动互补": {"en": "Enable control with Shizuku and automatic ADB fallback", "zh-Hant": "透過 Shizuku 啟用控制，與 ADB 自動互補"},
+    "两种授权可同时开启，通道失效时自动使用另一可用方案。": {"en": "Enable both authorizations to automatically use the other available connection if one fails.", "zh-Hant": "兩種授權可同時開啟，通道失效時自動使用另一可用方案。"},
+    "当前控制通道：": {"en": "Current control connection: ", "zh-Hant": "目前控制通道："},
+    "请求 Shizuku 授权": {"en": "Request Shizuku authorization", "zh-Hant": "請求 Shizuku 授權"},
+    "使用 Shizuku 授权": {"en": "Use Shizuku authorization", "zh-Hant": "使用 Shizuku 授權"},
+    "打开 Shizuku": {"en": "Open Shizuku", "zh-Hant": "開啟 Shizuku"},
+    "关闭 Shizuku 授权": {"en": "Disable Shizuku authorization", "zh-Hant": "關閉 Shizuku 授權"},
+    "无法打开 Shizuku，请手动打开": {"en": "Unable to open Shizuku. Please open it manually.", "zh-Hant": "無法開啟 Shizuku，請手動開啟"},
+    "Shizuku 未启动，自动使用可用的 ADB 通道": {"en": "Shizuku is not running. Using ADB when available.", "zh-Hant": "Shizuku 未啟動，自動使用可用的 ADB 通道"},
+    "请更新 Shizuku": {"en": "Please update Shizuku", "zh-Hant": "請更新 Shizuku"},
+    "等待 Shizuku 授权": {"en": "Waiting for Shizuku authorization", "zh-Hant": "等待 Shizuku 授權"},
+    "请通过无线调试或 ADB 启动 Shizuku": {"en": "Start Shizuku using wireless debugging or ADB", "zh-Hant": "請透過無線偵錯或 ADB 啟動 Shizuku"},
+    "Shizuku 暂不可用，可使用 ADB 授权": {"en": "Shizuku is unavailable. You can use ADB authorization.", "zh-Hant": "Shizuku 暫不可用，可使用 ADB 授權"},
+    "已就绪，可与 ADB 自动互补": {"en": "Ready, with automatic ADB fallback", "zh-Hant": "已就緒，可與 ADB 自動互補"},
+    "授权已保存，正在恢复通道": {"en": "Authorization saved. Restoring connection.", "zh-Hant": "授權已儲存，正在恢復通道"},
+    "请在 Shizuku 的已授权应用中允许 LanLink": {"en": "Allow LanLink in Shizuku's authorized apps", "zh-Hant": "請在 Shizuku 的已授權應用程式中允許 LanLink"},
+    "Shizuku 授权未通过，仍可使用 ADB 授权": {"en": "Shizuku authorization was denied. ADB authorization remains available.", "zh-Hant": "Shizuku 授權未通過，仍可使用 ADB 授權"},
+    "Shizuku 连接失败，可使用 ADB 授权": {"en": "Shizuku connection failed. You can use ADB authorization.", "zh-Hant": "Shizuku 連線失敗，可使用 ADB 授權"},
+    "1. 安装 Shizuku，通过无线调试或 ADB 启动。\n2. 点击下方按钮，允许 LanLink 使用 Shizuku。\n3. 可同时保留 ADB 授权，任一通道不可用时自动使用另一通道。\n手机重启后需重新启动 Shizuku。设备控制权限仍由你单独决定。": {"en": "1. Install Shizuku and start it using wireless debugging or ADB.\n2. Tap the button below and allow LanLink to use Shizuku.\n3. Keep ADB authorization enabled for automatic fallback when either connection is unavailable.\nRestart Shizuku after rebooting your phone. Device control permissions remain under your control.", "zh-Hant": "1. 安裝 Shizuku，透過無線偵錯或 ADB 啟動。\n2. 點擊下方按鈕，允許 LanLink 使用 Shizuku。\n3. 可同時保留 ADB 授權，任一通道不可用時自動使用另一通道。\n手機重新啟動後需重新啟動 Shizuku。裝置控制權限仍由你單獨決定。"},
+    "非 Root 模式可使用 ADB 或 Shizuku 授权，两种通道可同时开启并自动互补。Root 模式需手机已 Root，并在 Root 管理器中允许 LanLink 使用 Root 权限。": {"en": "Non-root mode supports ADB and Shizuku authorization with automatic fallback between them. Root mode requires a rooted phone and permission for LanLink in the root manager.", "zh-Hant": "非 Root 模式可使用 ADB 或 Shizuku 授權，兩種通道可同時開啟並自動互補。Root 模式需手機已 Root，並在 Root 管理器中允許 LanLink 使用 Root 權限。"},
+    "无法连接？": {
+      "en": "Unable to connect?",
+      "zh-Hant": "無法連線？"
+    },
+    "通过 IP 配对": {
+      "en": "Pair by IP",
+      "zh-Hant": "透過 IP 配對"
+    },
+    "对方 IPv4 地址": {
+      "en": "Other device’s IPv4 address",
+      "zh-Hant": "對方 IPv4 位址"
+    },
+    "请让对方打开添加设备页面": {
+      "en": "Open Add Device on the other device.",
+      "zh-Hant": "請讓對方開啟新增裝置頁面"
+    },
+    "申请配对": {
+      "en": "Request pairing",
+      "zh-Hant": "申請配對"
+    },
+    "请输入有效的 IPv4 地址": {
+      "en": "Enter a valid IPv4 address.",
+      "zh-Hant": "請輸入有效的 IPv4 位址"
+    },
     "我的设备": {
       "en": "My Device",
       "zh-Hant": "我的裝置",
@@ -4299,9 +4350,6 @@
     "正在重新连接 · ": {
       "en": "Reconnecting · "
     },
-    "已返回本机 · 查看模式": {
-      "en": "Returned to this device · View mode"
-    },
     "对方已结束控制": {
       "en": "The remote device ended control"
     },
@@ -5530,14 +5578,17 @@
     "自启动：请在系统设置中确认": {
       "en": "Auto-start: check in system settings"
     },
-    "上次后台连接中断，且系统限制了 LanLink 后台运行。这可能与本次中断有关，请检查下方设置。": {
-      "en": "The previous background connection was interrupted, and the system restricted LanLink's background activity. This may be related to the interruption. Please check the settings below."
+    "LanLink 上次在后台停止，当时系统限制了后台运行。请按下方说明将电池设为「不受限制」，并允许自启动。": {
+      "en": "LanLink stopped in the background while the system was restricting background activity. Follow the instructions below to set battery use to Unrestricted and allow auto-start."
     },
-    "上次后台连接意外中断，系统未提供明确原因。可检查省电与自启动设置，减少后台被清理的机会。": {
-      "en": "The previous background connection ended unexpectedly, and the system did not provide a clear reason. Check battery and auto-start settings to reduce the chance of background termination."
+    "LanLink 上次在后台意外停止，系统未提供明确原因。请按下方说明检查电池限制和自启动设置。": {
+      "en": "LanLink stopped unexpectedly in the background. Android did not report a clear cause. Follow the instructions below to check battery restrictions and auto-start."
     },
-    "设置省电白名单": {
-      "en": "Set battery optimization exemption"
+    "系统因内存不足停止了后台运行的 LanLink。你可以在下方检查电池限制和自启动设置。": {
+      "en": "Android stopped LanLink in the background because memory was low. You can check battery restrictions and auto-start below."
+    },
+    "设置电池使用限制": {
+      "en": "Manage battery restrictions"
     },
     "设置自启动与后台运行": {
       "en": "Set auto-start and background activity"
@@ -5568,30 +5619,6 @@
     },
     "在应用信息的电池设置中允许后台运行或选择「不受限制」。如手机提供自启动管理，请允许 LanLink 自启动；没有此选项时可跳过。": {
       "en": "Allow background activity or select Unrestricted in the app's battery settings. If your phone has auto-start management, enable it for LanLink; otherwise, skip that step."
-    },
-    "安卓设备连接中断": {
-      "en": "Android device disconnected"
-    },
-    "安卓设备连接已中断，暂时无法确认原因。可能是网络变化或应用被系统停止，请在手机打开 LanLink；重新连接后会核对系统退出记录。": {
-      "en": "The Android device disconnected. The cause is not yet known: the network may have changed or the system may have stopped the app. Open LanLink on the phone; its exit records will be checked after reconnection."
-    },
-    "手机上的 LanLink 已在后台异常停止，且检测到系统限制后台运行，可能与本次中断有关。请在手机重新打开 LanLink，按机型引导设置省电白名单和自启动。": {
-      "en": "LanLink stopped unexpectedly in the background on the phone. A system restriction on background activity was detected and may be related. Reopen LanLink on the phone and follow the instructions for its model to adjust battery and auto-start settings."
-    },
-    "手机上的 LanLink 上次运行已结束，系统未提供明确的退出原因。请重新打开手机上的 LanLink 后连接，并按手机上的提示检查后台运行设置。": {
-      "en": "LanLink previously stopped on the phone, but the system did not provide a clear reason. Reopen LanLink and reconnect, then follow any instructions on the phone to check background activity settings."
-    },
-    "手机已重启，LanLink 连接因此中断。请重新打开手机上的 LanLink；如输入助手未就绪，请通过已信任的调试连接恢复。": {
-      "en": "The phone restarted, interrupting the LanLink connection. Reopen LanLink on the phone. If the input helper is not ready, restore it using a trusted debugging connection."
-    },
-    "安卓系统记录显示 LanLink 因内存不足被停止，导致连接中断。请减少手机上同时运行的应用，然后重新连接。": {
-      "en": "Android records show that LanLink was stopped because of low memory, interrupting the connection. Reduce the number of apps running on the phone and reconnect."
-    },
-    "安卓系统记录显示 LanLink 上次发生崩溃或无响应，导致连接中断。请重新连接；如果反复发生，请检查日志。": {
-      "en": "Android records show that LanLink crashed or stopped responding, interrupting the connection. Reconnect; if this keeps happening, check the logs."
-    },
-    "安卓系统记录显示 LanLink 被用户或系统的停止操作结束，导致连接中断。请重新打开手机上的 LanLink 后连接。": {
-      "en": "Android records show that a user or system stop action ended LanLink, interrupting the connection. Reopen LanLink on the phone and reconnect."
     },
     "已检测到这台组内手机，请解锁手机，允许 USB 调试并勾选始终允许此电脑": {
       "en": "This phone in your group was detected. Unlock it, allow USB debugging, and select Always allow from this computer."
@@ -6004,6 +6031,62 @@
     "更新通道": {
       "en": "Update channel"
     },
+    "在线设备": {
+      "en": "Online devices",
+      "zh-Hant": "線上裝置",
+      "ja": "オンラインのデバイス",
+      "ko": "온라인 기기",
+      "de": "Online-Geräte",
+      "fr": "Appareils en ligne",
+      "es": "Dispositivos en línea",
+      "pt": "Dispositivos online",
+      "it": "Dispositivi online",
+      "ru": "Устройства в сети"
+    },
+    "启动与更新": {
+      "en": "Startup and updates",
+      "zh-Hant": "啟動與更新",
+      "ja": "起動とアップデート",
+      "ko": "시작 및 업데이트",
+      "de": "Start und Updates",
+      "fr": "Démarrage et mises à jour",
+      "es": "Inicio y actualizaciones",
+      "pt": "Inicialização e atualizações",
+      "it": "Avvio e aggiornamenti",
+      "ru": "Запуск и обновления"
+    },
+    "检查更新": {
+      "en": "Check for updates",
+      "zh-Hant": "檢查更新",
+      "ja": "アップデートを確認",
+      "ko": "업데이트 확인",
+      "de": "Nach Updates suchen",
+      "fr": "Rechercher des mises à jour",
+      "es": "Buscar actualizaciones",
+      "pt": "Verificar atualizações",
+      "it": "Controlla aggiornamenti",
+      "ru": "Проверить обновления"
+    },
+    "自动检测更新": {
+      "en": "Check for updates automatically",
+      "zh-Hant": "自動檢查更新",
+      "ja": "アップデートを自動で確認",
+      "ko": "자동으로 업데이트 확인",
+      "de": "Automatisch nach Updates suchen",
+      "fr": "Rechercher automatiquement les mises à jour",
+      "es": "Buscar actualizaciones automáticamente",
+      "pt": "Verificar atualizações automaticamente",
+      "it": "Controlla automaticamente gli aggiornamenti",
+      "ru": "Автоматически проверять обновления"
+    },
+    "登录后在后台运行，不显示主窗口，可从系统托盘打开。": {
+      "en": "Runs in the background after sign-in without opening the main window. Open it from the system tray.",
+      "zh-Hant": "登入後在背景執行，不顯示主視窗，可從系統匣開啟。"
+    },
+    "管理员模式首次开启需要系统确认。": {
+      "en": "Windows asks for confirmation the first time administrator mode is enabled.",
+      "zh-Hant": "首次開啟系統管理員模式需要系統確認。"
+    },
     "正式版": {
       "en": "Stable"
     },
@@ -6214,8 +6297,120 @@
     "峰值": {
       "en": "Peak"
     },
+    "设备已锁屏": {
+      "zh-Hant": "裝置已鎖定",
+      "en": "Device locked"
+    },
+    "手机屏幕已关闭": {
+      "zh-Hant": "手機螢幕已關閉",
+      "en": "Phone screen is off"
+    },
+    "点击亮屏": {
+      "zh-Hant": "點擊喚醒螢幕",
+      "en": "Wake screen"
+    },
+    "可在设置中开启控制期间禁止自动锁定": {
+      "zh-Hant": "可在設定中開啟控制期間禁止自動鎖定",
+      "en": "You can prevent auto-lock during control in Settings."
+    },
+    "控制期间防止自动锁定": {
+      "zh-Hant": "控制期間防止自動鎖定",
+      "en": "Prevent auto-lock during control"
+    },
+    "仅在手机已解锁且正在被远程控制时保持亮屏。": {
+      "zh-Hant": "僅在手機已解鎖且正在被遠端控制時保持螢幕亮起。",
+      "en": "Keeps the screen on while the unlocked phone is being remotely controlled."
+    },
     "查看诊断明细": {
       "en": "Show diagnostics"
+    },
+    "鼠标手感": {
+      "en": "Mouse feel",
+      "zh-Hant": "滑鼠手感"
+    },
+    "调整鼠标手感": {
+      "en": "Adjust mouse feel",
+      "zh-Hant": "調整滑鼠手感"
+    },
+    "为组内每台设备分别调整滚动与指针体验": {
+      "en": "Adjust scrolling and pointer behavior for each device in the group",
+      "zh-Hant": "為群組內每台裝置分別調整捲動與指標體驗"
+    },
+    "选择设备，单独调整它的鼠标体验": {
+      "en": "Select a device to adjust its mouse behavior",
+      "zh-Hant": "選擇裝置，單獨調整它的滑鼠體驗"
+    },
+    "平滑滚动": {
+      "en": "Smooth scrolling",
+      "zh-Hant": "平滑捲動"
+    },
+    "反向鼠标滚轮": {
+      "en": "Reverse mouse wheel",
+      "zh-Hant": "反向滑鼠滾輪"
+    },
+    "指针灵敏度": {
+      "en": "Pointer sensitivity",
+      "zh-Hant": "指標靈敏度"
+    },
+    "关闭鼠标加速度": {
+      "en": "Disable pointer acceleration",
+      "zh-Hant": "關閉滑鼠加速度"
+    },
+    "此设备暂不支持鼠标手感设置": {
+      "en": "Mouse settings are not yet supported on this device",
+      "zh-Hant": "此裝置暫不支援滑鼠手感設定"
+    },
+    "有未保存的更改": {
+      "en": "Unsaved changes",
+      "zh-Hant": "有未儲存的變更"
+    },
+    "更改后点击保存": {
+      "en": "Click Save after making changes",
+      "zh-Hant": "變更後按一下儲存"
+    },
+    "请到该设备完成键鼠权限授权，授权后设置生效": {
+      "en": "Complete mouse and keyboard authorization on that device to apply these settings",
+      "zh-Hant": "請到該裝置完成鍵鼠權限授權，授權後設定生效"
+    },
+    "设备当前离线，保存后将在上线时同步应用": {
+      "en": "Device offline. Saved settings will sync when it reconnects",
+      "zh-Hant": "裝置目前離線，儲存後將於上線時同步套用"
+    },
+    "请升级目标设备以应用鼠标手感设置": {
+      "en": "Update the target device to apply mouse settings",
+      "zh-Hant": "請升級目標裝置以套用滑鼠手感設定"
+    },
+    "仅调整所选设备，不影响组内其他设备": {
+      "en": "Only changes the selected device",
+      "zh-Hant": "僅調整所選裝置，不影響群組內其他裝置"
+    },
+    " · 主设备": {
+      "en": " · Primary",
+      "zh-Hant": " · 主裝置"
+    },
+    "鼠标设置无效": {
+      "en": "Invalid mouse settings",
+      "zh-Hant": "滑鼠設定無效"
+    },
+    "鼠标开关设置无效": {
+      "en": "Invalid mouse toggle settings",
+      "zh-Hant": "滑鼠開關設定無效"
+    },
+    "鼠标灵敏度范围为 0.2–3.0": {
+      "en": "Pointer sensitivity must be between 0.2 and 3.0",
+      "zh-Hant": "滑鼠靈敏度範圍為 0.2–3.0"
+    },
+    "鼠标设备设置无效": {
+      "en": "Invalid mouse device settings",
+      "zh-Hant": "滑鼠裝置設定無效"
+    },
+    "请选择支持鼠标设置的本组设备": {
+      "en": "Select a group device that supports mouse settings",
+      "zh-Hant": "請選擇支援滑鼠設定的本群組裝置"
+    },
+    "此设备不支持关闭鼠标加速度": {
+      "en": "Disabling pointer acceleration is not supported on this device",
+      "zh-Hant": "此裝置不支援關閉滑鼠加速度"
     }
   }
 }

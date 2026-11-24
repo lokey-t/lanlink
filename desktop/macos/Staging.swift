@@ -132,7 +132,7 @@ struct StagingCard:View {
     var status:String { if state=="ready" { return "已接收" }; if state=="receiving" { let received=row["received"] as? Double ?? 0,size=max(1,row["size"] as? Double ?? 0); return LF("传输中 · {0}%", String(Int(received*100/size))) }; return state=="pending" ? "待传输":state=="queued" ? "等待传输":state=="cancelled" ? "已取消":"传输失败" }
     var body:some View {
         VStack(alignment:.leading,spacing:14) {
-            HStack { Image(systemName:row["type"] as? String=="folder" ? "folder":"doc").foregroundStyle(.blue); Text(row["name"] as? String ?? "文件").font(.headline).lineLimit(2); Spacer(); Text(L(status)).font(.caption).foregroundStyle(.secondary) }
+            HStack { Image(systemName:row["type"] as? String=="folder" ? "folder":"doc").foregroundStyle(Palette.accent); Text(row["name"] as? String ?? "文件").font(.headline).lineLimit(2); Spacer(); Text(L(status)).font(.caption).foregroundStyle(.secondary) }
             HStack { Text(row["sourceName"] as? String ?? "设备"); Text(ByteCountFormatter.string(fromByteCount:Int64(row["size"] as? Double ?? 0),countStyle:.file)); Text(Date(timeIntervalSince1970:(row["created"] as? Double ?? 0)/1000),style:.time) }.font(.caption).foregroundStyle(.secondary)
             HStack(spacing:12) {
                 if state=="ready" {
@@ -144,7 +144,7 @@ struct StagingCard:View {
                 else { Button(L("删除")) { model.removeStaged(row) } }
             }.disabled(model.stageBusy.contains(id))
             if state == "ready" { StagedDragOut(model: model, id: id).frame(width: 160, height: 30).disabled(model.stageBusy.contains(id)) }
-            if let error=row["error"] as? String,!error.isEmpty { Text(Model.displayMessage(error)).font(.caption).foregroundStyle(.red) }
+            if let error=row["error"] as? String,!error.isEmpty { Text(Model.displayMessage(error)).font(.caption).foregroundStyle(Palette.danger) }
         }.padding(20).frame(maxWidth:.infinity,alignment:.leading).background(Palette.card,in:RoundedRectangle(cornerRadius:20)).overlay(RoundedRectangle(cornerRadius:20).stroke(Palette.line))
     }
 }
@@ -167,7 +167,7 @@ struct OutgoingStagingCard: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack { Text(row["name"] as? String ?? "文件").font(.headline); Spacer(); Text(L(status)).font(.caption) }
             Text(LF("发送到“{0}”", row["targetName"] as? String ?? L("设备")) + " · " + ByteCountFormatter.string(fromByteCount: Int64(row["size"] as? Double ?? 0), countStyle: .file)).font(.caption).foregroundStyle(.secondary)
-            if let error = row["error"] as? String, !error.isEmpty { Text(Model.displayMessage(error)).font(.caption).foregroundStyle(.red) }
+            if let error = row["error"] as? String, !error.isEmpty { Text(Model.displayMessage(error)).font(.caption).foregroundStyle(Palette.danger) }
             HStack {
                 if state == "failed" || state == "cancelled" { Button(L("重新发送")) { model.stageAction("stage-outgoing-retry", id) } }
                 if !["ready", "completed", "complete", "cancelled"].contains(state) { Button(L("取消发送")) { model.stageAction("stage-outgoing-cancel", id) } }

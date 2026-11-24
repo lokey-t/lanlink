@@ -19,18 +19,36 @@ final class VideoEncoder implements VideoSource {
   volatile long syncAt;
 
   VideoEncoder(int width, int height, Output output) throws Exception {
+    this(width, height, 30, output);
+  }
+
+  static VideoEncoder start(int width, int height, int fps, Output output) throws Exception {
+    try { return new VideoEncoder(width, height, fps, output); }
+    catch (Exception error) {
+      if (fps != 60) throw error;
+      return new VideoEncoder(width, height, 30, output);
+    }
+  }
+
+  VideoEncoder(int width, int height, int requestedFps, Output output) throws Exception {
     MediaFormat format = MediaFormat.createVideoFormat("video/avc", width, height);
     format.setInteger(
         MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
     format.setInteger(MediaFormat.KEY_BIT_RATE, 4_000_000);
-    format.setInteger(MediaFormat.KEY_FRAME_RATE, 30);
     format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1);
     format.setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0);
-    format.setFloat(MediaFormat.KEY_MAX_FPS_TO_ENCODER, 30);
     format.setLong(MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER, 100_000L);
     MediaCodec created = MediaCodec.createEncoderByType("video/avc");
     Surface input = null;
     try {
+      int fps = requestedFps;
+      if (fps == 60) {
+        MediaCodecInfo info = created.getCodecInfo();
+        if (!info.isHardwareAccelerated() || !info.getCapabilitiesForType("video/avc")
+            .getVideoCapabilities().areSizeAndRateSupported(width, height, fps)) fps = 30;
+      }
+      format.setInteger(MediaFormat.KEY_FRAME_RATE, fps);
+      format.setFloat(MediaFormat.KEY_MAX_FPS_TO_ENCODER, fps);
       created.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
       input = created.createInputSurface();
       created.start();

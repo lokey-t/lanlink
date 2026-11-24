@@ -6,7 +6,6 @@ import android.content.res.Resources;
 import android.os.Build;
 import android.os.LocaleList;
 import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -22,7 +21,7 @@ final class Language {
     if (application != null) return;
     Context app = context.getApplicationContext();
     try (InputStream input = app.getAssets().open("locales.json")) {
-      JSONObject catalog = new JSONObject(new String(input.readAllBytes(), StandardCharsets.UTF_8));
+      JSONObject catalog = new JSONObject(AssetText.read(input));
       messages = catalog.getJSONObject("messages");
     } catch (Exception failure) {
       android.util.Log.w("LanLink", "Unable to load language catalog", failure);

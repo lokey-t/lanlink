@@ -47,7 +47,10 @@ public final class RootStream {
     AtomicLong failedSince = new AtomicLong();
     AtomicLong lastFrame = new AtomicLong(android.os.SystemClock.elapsedRealtime());
     AtomicInteger bitrate = new AtomicInteger(4_000_000);
+    AtomicInteger cadence = new AtomicInteger(30);
     AtomicReference<VideoEncoder> current = new AtomicReference<>();
+    AtomicReference<AdbAudioCapture> audio = new AtomicReference<>();
+    RemoteScreenDim dim = new RemoteScreenDim();
     DataOutputStream output = new DataOutputStream(new BufferedOutputStream(video));
     output.writeInt(MAGIC);
     output.flush();
@@ -59,10 +62,29 @@ public final class RootStream {
                 String line;
                 while ((line = input.readLine()) != null) {
                   if (line.equals("stop")) break;
+                  if (line.matches("audio [0-9]{1,5} [a-f0-9]{64}") && AdbAudioCapture.supported()) {
+                    String[] parts = line.split(" ");
+                    int port = Integer.parseInt(parts[1]);
+                    if (port > 0 && port <= 65535 && !closed.get()) {
+                      AdbAudioCapture previous = audio.get();
+                      AdbAudioCapture capture = new AdbAudioCapture(port, parts[2], previous);
+                      audio.set(capture);
+                      if (closed.get()) capture.close();
+                    }
+                    continue;
+                  }
+                  if (line.matches("dim (-1|[0-9]{1,18})")) {
+                    dim.keep(Long.parseLong(line.substring(4)));
+                    continue;
+                  }
                   VideoEncoder encoder = current.get();
                   if (line.equals("key")) {
                     keyPending.set(true);
                     if (encoder != null) encoder.requestKey();
+                  }
+                  if (line.matches("fps (24|30|60)")) {
+                    int fps = Integer.parseInt(line.substring(4));
+                    if (cadence.getAndSet(fps) != fps) rebuild.set(true);
                   }
                   if (line.matches("rate [0-9]{6,7}")) {
                     int rate = Integer.parseInt(line.substring(5));
@@ -75,11 +97,25 @@ public final class RootStream {
               } catch (Exception ignored) {
               } finally {
                 closed.set(true);
+                AdbAudioCapture capture = audio.getAndSet(null);
+                if (capture != null) capture.close();
+                dim.close();
               }
             },
             "lanlink-root-controls");
     commands.setDaemon(true);
     commands.start();
+    Thread displayWatch = new Thread(() -> {
+      try {
+        while (!closed.get()) {
+          dim.tick();
+          Thread.sleep(100);
+        }
+      } catch (InterruptedException ignored) {
+      } finally { dim.close(); }
+    }, "lanlink-display-watch");
+    displayWatch.setDaemon(true);
+    displayWatch.start();
     RootDisplay mirror = null;
     try {
       while (!closed.get()) {
@@ -110,9 +146,10 @@ public final class RootStream {
             int height = Math.max(8, Math.round(info.height * scale) / 8 * 8);
             lastFrame.set(android.os.SystemClock.elapsedRealtime());
             VideoEncoder encoder =
-                new VideoEncoder(
+                VideoEncoder.start(
                     width,
                     height,
+                    cadence.get(),
                     new VideoEncoder.Output() {
                       public void frame(VideoWire.Frame frame) {
                         lastFrame.set(android.os.SystemClock.elapsedRealtime());
@@ -168,6 +205,11 @@ public final class RootStream {
         Thread.sleep(200);
       }
     } finally {
+      closed.set(true);
+      AdbAudioCapture capture = audio.getAndSet(null);
+      if (capture != null) capture.close();
+      displayWatch.interrupt();
+      dim.close();
       if (mirror != null) mirror.close();
       VideoEncoder old = current.getAndSet(null);
       if (old != null) {

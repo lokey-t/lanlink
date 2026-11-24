@@ -6,8 +6,28 @@ import { EventEmitter } from 'node:events';
 import { packFrame, unpackFrame, connectVideo, serverHandshake } from '../src/video-wire.js';
 import { AnnexBParser, JpegParser } from '../src/video-codec.js';
 import { VideoHost, VideoViewer } from '../src/video.js';
+import { AdaptiveFrameRate } from '../src/adaptive-video.js';
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const fixture = { data: Buffer.from([255, 216, 1, 255, 217]), codec: 'jpeg', width: 640, height: 480, key: true, time: 100 };
+
+test('adaptive frame rate upgrades a stable active stream, drops on congestion, and respects the receiver limit', () => {
+  let time = 0;
+  const fast = new AdaptiveFrameRate(60, () => time);
+  const legacy = new AdaptiveFrameRate(30, () => time);
+  const clean = {rttMs:12, delayMs:6, sampleAgeMs:15, stalledMs:15, frames:28};
+  for (let i = 0; i < 8; i++, time += 1000) fast.feedback({...clean, frames:0}, 4_000_000);
+  assert.equal(fast.fps, 30);
+  for (let i = 0; i < 5; i++, time += 1000) {
+    fast.feedback(clean, 4_000_000);
+    legacy.feedback(clean, 4_000_000);
+  }
+  assert.equal(fast.fps, 60);
+  assert.equal(legacy.fps, 30);
+  fast.feedback({...clean, delayMs:95}, 3_000_000);
+  assert.equal(fast.fps, 30);
+  fast.feedback(clean, 1_000_000);
+  assert.equal(fast.fps, 24);
+});
 
 test('binary media preserves frames, rejects tampering/replay/oversize and invalid dimensions', () => {
   const key = randomBytes(32), packet = packFrame(key, 0, fixture);
@@ -16,6 +36,9 @@ test('binary media preserves frames, rejects tampering/replay/oversize and inval
   const changed = Buffer.from(packet); changed[35] ^= 1; assert.throws(() => unpackFrame(key, 0, changed.subarray(4)));
   assert.throws(() => packFrame(key, 1, { ...fixture, width: 99999 }), /无效/);
   assert.throws(() => unpackFrame(key, 0, Buffer.alloc(4 * 1024 * 1024 + 1)), /长度/);
+  const audio = { ...fixture, codec: 'pcm', width: 1, height: 1, data: Buffer.alloc(3840, 42) };
+  assert.deepEqual(unpackFrame(key, 3, packFrame(key, 3, audio).subarray(4)), audio);
+  assert.throws(() => packFrame(key, 3, { ...audio, data: audio.data.subarray(1) }), /媒体帧无效/);
 });
 
 test('media channel authenticates both ends and handles fragmented binary frames', async t => {

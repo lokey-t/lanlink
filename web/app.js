@@ -6,8 +6,6 @@ if (!desktop) {
   history.replaceState(null, '', '/');
 }
 let state, initial = true, remoteId = null, viewing = false, control = false, noticeTimer, polling = false;
-const seenAndroidDisconnectRequests = new Set();
-let androidDisconnectRequestId = '';
 async function api(route, data) {
   if (desktop) return window.lanlink[route](data ?? {});
   const r = await fetch('/api/' + route, { method: data === undefined ? 'GET' : 'POST', headers: { 'X-LanLink-Token': token, 'Content-Type': 'application/json' }, body: data === undefined ? undefined : JSON.stringify(data) });
@@ -22,7 +20,8 @@ async function refresh() {
   try {
     state = await api('state'); $('localBadge').textContent = '● ' + state.name + (state.capabilities.simulated ? ' · 模拟模式' : ''); $('account').textContent = state.groupId; $('peerCount').textContent = state.peers.length; $('join').textContent = state.groupEstablished ? '配对并合并设备组' : '加入其他组';
     $('serviceWarning').hidden = true; $('serviceWarning').textContent = '';
-    const sig = JSON.stringify([state.peers, state.active]);
+    const inputTargets = state.inputTransport?.targets || [];
+    const sig = JSON.stringify([state.peers, state.active, inputTargets]);
     if (sig !== deviceSignature) {
       deviceSignature = sig; $('deviceList').replaceChildren();
       if (!state.peers.length) { const empty = document.createElement('div'); empty.className = 'empty'; const title = document.createElement('strong'); title.textContent = '等待你的下一台设备'; empty.append(title, document.createTextNode('在同一局域网中启动客户端，并输入另一台设备显示的八位配对码。')); $('deviceList').append(empty); }
@@ -31,6 +30,19 @@ async function refresh() {
         const icon = document.createElement('div'); icon.className = 'icon'; icon.textContent = p.platform === 'android' ? '▯' : '▱';
         const name = document.createElement('h3'); name.textContent = p.name || '已配对设备'; const detail = document.createElement('small'); detail.textContent = (p.platform || '') + ' · ' + p.address;
         const actions = document.createElement('div'); actions.className = 'actions';
+        const route = inputTargets.find(target => target.id === p.id);
+        if (route) {
+          const labels = {bluetooth:'蓝牙 HID',network:'网络输入',none:'输入未就绪'};
+          detail.textContent += ' · ' + (labels[route.selected] || '输入状态未知');
+          if (route.selected === 'network' && p.access?.inputBackend)
+            detail.textContent += ' (' + p.access.inputBackend + ')';
+          if (route.selected === 'none') {
+            const grant = p.access?.permissions?.input;
+            if (grant?.appEnabled === false) detail.textContent += ' · 对端已关闭输入';
+            else if (grant?.systemGranted === false) detail.textContent += ' · 缺少系统输入权限';
+            else if (grant?.peerAllowed === false) detail.textContent += ' · 此设备尚未获准控制';
+          }
+        }
         actions.append(button('查看屏幕', () => openRemote(p)), button('切换键鼠', () => api('control', { id: p.id, capture: true }), 'secondary'));
         if (['win32', 'darwin'].includes(p.platform)) actions.append(button('关机', async () => { if (confirm('请求 ' + p.name + ' 在 30 秒后关机？目标端可取消，未保存的工作可能阻止关机。')) { await api('shutdown', { id: p.id }); notice('已发送关机请求'); } }, 'danger'), button('取消关机', () => api('cancel-shutdown', { id: p.id }), 'secondary'));
         card.append(icon, name, detail, actions); $('deviceList').append(card);
@@ -45,7 +57,6 @@ async function refresh() {
     if (remoteId && state.active !== remoteId) control = false;
     $('remoteStatus').textContent = control ? '正在控制 · 点击画面后输入' : '查看模式';
     refreshSharedLayout();
-    refreshAndroidDisconnectNotice();
   } catch (e) { $('serviceWarning').textContent = e.message; $('serviceWarning').hidden = false; } finally { polling = false; }
 }
 let layoutSignature='', layoutMasterSaving=false;
@@ -79,22 +90,6 @@ function refreshSharedLayout(){
 action('placeLayout',async()=>{const id=$('layoutTarget').value,anchor=state.layout?.positions?.[$('layoutAnchor').value]||{x:0,y:0},delta={center:{x:0,y:0},left:{x:-1,y:0},right:{x:1,y:0},top:{x:0,y:-1},bottom:{x:0,y:1}}[$('layoutDirection').value];await api('layout-place',{id,x:anchor.x+delta.x,y:anchor.y+delta.y});notice('同组布局已更新');});
 action('removeLayout',async()=>{await api('layout-remove',{id:$('layoutTarget').value});notice('设备已移出布局');});
 $('layoutMaster').onchange=()=>chooseLayoutMaster($('layoutMaster').value);
-function refreshAndroidDisconnectNotice() {
-  const request = state.androidDisconnectNotice, requestId = request?.requestId || '', dialog = $('androidDisconnect');
-  if (dialog.open && androidDisconnectRequestId !== requestId) { androidDisconnectRequestId = ''; dialog.close(); }
-  if (!requestId) return;
-  $('androidDisconnectName').textContent = request.name || '设备';
-  $('androidDisconnectMessage').textContent = request.message || '';
-  if (dialog.open || seenAndroidDisconnectRequests.has(requestId)) return;
-  androidDisconnectRequestId = requestId; seenAndroidDisconnectRequests.add(requestId); dialog.showModal();
-}
-async function dismissAndroidDisconnectNotice() {
-  const requestId = androidDisconnectRequestId;
-  androidDisconnectRequestId = ''; $('androidDisconnect').close();
-  if (requestId) await api('android-disconnect-dismiss', { requestId });
-}
-action('dismissAndroidDisconnect', dismissAndroidDisconnectNotice);
-$('androidDisconnect').addEventListener('cancel', e => { e.preventDefault(); dismissAndroidDisconnectNotice().catch(e => notice(e.message)); });
 action('saveLayout', async () => { await api('settings', { dwell: Number($('dwell').value) }); notice('本机切换设置已保存'); });
 action('exportLogs', async () => {
   notice('正在收集组内日志…');
@@ -124,10 +119,50 @@ let inputChain = Promise.resolve(), move = null, moveBusy = false;
 function sendInput(input) { if (!control || !remoteId) return Promise.resolve(); const id = remoteId; inputChain = inputChain.then(() => api('input', { id, input })).catch(e => { control = false; notice(e.message); }); return inputChain; }
 function coordinates(e) { const r = $('screen').getBoundingClientRect(); return { kind: 'move', x: Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)), y: Math.max(0, Math.min(1, (e.clientY - r.top) / r.height)) }; }
 $('screen').onpointermove = async e => { if (!control) return; move = coordinates(e); if (moveBusy) return; moveBusy = true; try { while (move && control) { const m = move; move = null; await sendInput(m); } } finally { moveBusy = false; } };
-$('screen').onpointerdown = async e => { if (!control) return; e.preventDefault(); $('screen').focus(); $('screen').setPointerCapture(e.pointerId); await sendInput(coordinates(e)); await sendInput({ kind: 'button', button: e.button, down: true }); };
-$('screen').onpointerup = e => { if (control) { e.preventDefault(); sendInput({ kind: 'button', button: e.button, down: false }); } };
+const heldPointerButtons = new Map();
+function pointerButton(e, down) {
+  if (!control || !e.isPrimary) return;
+  e.preventDefault();
+  if (down) {
+    $('screen').focus();
+    $('screen').setPointerCapture(e.pointerId);
+    heldPointerButtons.set(e.pointerId, {button:e.button, id:remoteId});
+  } else heldPointerButtons.delete(e.pointerId);
+  // Queue position and button together before a subsequent DOM event can enqueue its release.
+  move = null;
+  sendInput(coordinates(e));
+  sendInput({kind:'button', button:e.button, down});
+}
+$('screen').onpointerdown = e => pointerButton(e, true);
+$('screen').onpointerup = e => pointerButton(e, false);
+$('screen').onlostpointercapture = e => {
+  if (!heldPointerButtons.has(e.pointerId)) return;
+  const {button,id} = heldPointerButtons.get(e.pointerId);
+  heldPointerButtons.delete(e.pointerId);
+  if (remoteId === id) sendInput({kind:'button',button,down:false});
+};
 $('screen').oncontextmenu = e => e.preventDefault();
 $('screen').addEventListener('wheel', e => { if (control) { e.preventDefault(); sendInput({ kind: 'wheel', delta: Math.sign(e.deltaY) * -120 }); } }, { passive: false });
 for (const name of ['keydown', 'keyup']) $('screen').addEventListener(name, e => { if (!control || e.isComposing) return; e.preventDefault(); if (e.code === 'KeyV' && (e.ctrlKey || e.metaKey)) { if (name === 'keydown' && !e.repeat) api('paste', { id: remoteId }).catch(e => notice(e.message)); return; } sendInput({ kind: 'key', code: e.code, down: name === 'keydown' }); });
 window.addEventListener('blur', () => { if (control) { control = false; api('release', {}).catch(() => {}); } });
 await refresh(); setInterval(refresh, 1500);
+
+$('directPair').onclick = () => { $('directPairError').textContent = ''; $('directPairDialog').showModal(); };
+$('cancelDirectPair').onclick = () => $('directPairDialog').close();
+$('directPairForm').onsubmit = async event => {
+  event.preventDefault();
+  const button = event.submitter;
+  if (button.disabled) return;
+  button.disabled = true;
+  try {
+    const host = $('pairHost').value.trim();
+    if (!/^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(host) || host.split('.').some(part => Number(part) > 255)) throw Error('请输入有效的 IPv4 地址');
+    const current = await api('state');
+    if (!confirm(current.groupEstablished ? '配对成功后，双方组内所有设备将合并为一组，保留已有授权。继续？' : '加入对方的组？')) return;
+    await api('join', { host, code: $('directPairCode').value, expectedGroup: current.groupId });
+    $('directPairDialog').close();
+    $('directPairCode').value = '';
+    notice('配对完成，正在同步组内设备');
+  } catch (error) { $('directPairError').textContent = error.message; }
+  finally { button.disabled = false; }
+};

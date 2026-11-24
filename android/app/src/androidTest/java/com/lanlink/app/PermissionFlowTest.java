@@ -160,6 +160,35 @@ public final class PermissionFlowTest extends Instrumentation {
     android.content.SharedPreferences languagePrefs = getTargetContext().getSharedPreferences("identity", 0);
     String previousLanguage = languagePrefs.getString("language", null);
     boolean pinnedLanguage = false;
+    if (options != null && options.containsKey("remoteDisplayProbe")) {
+      try {
+        RemoteDisplay display = new RemoteDisplay(getTargetContext());
+        try {
+          try (java.io.InputStream output = new android.os.ParcelFileDescriptor.AutoCloseInputStream(
+              getUiAutomation().executeShellCommand("input keyevent 223"))) {
+            while (output.read() != -1) {}
+          }
+          long deadline = android.os.SystemClock.elapsedRealtime() + 3500;
+          while (display.interactive() && android.os.SystemClock.elapsedRealtime() < deadline) Thread.sleep(50);
+          check(!display.interactive(), "phone enters screen-off state");
+          display.keepAwake(true);
+          Thread.sleep(300);
+          check(!display.interactive(), "keep-awake does not wake a manually turned-off display");
+          display.wake();
+          deadline = android.os.SystemClock.elapsedRealtime() + 3500;
+          while (!display.interactive() && android.os.SystemClock.elapsedRealtime() < deadline) Thread.sleep(50);
+          check(display.interactive(), "remote wake turns on the screen");
+          if (getTargetContext().getSystemService(android.app.KeyguardManager.class).isDeviceSecure())
+            check(display.locked(), "wake does not dismiss a secure keyguard");
+          result.putString("stream", "PASS: screen off, keep-awake respects manual lock, remote wake keeps secure keyguard\n");
+          finish(Activity.RESULT_OK, result);
+        } finally { display.release(); }
+      } catch (Throwable failure) {
+        result.putString("stream", android.util.Log.getStackTraceString(failure));
+        finish(Activity.RESULT_CANCELED, result);
+      }
+      return;
+    }
     if (!Build.HARDWARE.equals("ranchu") && !Build.HARDWARE.equals("goldfish")) {
       result.putString("stream", "This test only runs on a disposable Android emulator.\n");
       finish(Activity.RESULT_CANCELED, result);

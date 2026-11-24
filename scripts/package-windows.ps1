@@ -52,7 +52,7 @@ foreach ($file in @('LICENSE.TXT','THIRD-PARTY-NOTICES.TXT')) {
 }
 Copy-Item -LiteralPath (Join-Path $root 'native/macos') -Destination (Join-Path $output 'native') -Recurse
 New-Item -ItemType Directory -Force (Join-Path $output 'native/windows') | Out-Null
-foreach($name in @('bridge.ps1','Bridge.cs','BridgeWork.cs')) {
+foreach($name in @('bridge.ps1','Bridge.cs','BridgeWork.cs','audio.ps1','Audio.cs')) {
     Copy-Item -LiteralPath (Join-Path $root "native/windows/$name") -Destination (Join-Path $output 'native/windows')
 }
 foreach($name in @('src','Cargo.toml','Cargo.lock')){Copy-Item -LiteralPath (Join-Path $root "native/quic/$name") -Destination (Join-Path $output 'native/quic') -Recurse}

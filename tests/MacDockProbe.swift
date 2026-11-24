@@ -65,12 +65,13 @@ import AppKit
         try await eventually("Changing Dock policy must preserve the visible settings window and its focus") { window.isVisible && focused(window) }
         try require(field.stringValue == "Unsaved settings 设置 draft", "Changing Dock policy must preserve the settings draft")
         try require(Model(preferences: UserDefaults(suiteName: suite)!).dockIconHidden, "A new model must restore the hidden preference")
-        guard let statusItem = model.statusItem, let menu = statusItem.menu,
+        guard let statusItem = model.statusItem, let menu = model.statusMenu,
               let openIndex = menu.items.firstIndex(where: { $0.action == #selector(AppDelegate.showMain) }) else {
             throw failure("Hiding the Dock icon must retain a menu bar entry that opens LanLink")
         }
         try require(menu.items[openIndex].target as? AppDelegate === delegate, "The menu bar action must target the live app delegate")
         try require(statusItem.button != nil && menu.items.contains(where: { $0.action == #selector(AppDelegate.quitApp) }), "The menu bar must retain its visible button and Quit action")
+        try require(statusItem.button?.action == #selector(AppDelegate.statusItemClicked(_:)) && statusItem.button?.target as? AppDelegate === delegate, "Clicking the menu bar icon must open the quick panel")
         try await selectAll(window: window, field: field)
 
         // The custom title bar closes this borderless window through the delegate.

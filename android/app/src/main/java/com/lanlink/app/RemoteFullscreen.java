@@ -159,7 +159,7 @@ final class RemoteFullscreen implements AutoCloseable {
     toggle.setChecked(checked);
     toggle.setEnabled(enabled);
     toggle.setAlpha(enabled ? 1 : .5f);
-    toggle.setThumbTintList(ColorStateList.valueOf(0xffb5a7fa));
+    toggle.setThumbTintList(ColorStateList.valueOf(0xffa9b4f5));
     toggle.setOnCheckedChangeListener((v, value) -> {
       prefs.edit().putBoolean(key, value).apply();
       if (key.equals("left_touchpad")) { leftEnabled = value; leftPad.cancelGesture(); }

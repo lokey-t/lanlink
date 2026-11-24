@@ -13,6 +13,7 @@ namespace LanLink.Desktop {
     static readonly HashSet<string> resourceColors = new HashSet<string>();
     static bool dark, listening, initialized;
     public static string Mode = "system";
+    public static event Action Changed;
     public static bool Dark { get { return dark; } }
     static bool SystemDark() {
       try { using(var key=Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")) return Convert.ToInt32(key == null ? 1 : key.GetValue("AppsUseLightTheme",1)) == 0; }
@@ -23,8 +24,19 @@ namespace LanLink.Desktop {
       Set(Mode);
       if(!listening) { listening=true;SystemEvents.UserPreferenceChanged+=delegate { if(Application.Current!=null)Application.Current.Dispatcher.BeginInvoke(new Action(delegate { Set(Mode); })); }; }
     }
+    // Shared design tokens (see AGENTS.md); token colors get a hand-tuned dark value.
+    static readonly Dictionary<string,string> DarkPalette = new Dictionary<string,string> {
+      {"5B6BD5","A9B4F5"},{"4E5DC4","B8C1F7"},{"4453B5","C6CDF9"},{"ECEEFC","2E3456"},{"E1E4FA","383F66"},{"C7CDF2","4A5285"},
+      {"7B70C5","B3A8F0"},{"202C43","E4EAF4"},{"65748B","A8B5CA"},{"DFE5EF","3B4960"},{"FFFFFF","222C3C"},{"F1F5FC","111722"},
+      {"F9FBFE","171E2B"},{"2F8566","7AC6A6"},{"E3F3ED","203E36"},{"9A6E1F","E0B865"},{"FBF1DE","3D3420"},{"C04A5C","EF96A5"},
+      {"FBE9EC","45262E"}
+    };
     public static Color Resolve(string hex) {
       Color c=(Color)ColorConverter.ConvertFromString(hex);if(!dark || c.A==0)return c;
+      string mapped;
+      if(DarkPalette.TryGetValue(string.Format("{0:X2}{1:X2}{2:X2}",c.R,c.G,c.B),out mapped)) {
+        int rgb=Convert.ToInt32(mapped,16);return Color.FromArgb(c.A,(byte)(rgb>>16),(byte)(rgb>>8),(byte)rgb);
+      }
       // Preserve semantic hues while placing pale surfaces and dark text on a dark palette.
       double max=Math.Max(c.R,Math.Max(c.G,c.B)),min=Math.Min(c.R,Math.Min(c.G,c.B));
       if(min>=210) {
@@ -45,6 +57,7 @@ namespace LanLink.Desktop {
       initialized=true;Mode=next;dark=nextDark;
       foreach(var item in brushes)if(!item.Value.IsFrozen)item.Value.Color=Resolve(item.Key);
       if(Application.Current!=null)foreach(var hex in resourceColors){Application.Current.Resources["ThemeColor"+hex.Substring(1)]=Resolve(hex);Application.Current.Resources["ThemeBrush"+hex.Substring(1)]=new SolidColorBrush(Resolve(hex));}
+      if(Changed!=null)Changed();
     }
     public static ResourceDictionary Load(string path) {
       string xaml=File.ReadAllText(path);

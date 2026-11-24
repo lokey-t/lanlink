@@ -14,7 +14,7 @@ using Microsoft.Win32;
 namespace LanLink.Desktop {
   public sealed class StagingPage : Grid {
     readonly MainWindow main; readonly StackPanel list=new StackPanel(),outgoing=new StackPanel();
-    readonly TextBlock status=MainWindow.Text("",12,"#788195"),empty=MainWindow.LText("暂存区是空的。收到文件后可选择“保存到…”或拖到文件夹。",14,"#788195"),sentEmpty=MainWindow.LText("暂无发送任务",14,"#788195");
+    readonly TextBlock status=MainWindow.Text("",12,"#65748B"),empty=MainWindow.LText("暂存区是空的。收到文件后可选择“保存到…”或拖到文件夹。",14,"#65748B"),sentEmpty=MainWindow.LText("暂无发送任务",14,"#65748B");
     readonly Dictionary<string,StageCard> cards=new Dictionary<string,StageCard>(); readonly Dictionary<string,StageCard> sentCards=new Dictionary<string,StageCard>(); bool loading,preview;
     public int RowCount {get{return cards.Count;}} public void SetPreview(object data){preview=true;Display(data);}
     sealed class StageCard {public Border View;public TextBlock Name,Progress,Info,Error;public StackPanel Actions;public object Data;public string State,LocalError="";public bool Busy;}
@@ -33,9 +33,9 @@ namespace LanLink.Desktop {
     }
     public void Display(object data){DisplayRows(Json.Get(data,"files") as IEnumerable??new object[0],false);}
     StageCard MakeCard(string id,bool sending){
-      var card=new StageCard{ Name=MainWindow.Text("",17), Progress=MainWindow.Text("",12,"#7163C8"),Info=MainWindow.Text("",12,"#788195"),Error=MainWindow.Text("",12,"#B76370"),Actions=new StackPanel{Orientation=Orientation.Horizontal}};
+      var card=new StageCard{ Name=MainWindow.Text("",17), Progress=MainWindow.Text("",12,"#5B6BD5"),Info=MainWindow.Text("",12,"#65748B"),Error=MainWindow.Text("",12,"#C04A5C"),Actions=new StackPanel{Orientation=Orientation.Horizontal}};
       var content=new StackPanel();var head=new DockPanel();DockPanel.SetDock(card.Progress,Dock.Right);head.Children.Add(card.Progress);card.Name.TextWrapping=TextWrapping.Wrap;head.Children.Add(card.Name);content.Children.Add(head);card.Info.Margin=new Thickness(0,8,0,12);card.Info.TextWrapping=TextWrapping.Wrap;content.Children.Add(card.Info);content.Children.Add(card.Actions);card.Error.TextWrapping=TextWrapping.Wrap;card.Error.Margin=new Thickness(0,12,0,0);content.Children.Add(card.Error);
-      card.View=new Border{Child=content,Background=MainWindow.Brush("#FFFFFF"),CornerRadius=new CornerRadius(20),Padding=new Thickness(22),Margin=new Thickness(0,0,0,14),BorderBrush=MainWindow.Brush("#E5EAF4"),BorderThickness=new Thickness(1)};
+      card.View=new Border{Child=content,Background=MainWindow.Brush("#FFFFFF"),CornerRadius=new CornerRadius(20),Padding=new Thickness(22),Margin=new Thickness(0,0,0,14),BorderBrush=MainWindow.Brush("#DFE5EF"),BorderThickness=new Thickness(1)};
       (sending?sentCards:cards).Add(id,card);(sending?outgoing:list).Children.Add(card.View);return card;
     }
     static string StateLabel(object row,bool sending){
@@ -65,7 +65,7 @@ namespace LanLink.Desktop {
       if(state=="ready"){
         ActionButton(card,"保存到…",()=>SaveTo(card,id));
         ActionButton(card,"在文件夹中显示",async()=>{var ready=await main.Client.Call("stage-ready",new{id=id});System.Diagnostics.Process.Start(new ProcessStartInfo("explorer.exe","/select,\""+Json.Text(ready,"path")+"\""){UseShellExecute=true});});
-        var drag=MainWindow.LText("拖到文件夹",12,"#7163C8");drag.Margin=new Thickness(0,0,14,0);drag.Cursor=Cursors.Hand;Point down=new Point();bool pressed=false;drag.MouseLeftButtonDown+=(s,e)=>{down=e.GetPosition(drag);pressed=true;};drag.MouseLeftButtonUp+=(s,e)=>pressed=false;
+        var drag=MainWindow.LText("拖到文件夹",12,"#5B6BD5");drag.Margin=new Thickness(0,0,14,0);drag.Cursor=Cursors.Hand;Point down=new Point();bool pressed=false;drag.MouseLeftButtonDown+=(s,e)=>{down=e.GetPosition(drag);pressed=true;};drag.MouseLeftButtonUp+=(s,e)=>pressed=false;
         drag.MouseMove+=async(s,e)=>{if(!pressed||card.Busy||e.LeftButton!=MouseButtonState.Pressed||(e.GetPosition(drag)-down).Length<6)return;pressed=false;await Perform(card,async()=>{var ready=await main.Client.Call("stage-ready",new{id=id});var payload=new DataObject(DataFormats.FileDrop,new[]{Json.Text(ready,"path")});var effect=DragDrop.DoDragDrop(drag,payload,DragDropEffects.Copy);if(effect==DragDropEffects.Copy)main.NotifyTransient(Locale.T("复制已交给文件管理器。请确认目标文件已保存，再删除暂存副本。"));});};card.Actions.Children.Add(drag);
       }else if(state=="receiving"||state=="queued")ActionButton(card,"取消传输",async()=>{await main.Client.Call("stage-cancel",new{id=id});main.NotifyTransient(Locale.T("已取消传输，可稍后重试；其他任务继续。"));});
       else ActionButton(card,state=="pending"?"开始传输":"重新传输",async()=>{var result=await main.Client.Call("stage-start",new{id=id});main.NotifyTransient(Json.Text(result,"message"));});
@@ -83,10 +83,10 @@ namespace LanLink.Desktop {
   public sealed class FileShareWindow : Window {
     public FileShareWindow(MainWindow main,string[] files,IEnumerable<Device> devices){
       Title=Locale.T("分享文件 · LanLink");Owner=main;Width=420;Height=440;MinWidth=360;MinHeight=300;WindowStartupLocation=WindowStartupLocation.CenterOwner;Background=MainWindow.Brush("#F7F8FB");Resources=main.Resources;
-      var body=new StackPanel{Margin=new Thickness(24)};body.Children.Add(MainWindow.LText("发送到设备",24));var summary=MainWindow.Text(files.Length==1?Path.GetFileName(files[0]):files.Length+Locale.T(" 个文件或文件夹"),13,"#788195");summary.Margin=new Thickness(0,12,0,20);body.Children.Add(summary);
-      var targets=new StackPanel();body.Children.Add(targets);var status=MainWindow.Text("",12,"#B76370");status.Visibility=Visibility.Collapsed;status.TextWrapping=TextWrapping.Wrap;body.Children.Add(status);bool any=false,busy=false;
+      var body=new StackPanel{Margin=new Thickness(24)};body.Children.Add(MainWindow.LText("发送到设备",24));var summary=MainWindow.Text(files.Length==1?Path.GetFileName(files[0]):files.Length+Locale.T(" 个文件或文件夹"),13,"#65748B");summary.Margin=new Thickness(0,12,0,20);body.Children.Add(summary);
+      var targets=new StackPanel();body.Children.Add(targets);var status=MainWindow.Text("",12,"#C04A5C");status.Visibility=Visibility.Collapsed;status.TextWrapping=TextWrapping.Wrap;body.Children.Add(status);bool any=false,busy=false;
       foreach(var device in devices.Where(d=>d.Online&&!d.Local)){any=true;var d=device;var send=MainWindow.Button(d.Name+"   →",delegate{});send.Click+=async delegate{if(busy)return;busy=true;targets.IsEnabled=false;status.Visibility=Visibility.Visible;status.Text=Locale.T("正在准备发送到“")+d.Name+"”…";try{await main.PrepareFileShare(d,files);Close();}catch(Exception ex){status.Visibility=Visibility.Visible;status.Text=MainWindow.DisplayError(ex.Message);busy=false;targets.IsEnabled=true;}};send.HorizontalContentAlignment=HorizontalAlignment.Left;send.Margin=new Thickness(0,0,0,12);targets.Children.Add(send);}
-      if(!any)body.Children.Add(MainWindow.LText("暂无在线设备，请打开对方 LanLink。",14,"#788195"));var tip=MainWindow.LText("文件会进入对方暂存区。可在“暂存文件”的发送任务中查看进度、取消或重试。",12,"#788195");tip.TextWrapping=TextWrapping.Wrap;tip.Margin=new Thickness(0,14,0,16);body.Children.Add(tip);body.Children.Add(MainWindow.LButton("关闭",Close));WindowShell.Wrap(this,new Border{Background=MainWindow.Brush("#F7F8FB"),Child=new ScrollViewer{Content=body,VerticalScrollBarVisibility=ScrollBarVisibility.Auto}},true,true);
+      if(!any)body.Children.Add(MainWindow.LText("暂无在线设备，请打开对方 LanLink。",14,"#65748B"));var tip=MainWindow.LText("文件会进入对方暂存区。可在“暂存文件”的发送任务中查看进度、取消或重试。",12,"#65748B");tip.TextWrapping=TextWrapping.Wrap;tip.Margin=new Thickness(0,14,0,16);body.Children.Add(tip);body.Children.Add(MainWindow.LButton("关闭",Close));WindowShell.Wrap(this,new Border{Background=MainWindow.Brush("#F7F8FB"),Child=new ScrollViewer{Content=body,VerticalScrollBarVisibility=ScrollBarVisibility.Auto}},true,true);
     }
   }
   public static class FileShareShell {

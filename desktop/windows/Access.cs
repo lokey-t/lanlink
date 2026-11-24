@@ -8,7 +8,7 @@ namespace LanLink.Desktop {
   public sealed class PermissionRequestWindow : Window {
     readonly MainWindow main; readonly object notice; bool done,closed,checking;
     readonly DispatcherTimer timer=new DispatcherTimer {Interval=TimeSpan.FromSeconds(1)};
-    readonly TextBlock message=MainWindow.LText("请在被控设备允许本设备控制。",14,"#657895");
+    readonly TextBlock message=MainWindow.LText("请在被控设备允许本设备控制。",14,"#65748B");
     public string RequestId {get{return Json.Text(notice,"requestId");}}
     public PermissionRequestWindow(MainWindow owner,object value) {
       main=owner;notice=value;Title=Locale.T("等待设备授权");Width=440;SizeToContent=SizeToContent.Height;Resources=owner.Resources;FontFamily=owner.FontFamily;WindowStartupLocation=WindowStartupLocation.CenterScreen;

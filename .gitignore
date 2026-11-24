@@ -28,3 +28,6 @@ build-info.json
 # Local promotional media and hosting bindings
 /promo/
 /website/.openai/
+
+# Local agent memory
+/.workbuddy/

@@ -40,8 +40,11 @@ android {
         jniLibs { useLegacyPackaging = true }
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    buildFeatures { aidl true; buildConfig true }
 }
 dependencies {
+    implementation 'dev.rikka.shizuku:api:13.1.5'
+    implementation 'dev.rikka.shizuku:provider:13.1.5'
     implementation 'com.google.zxing:core:3.5.3'
     implementation 'io.github.webrtc-sdk:android:150.7871.01'
 }

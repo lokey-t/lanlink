@@ -27,16 +27,21 @@ final class VideoPlayer implements AutoCloseable {
   volatile Surface surface;
   volatile VideoWire connection;
   volatile VideoTransport rtc;long rtcCooldown;
+  private volatile StreamAudio.Player playerAudio;
+  private String playerAudioKey;
+  private volatile boolean audioPermissionNeeded;
   volatile int width, height;
   volatile long renderedFrames;
   MediaCodec decoder;
+  private final Object codecLock = new Object();
+  private Thread outputThread;
   int decoderWidth, decoderHeight;
   volatile boolean needKey = true;
   volatile boolean receivingH264;
   volatile String session;
   volatile String codecLabel="";
   long fpsAt,fpsFrames;
-  final Runnable metrics=new Runnable(){public void run(){if(closed)return;long now=SystemClock.elapsedRealtime();if(fpsAt!=0&&!codecLabel.isEmpty())status.setText(codecLabel+" · "+Math.round((renderedFrames-fpsFrames)*1000f/Math.max(1,now-fpsAt))+" fps · "+String.format(java.util.Locale.ROOT,"%.1f Mbps",bitrate/1000000.0));fpsAt=now;fpsFrames=renderedFrames;main.postDelayed(this,1000);}};
+  final Runnable metrics=new Runnable(){public void run(){if(closed)return;long now=SystemClock.elapsedRealtime();if(fpsAt!=0&&!codecLabel.isEmpty())status.setText(codecLabel+" · "+Math.round((renderedFrames-fpsFrames)*1000f/Math.max(1,now-fpsAt))+" fps · "+String.format(java.util.Locale.ROOT,"%.1f Mbps",bitrate/1000000.0)+(audioPermissionNeeded?" · "+Language.t("请在被控设备授权共享系统声音"):""));fpsAt=now;fpsFrames=renderedFrames;main.postDelayed(this,1000);}};
   VideoViewport viewport;
   boolean legacyViewing;
 
@@ -74,6 +79,22 @@ final class VideoPlayer implements AutoCloseable {
     new Thread(this::run, "lanlink-video-player").start();
   }
 
+  private void startOutput() {
+    if (outputThread != null || closed) return;
+    // Codec output can arrive after queueInputBuffer returns. Drain independently
+    // of the network so the final image never waits for another frame/heartbeat.
+    outputThread = new Thread(() -> {
+      while (!closed) {
+        synchronized (codecLock) {
+          try { if (decoder != null) drainOutput(); }
+          catch (RuntimeException failure) { stopDecoder(); }
+        }
+        try { Thread.sleep(4); } catch (InterruptedException stopped) { return; }
+      }
+    }, "lanlink-video-output");
+    outputThread.start();
+  }
+
   void fit() {
     if (viewport != null) {
       viewport.fit(width, height);
@@ -88,6 +109,10 @@ final class VideoPlayer implements AutoCloseable {
   }
 
   void render(VideoWire.Frame frame) throws Exception {
+    synchronized (codecLock) { renderLocked(frame); }
+  }
+
+  private void renderLocked(VideoWire.Frame frame) throws Exception {
     if (frame.heartbeat) {
       // Static desktops can stop producing image frames while the final codec output is pending.
       if (decoder != null) drainOutput();
@@ -128,6 +153,7 @@ final class VideoPlayer implements AutoCloseable {
       decoder = MediaCodec.createDecoderByType("video/avc");
       decoder.configure(format, target, null, 0);
       decoder.start();
+      startOutput();
       decoderWidth = width;
       decoderHeight = height;
       needKey = true;
@@ -169,6 +195,10 @@ final class VideoPlayer implements AutoCloseable {
   }
 
   void stopDecoder() {
+    synchronized (codecLock) { stopDecoderLocked(); }
+  }
+
+  private void stopDecoderLocked() {
     if (decoder == null) return;
     try {
       decoder.stop();
@@ -191,8 +221,23 @@ final class VideoPlayer implements AutoCloseable {
     if (transport != null) transport.close();
   }
 
+  private static boolean supportsFastAvc() {
+    try {
+      MediaFormat format = MediaFormat.createVideoFormat("video/avc", 1920, 1080);
+      format.setInteger(MediaFormat.KEY_FRAME_RATE, 60);
+      MediaCodecList list = new MediaCodecList(MediaCodecList.REGULAR_CODECS);
+      String name = list.findDecoderForFormat(format);
+      if (name == null) return false;
+      for (MediaCodecInfo info : list.getCodecInfos()) {
+        if (info.getName().equals(name)) return info.isHardwareAccelerated();
+      }
+    } catch (RuntimeException ignored) {}
+    return false;
+  }
+
   void run() {
     boolean jpegOnly = false, legacy = false, h264Only = false;
+    boolean fastAvc = supportsFastAvc();
     try {
       while (!closed) {
         final AtomicBoolean startupTimedOut = new AtomicBoolean();
@@ -208,27 +253,44 @@ final class VideoPlayer implements AutoCloseable {
           }
           if (!legacy && connection == null && rtc==null) {
             JSONObject info=null;
+            int maxFps = !jpegOnly && fastAvc ? 60 : 30;
+            JSONObject media = Wire.obj("h264", !jpegOnly, "audio", 1, "maxFps", maxFps);
             if(peer.fastPath==null&&peer.quicConn!=0&&System.currentTimeMillis()>rtcCooldown){
-              try{long channel=new java.security.SecureRandom().nextInt()&0xffffffffL;if(channel==0)channel=1;rtc=LinkService.instance.quic.video(peer,channel);info=peer.request("videoOpen",Wire.obj("h264",!jpegOnly,"quic",channel));session=info.getString("id");if(info.optLong("quic")!=channel)throw new IOException("QUIC 串流协商失败");rtc.ready();}
+              try{long channel=new java.security.SecureRandom().nextInt()&0xffffffffL;if(channel==0)channel=1;rtc=LinkService.instance.quic.video(peer,channel);info=peer.request("videoOpen",new JSONObject(media.toString()).put("quic",channel));session=info.getString("id");if(info.optLong("quic")!=channel)throw new IOException("QUIC 串流协商失败");rtc.ready();}
               catch(Exception unavailable){if(rtc!=null)rtc.close();rtc=null;rtcCooldown=System.currentTimeMillis()+30000;if(session!=null){try{peer.request("videoStop",Wire.obj("id",session));}catch(Exception ignored){}session=null;}}
             }
             if(rtc==null && peer.fastPath==null && peer.info.optJSONObject("capabilities")!=null && peer.info.optJSONObject("capabilities").optInt("rtcVideo")==1 && System.currentTimeMillis()>rtcCooldown){
-              try{RtcVideo stream=new RtcVideo(LinkService.instance);rtc=stream;info=peer.request("videoOpen",Wire.obj("h264",!jpegOnly,"rtc",stream.offer()));session=info.getString("id");stream.accept(info.getString("rtc"));rtc.ready();if(closed)throw new IOException("CONTROL_ENDED: 画面请求已取消");}
+              try{RtcVideo stream=new RtcVideo(LinkService.instance);rtc=stream;info=peer.request("videoOpen",new JSONObject(media.toString()).put("rtc",stream.offer()));session=info.getString("id");stream.accept(info.getString("rtc"));rtc.ready();if(closed)throw new IOException("CONTROL_ENDED: 画面请求已取消");}
               catch(Exception unavailable){if(rtc!=null)rtc.close();rtc=null;rtcCooldown=System.currentTimeMillis()+30000;if(session!=null){try{peer.request("videoStop",Wire.obj("id",session));}catch(Exception ignored){}session=null;}if(closed)throw unavailable;}
             }
-            if(rtc==null)info = peer.request("videoOpen", Wire.obj("h264", !jpegOnly));
+            if(rtc==null)info = peer.request("videoOpen", media);
             h264Only = info.optBoolean("h264Only");
             session = info.getString("id");
-            if(rtc!=null)rtc.keyCallback(()->{LinkService currentService=LinkService.instance;if(currentService!=null)currentService.jobs.execute(()->{try{peer.request("videoKey",Wire.obj("id",session));}catch(Exception ignored){}});});
+            if(rtc!=null) {
+              final Wire videoPeer = peer;
+              final String videoSession = session;
+              final VideoTransport transport = rtc;
+              transport.keyCallback(() -> {
+                LinkService currentService = LinkService.instance;
+                if (currentService != null) currentService.jobs.execute(() -> {
+                  if (closed || rtc != transport) return;
+                  try { videoPeer.request("videoKey", Wire.obj("id", videoSession)); }
+                  catch (Exception ignored) {}
+                });
+              });
+            }
             if (closed) break;
             int usbPort = info.optInt("usbPort");
-            if(rtc!=null){}else if (usbPort > 0 && usbPort <= 65535) {
+            if (rtc == null) {
+            if (usbPort > 0 && usbPort <= 65535) {
               JSONObject route = new JSONObject(info.toString()).put("port", usbPort);
               try { connection = VideoWire.connect("127.0.0.1", route); }
               catch (Exception unavailable) {
                 connection = VideoWire.connect(peer.socket.getInetAddress().getHostAddress(), info);
               }
             } else connection = VideoWire.connect(peer.socket.getInetAddress().getHostAddress(), info);
+            }
+            updateAudio(peer, session, info);
           }
           feedback.reset();
           final java.util.concurrent.ScheduledExecutorService keeper=java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
@@ -238,10 +300,11 @@ final class VideoPlayer implements AutoCloseable {
           keeper.scheduleWithFixedDelay(()->{
             if(closed||keepSession==null||!keepSession.equals(session))return;
             if(allowJpegFallback&&renderedFrames==initialFrames&&SystemClock.elapsedRealtime()-connectedAt>=8000){startupTimedOut.set(true);if(keepConnection!=null)keepConnection.close();if(keepRtc!=null)keepRtc.close();return;}
-            try{long sent=SystemClock.elapsedRealtime();JSONObject result=keepPeer.request("videoKeep",Wire.obj("id",keepSession,"feedback",feedback.report().put("needKey",needsKeyFrame(keepRtc))));if(keepSession.equals(session)){feedback.rtt=SystemClock.elapsedRealtime()-sent;bitrate=result.optInt("bitrate",4000000);}}
+            try{long sent=SystemClock.elapsedRealtime();JSONObject result=keepPeer.request("videoKeep",Wire.obj("id",keepSession,"feedback",feedback.report().put("needKey",needsKeyFrame(keepRtc))));if(keepSession.equals(session)){feedback.rtt=SystemClock.elapsedRealtime()-sent;bitrate=result.optInt("bitrate",4000000);updateAudio(keepPeer,keepSession,result);}}
             catch(Exception error){keepaliveFailed(error,keepConnection,keepRtc);}
           },1,1,java.util.concurrent.TimeUnit.SECONDS);
           try {
+          long lastH264At = 0, undecodedSince = 0, lastPresented = renderedFrames;
           while (!closed) {
             VideoWire.Frame frame;
             if (legacy) {
@@ -263,12 +326,24 @@ final class VideoPlayer implements AutoCloseable {
               continue;
             }
             codecLabel=frame.h264?(rtc instanceof QuicVideo?"H.264 · QUIC":rtc!=null?"H.264 · WebRTC":"H.264 · TCP"):legacy?"截图兼容模式":"兼容串流";
+            if (frame.h264 && surface != null) {
+              long now = SystemClock.elapsedRealtime(), presented = renderedFrames;
+              if (presented != lastPresented || now - lastH264At >= 1500) undecodedSince = now;
+              lastPresented = presented;
+              lastH264At = now;
+              if (now - undecodedSince >= 5000) throw new IOException("画面已中断，正在重新连接");
+            } else {
+              lastH264At = 0;
+            }
             render(frame);
             if (legacy) Thread.sleep(50);
           }
           } finally {keeper.shutdownNow();}
         } catch (Exception error) {
-          if(rtc!=null)rtcCooldown=System.currentTimeMillis()+30000;
+          boolean retryStandardAvc = fastAvc
+              && (startupTimedOut.get() || error instanceof MediaCodec.CodecException);
+          if (retryStandardAvc) fastAvc = false;
+          else if(rtc!=null)rtcCooldown=System.currentTimeMillis()+30000;
           String reason = startupTimedOut.get() ? "画面解码超时，正在切换兼容串流" : error.getMessage() == null ? "串流连接暂不可用" : error.getMessage();
           main.post(
               () -> {
@@ -290,8 +365,8 @@ final class VideoPlayer implements AutoCloseable {
             h264Only = true;
             jpegOnly = false;
             legacy = false;
-          } else if (!h264Only && reason.contains("不支持")) legacy = true;
-          else if (!h264Only
+          } else if (!retryStandardAvc && !h264Only && reason.contains("不支持")) legacy = true;
+          else if (!retryStandardAvc && !h264Only
               && (error instanceof MediaCodec.CodecException || reason.contains("解码")))
             jpegOnly = true;
         } finally {
@@ -306,7 +381,28 @@ final class VideoPlayer implements AutoCloseable {
     }
   }
 
+  private synchronized void updateAudio(Wire source, String id, JSONObject result) {
+    if (closed || id == null || !id.equals(session)) return;
+    JSONObject audio = result.optJSONObject("audio");
+    if (audio == null && !result.has("audioStatus")) return;
+    audioPermissionNeeded = "permission-required".equals(result.optString("audioStatus"));
+    String key = audio == null ? null : audio.optString("key");
+    if (java.util.Objects.equals(key, playerAudioKey)) return;
+    if (playerAudio != null) playerAudio.close();
+    playerAudioKey = key;
+    playerAudio = audio == null ? null : new StreamAudio.Player(source.socket.getInetAddress().getHostAddress(), audio);
+  }
+
   void disconnect() {
+    String videoId;
+    synchronized (this) {
+      videoId = session;
+      session = null;
+      if (playerAudio != null) playerAudio.close();
+      playerAudio = null;
+      playerAudioKey = null;
+      audioPermissionNeeded = false;
+    }
     codecLabel="";
     receivingH264=false;
     VideoTransport rtcOld=rtc;rtc=null;if(rtcOld!=null)rtcOld.close();
@@ -321,17 +417,17 @@ final class VideoPlayer implements AutoCloseable {
       } catch (Exception ignored) {
       }
     }
-    if (session != null) {
+    if (videoId != null) {
       try {
-        peer.request("videoStop", Wire.obj("id", session));
+        peer.request("videoStop", Wire.obj("id", videoId));
       } catch (Exception ignored) {
       }
-      session = null;
     }
   }
 
   public void close() {
     closed = true;
+    if (outputThread != null) outputThread.interrupt();
     main.removeCallbacks(metrics);
     if(rtc!=null)rtc.close();
     VideoWire old = connection;

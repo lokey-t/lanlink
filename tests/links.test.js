@@ -6,10 +6,116 @@ import { mkdtemp, mkdir, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { Service } from '../src/service.js';
+import { InputTransport } from '../src/input-transport.js';
+import { LinkManager } from '../src/links.js';
 import { newToken } from '../src/identity.js';
 
 const pause = ms => new Promise(r => setTimeout(r, ms));
+
+test('Android route status follows live input grants independently of screen access', () => {
+  const id = 'phone', p = {info:{platform:'android', capabilities:{networkInputReady:true}}};
+  const routes = new InputTransport({config:{id:'desktop'}, group:{data:{id:'group'}}, peers:new Map([[id,p]])});
+  const target = () => routes.state().targets.find(target => target.id === id);
+  p.access = {permissions:{input:{appEnabled:true, peerAllowed:true, systemGranted:false}, screen:{systemGranted:true}}};
+  assert.equal(target().selected, 'none');
+  assert.equal(target().capabilities.bluetooth, 'unsupported');
+  p.access.permissions.input.systemGranted = true;
+  assert.equal(target().selected, 'network');
+  p.access.permissions.input.peerAllowed = false;
+  assert.equal(target().selected, 'none');
+});
+
+test('auxiliary route tolerates isolated latency spikes and retires on sustained degradation', async () => {
+  const p = Object.assign(new EventEmitter(), {remote:{id:'desktop'}, closed:false, lanRequest:async()=>({})});
+  const links = new LinkManager({peers:new Map([['desktop',p]]),group:{excluded:()=>false},emit:()=>{}});
+  let delay = 40;
+  const active = {primary:p,peer:{request:async()=>{if(delay)await pause(delay);},close:()=>{}},onPrimaryClosed:()=>{}};
+  links.links.add(active);
+  p.fastLink = active;
+  await links.tick();
+  assert.equal(p.fastLink,active);
+  const pingLan = p.lanRequest;
+  p.lanRequest = async () => { throw Error('comparison timed out'); };
+  await links.tick();
+  assert.equal(p.fastLink,active);
+  assert.equal(active.slowSamples,0);
+  p.lanRequest = pingLan;
+  delay = 0;
+  await links.tick();
+  assert.equal(active.slowSamples,0);
+  delay = 40;
+  await links.tick();
+  await links.tick();
+  assert.equal(p.fastLink,active);
+  await links.tick();
+  assert.equal(p.fastLink,null);
+  assert.equal(p.closed,false);
+});
 async function until(check) { for(let i=0;i<300;i++){if(check())return;await pause(10);}throw Error('Timed out'); }
+
+test('standby activation cannot override a route selected while its acknowledgement is pending', async () => {
+  const primary = Object.assign(new EventEmitter(), {
+    remote:{id:'desktop'}, closed:false, routeVersion:0,
+    lanRequest:async()=>({})
+  });
+  const service = {peers:new Map([['desktop',primary]]),group:{excluded:()=>false},emit:()=>{}};
+  const manager = new LinkManager(service);
+  let acknowledge, entered;
+  const waiting = new Promise(resolve => { entered = resolve; });
+  const standby = {
+    primary, fastSamples:2, onPrimaryClosed:()=>{},
+    peer:{
+      closed:false,
+      request:async method => {
+        if (method === 'linkUse') {
+          entered();
+          await new Promise(resolve => { acknowledge = resolve; });
+        }
+        return {};
+      },
+      close(){ this.closed = true; }
+    }
+  };
+  const replacement = {
+    primary, onPrimaryClosed:()=>{},
+    peer:{closed:false,request:async()=>({}),close(){this.closed=true;}}
+  };
+  manager.links.add(standby);
+  const probing = manager.tick();
+  await waiting;
+  manager.links.add(replacement);
+  manager.activate(primary,replacement);
+  acknowledge();
+  await probing;
+  assert.equal(primary.fastLink,replacement);
+  assert.equal(standby.peer.closed,true);
+  assert.equal(replacement.peer.closed,false);
+  assert.throws(()=>manager.activate(primary,standby),/INPUT_ROUTE_CLOSED/);
+});
+
+test('retired probe results cannot accumulate degradation against a newer route generation', async () => {
+  let finish, entered;
+  const waiting = new Promise(resolve => { entered = resolve; });
+  const primary = Object.assign(new EventEmitter(), {
+    remote:{id:'desktop'},closed:false,routeVersion:0,
+    lanRequest:async()=>{entered();await new Promise(resolve=>{finish=resolve;});}
+  });
+  const manager = new LinkManager({
+    peers:new Map([['desktop',primary]]),group:{excluded:()=>false},emit:()=>{}
+  });
+  const link = {primary,slowSamples:2,onPrimaryClosed:()=>{},
+    peer:{closed:false,request:async()=>{await pause(40);},close(){this.closed=true;}}};
+  manager.links.add(link);
+  primary.fastLink=link;
+  const probing = manager.tick();
+  await waiting;
+  primary.routeVersion++;
+  finish();
+  await probing;
+  assert.equal(primary.fastLink,link);
+  assert.equal(link.slowSamples,2);
+  assert.equal(link.peer.closed,false);
+});
 class Native extends EventEmitter {
   capabilities = { input: true, screen: true, host: true };
   calls = [];

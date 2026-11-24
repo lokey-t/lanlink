@@ -85,7 +85,7 @@ struct ConnectionQualityView: View {
                 }
             }.scrollIndicators(.hidden)
             statusStrip
-            if !error.isEmpty { Text(Model.displayMessage(error)).foregroundStyle(.red) }
+            if !error.isEmpty { Text(Model.displayMessage(error)).foregroundStyle(Palette.danger) }
             if let session = state.session {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {

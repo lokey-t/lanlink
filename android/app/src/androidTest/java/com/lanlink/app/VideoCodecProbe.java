@@ -117,6 +117,11 @@ final class VideoCodecProbe {
       test.waitForIdleSync();
       long before = player[0].renderedFrames;
       player[0].render(firstKey);
+      // No second packet (including a heartbeat) may be needed to present this IDR.
+      end = System.currentTimeMillis() + 1000;
+      while (player[0].renderedFrames == before && System.currentTimeMillis() < end) Thread.sleep(5);
+      if (player[0].renderedFrames == before)
+        throw new AssertionError("A single H264 frame must display while the network is idle");
       VideoWire.Frame heartbeat = new VideoWire.Frame(new byte[0], 1, 1, false, false);
       heartbeat.heartbeat = true;
       end = System.currentTimeMillis() + 2000;
@@ -131,7 +136,7 @@ final class VideoCodecProbe {
       player[0].render(new VideoWire.Frame(jpegBytes.toByteArray(), 320, 240, false, true));
       if (player[0].decoder != null || player[0].needsKeyFrame(null))
         throw new AssertionError("H264 to JPEG fallback must release codec and stop IDR requests");
-      return roundtrip + "; pre-existing Surface, JPEG fallback, static H264 heartbeat and transient keepalive pressure verified";
+      return roundtrip + "; pre-existing Surface, JPEG fallback, idle-network single-frame presentation and transient keepalive pressure verified";
     } finally {
       player[0].close();
       player[0].stopDecoder();

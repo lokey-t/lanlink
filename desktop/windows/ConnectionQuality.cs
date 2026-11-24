@@ -47,7 +47,7 @@ namespace LanLink.Desktop {
       var testContent=new StackPanel { Orientation=Orientation.Horizontal };
       playIcon.Margin=stopIcon.Margin=new Thickness(0,0,6,0);
       testContent.Children.Add(playIcon);testContent.Children.Add(stopIcon);testContent.Children.Add(testLabel);
-      test.Content=testContent;test.Height=38;test.VerticalAlignment=VerticalAlignment.Top;test.Margin=new Thickness(0);
+      test.Content=WindowShell.OnAccent(testContent);test.Height=38;test.VerticalAlignment=VerticalAlignment.Top;test.Margin=new Thickness(0);
       test.SetResourceReference(StyleProperty,"Primary");
       buttons.Children.Add(export); buttons.Children.Add(test);
       DockPanel.SetDock(buttons,Dock.Right); toolbar.Children.Add(buttons);
@@ -63,7 +63,7 @@ namespace LanLink.Desktop {
       DockPanel.SetDock(statusIcon,Dock.Left);statusRow.Children.Add(statusIcon);
       time.Margin=new Thickness(10,0,0,0);
       DockPanel.SetDock(time,Dock.Right); statusRow.Children.Add(time); statusRow.Children.Add(status);
-      header.Children.Add(new Border { Child=statusRow, Background=Theme.Brush("#EAF0FB"), CornerRadius=new CornerRadius(10),
+      header.Children.Add(new Border { Child=statusRow, Background=Theme.Brush("#ECEEFC"), CornerRadius=new CornerRadius(10),
         Padding=new Thickness(11,8,11,8), Margin=new Thickness(0,0,0,12) });
       Children.Add(header);
       var scroll = new ScrollViewer { Content=content, VerticalScrollBarVisibility=ScrollBarVisibility.Auto };
@@ -171,7 +171,7 @@ namespace LanLink.Desktop {
       status.Text=running ? Locale.T(Json.Flag(session,"cancelling")?"正在取消测试":"测试中")+" · "+Json.Text(current,"name")+" · "+StageLabel(Json.Text(session,"stage"))
         : session==null ? Locale.T("选择设备或测试全组，获取从本机到目标设备的连接数据。")
         : StateLabel(sessionStatus)+" · "+scope;
-      status.Foreground=Theme.Brush(sessionStatus=="completed"?"#286954":"#476389");
+      status.Foreground=Theme.Brush(sessionStatus=="completed"?"#2F8566":"#5B6BD5");
       time.Text=session==null || running ? "" : Locale.T("最近一次")+" · "+LocalTime(session);
       content.Children.Clear();
       if (session==null) return;
@@ -194,11 +194,11 @@ namespace LanLink.Desktop {
       var button=Action(title,() => { SelectDevice(id); return Task.FromResult(0); },false);
       button.Padding=new Thickness(10,7,10,7);
       var label=new StackPanel { Orientation=Orientation.Horizontal };
-      if(online.HasValue) label.Children.Add(new Ellipse { Width=6,Height=6,Fill=Theme.Brush(online.Value?"#3D8B73":"#8390A6"),
+      if(online.HasValue) label.Children.Add(new Ellipse { Width=6,Height=6,Fill=Theme.Brush(online.Value?"#2F8566":"#65748B"),
         Margin=new Thickness(0,0,7,0),VerticalAlignment=VerticalAlignment.Center });
       label.Children.Add(new TextBlock { Text=title,FontSize=12 });
       button.Content=label;
-      if(id==selected) button.SetResourceReference(StyleProperty,"Primary");
+      if(id==selected) button.SetResourceReference(StyleProperty,"PrimarySoft");
       if(online==false) System.Windows.Automation.AutomationProperties.SetName(button,title+" · "+Locale.T("离线"));
       tabs.Children.Add(button);
     }
@@ -214,7 +214,7 @@ namespace LanLink.Desktop {
     }
 
     static Border Card(UIElement child) {
-      return new Border { Child=child,Background=Theme.Brush("#FFFFFF"),BorderBrush=Theme.Brush("#DCE5F2"),
+      return new Border { Child=child,Background=Theme.Brush("#FFFFFF"),BorderBrush=Theme.Brush("#DFE5EF"),
         BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(16),Padding=new Thickness(14),Margin=new Thickness(0,0,0,12) };
     }
 
@@ -253,11 +253,11 @@ namespace LanLink.Desktop {
     sealed class Reading {
       public readonly string Label, Color;
       public readonly double? Value;
-      public Reading(string label,double? value,string color="#557CCE"){Label=label;Value=value;Color=color;}
+      public Reading(string label,double? value,string color="#5B6BD5"){Label=label;Value=value;Color=color;}
     }
 
     static IEnumerable<Reading> Rates(string label,object route) {
-      yield return new Reading(label+" ↑",Number(Json.Get(route,"uploadSummary"),"mbps"),"#3D8B73");
+      yield return new Reading(label+" ↑",Number(Json.Get(route,"uploadSummary"),"mbps"),"#2F8566");
       yield return new Reading(label+" ↓",Number(Json.Get(route,"downloadSummary"),"mbps"));
     }
 
@@ -307,14 +307,14 @@ namespace LanLink.Desktop {
     }
 
     static void Divider(Panel panel) {
-      panel.Children.Add(new Border { Height=1,Background=Theme.Brush("#DCE5F2") });
+      panel.Children.Add(new Border { Height=1,Background=Theme.Brush("#DFE5EF") });
     }
 
     static Border Badge(string value) {
       var label=Text(StateLabel(value));
-      label.Foreground=Theme.Brush(value=="completed"?"#286954":"#65748B");
+      label.Foreground=Theme.Brush(value=="completed"?"#2F8566":"#65748B");
       return new Border { Child=label,HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Center,
-        Background=Theme.Brush(value=="completed"?"#EAF6EF":"#EDF2FA"),CornerRadius=new CornerRadius(12),Padding=new Thickness(7,3,7,3) };
+        Background=Theme.Brush(value=="completed"?"#E3F3ED":"#EDF2FA"),CornerRadius=new CornerRadius(12),Padding=new Thickness(7,3,7,3) };
     }
 
     void DrawOverview(object[] results) {
@@ -331,7 +331,7 @@ namespace LanLink.Desktop {
         var route=Route(device);
         var name=Action(Json.Text(device,"name"),()=>{SelectDevice(Json.Text(device,"id"));return Task.FromResult(0);},false);
         name.Padding=new Thickness(2);name.Margin=new Thickness(0);name.BorderThickness=new Thickness(0);name.Background=Brushes.Transparent;
-        name.Foreground=Theme.Brush("#4169CE");name.HorizontalAlignment=HorizontalAlignment.Left;
+        name.Foreground=Theme.Brush("#5B6BD5");name.HorizontalAlignment=HorizontalAlignment.Left;
         table.Children.Add(TableRow(name,Text(Transport(route)),Text(Metric(Json.Get(route,"mouse"),"averageMs","").Trim()),
           Text(Metric(Json.Get(route,"uploadSummary"),"mbps","").Trim()+" / "+Metric(Json.Get(route,"downloadSummary"),"mbps","").Trim()),
           Badge(Json.Text(device,"status"))));
@@ -403,12 +403,12 @@ namespace LanLink.Desktop {
       var chart=new Canvas { Width=width,Height=height,ClipToBounds=false };
       for(int i=0;i<3;i++) {
         double y=8+i*34;
-        chart.Children.Add(new Line { X1=left,X2=right,Y1=y,Y2=y,Stroke=Theme.Brush("#DCE5F2"),StrokeThickness=1 });
+        chart.Children.Add(new Line { X1=left,X2=right,Y1=y,Y2=y,Stroke=Theme.Brush("#DFE5EF"),StrokeThickness=1 });
         var tick=Text((max*(2-i)/2).ToString("0.##"),true);Canvas.SetTop(tick,y-8);chart.Children.Add(tick);
       }
       foreach(var entry in series) {
         bool usb=Json.Text(entry.Route,"kind")=="usb";
-        var stroke=Theme.Brush(usb?"#3D8B73":"#557CCE");
+        var stroke=Theme.Brush(usb?"#2F8566":"#5B6BD5");
         Point? previous=null;
         for(int i=0;i<entry.Values.Length;i++) {
           if(!entry.Values[i].HasValue){previous=null;continue;}

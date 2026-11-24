@@ -9,6 +9,9 @@ final class AdaptiveVideo {
   long changedAt = -6000;
   double baseRtt = Double.POSITIVE_INFINITY;
   final java.util.function.LongSupplier clock;
+  int fps = 30;
+  private int cadenceGood;
+  private long cadenceChanged = -6000;
   AdaptiveVideo() { this(SystemClock::elapsedRealtime); }
   AdaptiveVideo(java.util.function.LongSupplier clock) { this.clock = clock; }
 
@@ -33,6 +36,34 @@ final class AdaptiveVideo {
   }
 
   boolean congested(long queued) { return feedback(Wire.obj("delayMs", 0, "rttMs", 0, "frames", 0), queued); }
+
+  synchronized boolean updateFrameRate(JSONObject report, long queued, int maximum) {
+    if (report == null) return false;
+    double rtt = report.optDouble("rttMs", -1), delay = report.optDouble("delayMs", -1),
+        stale = report.optDouble("sampleAgeMs", -1), stalled = report.optDouble("stalledMs", -1);
+    int frames = report.optInt("frames", -1);
+    if (!Double.isFinite(rtt) || !Double.isFinite(delay) || !Double.isFinite(stale) ||
+        !Double.isFinite(stalled) || Math.min(Math.min(rtt, delay), Math.min(stale, stalled)) < 0 ||
+        frames < 0) return false;
+    long now = clock.getAsLong();
+    boolean poor = rate < 2_000_000 || rtt > 120 || delay > 75 || queued >= 64 * 1024 || stalled > 1500;
+    int next = fps;
+    if (poor) {
+      next = fps == 60 && rate >= 2_000_000 ? 30 : 24;
+      cadenceGood = 0;
+    } else {
+      boolean stable = frames >= 12 && stale < 1500 && rtt > 0 && rtt <= 45 && delay <= 22 &&
+          queued < 16 * 1024 && !report.optBoolean("needKey");
+      cadenceGood = stable ? cadenceGood + 1 : 0;
+      if (cadenceGood >= 5 && now - cadenceChanged >= 6000)
+        next = fps == 24 ? 30 : rate >= 3_500_000 ? maximum : fps;
+    }
+    if (fps == next) return false;
+    fps = next;
+    cadenceGood = 0;
+    cadenceChanged = now;
+    return true;
+  }
 
   static final class Feedback {
     long base = Long.MAX_VALUE, delay, peak, sampleAt = -1, aliveAt = SystemClock.elapsedRealtime();

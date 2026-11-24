@@ -1,8 +1,18 @@
-# 手机控制与 ADB 授权（0.3.13）
+# 手机控制与 ADB / Shizuku 授权
 
-安卓受控仅使用 Root / ADB 输入助手。已移除无障碍触控备用方案和 LanLink 输入法；没有助手时允许使用已具备的功能，例如单独授权后的屏幕查看。权限不足时手机弹窗说明缺少的权限，并提供设置入口。
+安卓受控使用 Root / ADB / Shizuku 输入助手。已移除无障碍触控备用方案和 LanLink 输入法；没有助手时允许使用已具备的功能，例如单独授权后的屏幕查看。权限不足时手机弹窗说明缺少的权限，并提供设置入口。
 
 ## 首次设置与持久恢复
+
+### 非 Root 模式的 Shizuku 授权
+
+手机「设置 → 权限使用模式 → 非 Root 模式」提供 ADB 和 Shizuku 两个独立入口。安装并通过无线调试、ADB 或 Root 启动 Shizuku 后，点击「请求 Shizuku 授权」，在系统弹窗中允许 LanLink。未安装、未启动或拒绝授权时可继续使用 ADB。Root 启动的 Shizuku 同样可在本应用非 Root 模式下使用：权限由已允许的 Shizuku 提供，不会自动切换 LanLink 的 Root 模式或额外请求 su。助手连接核对 Shizuku 实际提供的 UID（0 或 2000），关闭 Shizuku 授权对两种身份均生效。
+
+两种授权可以同时保留，当前通道失效或输入被拒绝时，后续操作自动使用另一条已授权且就绪的通道；恢复的通道不会反复抢占当前通道。为避免重复点击或粘贴，连接断开时无法确定是否执行的操作不会自动重放。设置页分别显示两种通道状态和当前控制通道。关闭其中一种授权不会关闭另一种；设备级的控制同意和应用功能开关仍然生效。
+
+Shizuku 授权不要求电脑在线，但手机重启后需要先重新启动 Shizuku。服务运行期间会自动尝试恢复已允许的 Shizuku 通道，不在后台重复弹出授权请求。两条通道均不可用时仍提示恢复权限。
+
+### 通过电脑设置 ADB
 
 1. 手机与电脑加入同一组；手机在首次控制提示中允许该电脑操作。
 2. 使用含 ADB 的 LanLink 桌面包时，电脑打开 LanLink 即可检测 ADB。自行构建的桌面包如未包含 ADB，可安装独立的 Android SDK Platform-Tools。LanLink 支持 Android Studio 安装的 SDK、PATH、ANDROID_HOME、ANDROID_SDK_ROOT 和 LANLINK_ADB，也会检查 Windows 系统盘根目录下的 `platform-tools`。修改 PATH 后请完全退出并重新打开 LanLink。
@@ -28,6 +38,8 @@ Mac、Windows 主控端在安卓连接中断时弹窗说明原因尚待确认；
 系统参考：[进程退出记录](https://developer.android.com/reference/android/app/ApplicationExitInfo)、[后台限制状态](https://developer.android.com/reference/android/app/ActivityManager#isBackgroundRestricted())、[省电白名单状态](https://developer.android.com/reference/android/os/PowerManager#isIgnoringBatteryOptimizations(java.lang.String))。厂商自启动页面仍需在对应 ROM 上验证。
 
 ## 文字与触控板
+
+- 控制中心的独立触控板默认使用竖屏，显示设备名、连接状态、键盘入口和手势提示。点击底部「全屏」进入横屏触控板；横屏返回菜单中的「退出全屏」回到竖屏。两种布局复用同一输入会话，切换不会重新申请控制，关闭才释放控制。
 
 - 电脑向安卓发送文字：通过允许的剪贴板写入，再由输入助手执行系统粘贴；目标应用须支持粘贴，不能保证密码框或禁止粘贴的应用可用。Android 后台剪贴板读取限制仍然存在。
 - 手机控制电脑：上方屏幕支持平移和双指缩放，下方触控板控制鼠标，支持轻点、长按拖动、双指滚动和右键。底部键盘调用手机已有系统输入法，不需要安装 LanLink 输入法。

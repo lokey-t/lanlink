@@ -1,0 +1,52 @@
+触控板、串流与 Windows 鼠标手感优化
+2026-11-22，Asia/Shanghai；当前工作树 0.92.1，保留原有未提交修改。
+
+本轮修改
+1. 独立触控板默认恢复竖屏：设备名、连接状态、键盘入口、完整触控面、手势说明及全屏按钮。全屏按钮打开原有横屏双侧鼠标键界面；横屏返回菜单增加退出全屏。共用同一个 TouchpadView、状态控件和输入会话，切换前取消手势并释放按住的鼠标键；退出触控板才结束控制。系统栏和输入法安全区域随模式调整。
+2. 桌面 H.264 解码改为单线程/slice 模式，JPEG 输出也取消多帧线程等待。媒体通道已有完整帧边界，向 FFmpeg 管道写入时追加 H.264 AUD 边界，让最后一张图无需等待下一张图才能送进解码器；不更改认证、加密或网络协议。原生像素与 JPEG 路径均验证单帧输出。
+3. Android MediaCodec 使用独立输出线程取出最新解码图像，不再由网络下一帧或心跳触发显示。输出、重新配置和关闭共用 codecLock；保留已有硬件解码、关键帧恢复和只显示最新输出的策略。
+4. Mac 原生 ScreenCaptureKit/VideoToolbox 路径请求 EnableLowLatencyRateControl，并在准备编码器之前限制 MaxFrameDelayCount 为零。不支持低延迟编码器选择的旧环境重试原有硬件编码器。Mac 端这部分尚未编译或部署，不能记为实机通过。
+5. Windows 鼠标手感窗口使用现有圆角外壳、主题颜色和设置开关；设备选择使用圆角选中态，设置区使用独立卡片。移除默认系统 ListBox 选中风格、列表横向滚动条和用空格对齐滑块刻度的写法，灵敏度修改也会提示未保存。
+6. 清理 Android 串流协商中重复的媒体字段构造和空分支；竖屏/全屏没有复制一套控制和恢复逻辑。没有批量删除与本次问题无关的旧代码。
+
+方案依据（查阅官方资料）
+- scrcpy 默认不增加视频缓冲，收到并解码后尽快显示：https://github.com/Genymobile/scrcpy/blob/master/doc/video.md
+- Sunshine 的硬件编码和低延迟配置：https://docs.lizardbyte.dev/projects/sunshine/latest/md_docs_2configuration.html
+- Apple 的低延迟 VideoToolbox 选择：https://developer.apple.com/documentation/videotoolbox/kvtvideoencoderspecification_enablelowlatencyratecontrol
+- Apple 的编码帧延迟限制：https://developer.apple.com/documentation/videotoolbox/kvtcompressionpropertykey_maxframedelaycount
+- Android MediaCodec 低延迟能力：https://developer.android.com/reference/android/media/MediaCodec
+本轮沿用既有加密控制、QUIC/WebRTC/TCP 媒体通道，优先消除已复现的编解码等待，没有引入另一套 Moonlight/Sunshine 服务。以上方案提供设计依据，不代表本项目已经达到相同端到端延迟。
+
+验证
+- Node 全量：375 项，356 通过、19 跳过、0 失败；LANLINK_FFMPEG 指向本机实际运行组件，限制测试并发为 2，耗时 38.02 秒。
+- 视频专项：22 项，20 通过、2 跳过；新增只发送一个 H.264 IDR、保持媒体连接不再发包的实际 FFmpeg 回归，验证原生 BGRA 像素和 JPEG 均及时输出。修改期间复现过等待 1.5 秒仍无输出；补齐帧边界后本机单次原生输出约 54 ms。这不是采集到手机显示的端到端数值。
+- Android Debug APK、instrumentation APK 和 lint 均构建通过；lint 0 错误、71 警告，其中新增竖屏固定方向提示对应本次明确的竖屏交互设计。
+- 模拟器完整触控板专项通过：竖屏入口、显式全屏、退出全屏、保持单次 acquire、鼠标键/手势、菜单、离线返回、关闭释放和新连接复用。
+- 模拟器实际加密视频与 MediaCodec 专项通过：63 张显示帧 / 3159 ms；Surface 编解码回环 41 帧；JPEG 回退、预先可用 Surface、只有单张 H.264 且网络随后空闲时仍呈现、保活压力处理均通过。
+- Windows 当前源码编译和原生 WPF 自检通过。实际打开鼠标手感窗口检查卡片、设备选中、开关和滑块，使用取消退出，没有保存测试值。
+- 小米实体手机（24129PN74C，Android 16）保留数据安装新版 Debug APK；实际进入 Windows 独立触控板：竖屏显示已连接，点击全屏进入 2670x1200 横屏，菜单退出后回到竖屏仍显示已连接；关闭并释放。
+- 实体手机查看当前 Windows 测试版：实际 H.264/TCP 画面正常显示，观察到 15–21 fps、1.1–1.7 Mbps 的瞬时指标。画面已人工检查；关闭后释放控制。没有把这些瞬时数据当作稳定吞吐或延迟结果。
+- Windows 测试版实际查看同组现有 Mac：H.264 图像正常显示，观察到约 14–16 fps 的瞬时指标。Mac 发送端仍是现有安装版本，因此仅验证本轮 Windows 解码端与旧 Mac 的互通，不能验证新的 Mac 编码设置。关闭后主窗口恢复“键鼠控制：本机”。
+- 首次高并发全量测试中，原有 QUIC 鼠标断网压力用例出现旧位移超时断言失败；单独复测 3 项通过，降低测试并发后的全量通过。本轮没有修改 QUIC，不宣称该偶发现象已由本次改动修复。
+
+限制
+- Mac SSH 需要交互认证，未在 Mac 编译、安装或测试新的 VideoToolbox 设置。
+- 没有进行精确的输入到显示延迟对比、真实弱网、多小时负载或两种方向全链路同时更新后的性能验收；不能宣称“延迟极大”的所有原因均已消除。
+- 没有发布 Release，也没有覆盖 Windows 正式安装目录；Windows 使用 .tools/optimization-20261122 独立运行目录，Android 保留原应用数据。
+
+主要证据
+.tools/optimization-20261122-tests-final.log
+.tools/optimization-20261122-video.log
+.tools/optimization-20261122-quic-recheck.log
+.tools/optimization-20261122-touchpad.log
+.tools/optimization-20261122-codec-android.log
+.tools/optimization-20261122-check-final.log
+.tools/optimization-20261122-windows-final.log
+.tools/optimization-20261122-android-delivery.log
+.tools/optimization-20261122/ui-final/passed.txt
+.tools/optimization-20261122/touchpad-portrait.png
+.tools/optimization-20261122/touchpad-fullscreen.png
+.tools/optimization-20261122/physical-touchpad-portrait.png
+.tools/optimization-20261122/physical-touchpad-fullscreen.png
+.tools/optimization-20261122/phone-returned-ui.xml
+.tools/optimization-20261122/physical-windows-stream.png

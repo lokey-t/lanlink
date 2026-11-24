@@ -9,15 +9,19 @@ import android.widget.*;
 
 /** Small native design system shared by the phone's pages and sheets. */
 final class Ui {
+  // Shared design tokens (AGENTS.md): PURPLE is the cross-platform accent, LILAC its soft tint.
   static int BG = 0xfff7f8fb,
-      INK = 0xff202637,
-      MUTED = 0xff788195,
-      PURPLE = 0xff7163c8,
-      LILAC = 0xffeeebfc,
+      INK = 0xff202c43,
+      MUTED = 0xff65748b,
+      PURPLE = 0xff5b6bd5,
+      LILAC = 0xffeceefc,
+      ACCENT_LINE = 0xffc7cdf2,
+      MASTER = 0xff7b70c5,
       MINT = 0xffe3f3ed,
-      GREEN = 0xff368769,
-      LINE = 0xffedf0f5,
-      RED = 0xffc54d60;
+      GREEN = 0xff2f8566,
+      AMBER = 0xff9a6e1f,
+      LINE = 0xffdfe5ef,
+      RED = 0xffc04a5c;
   static int CARD = Color.WHITE;
   static int THUMB = Color.WHITE;
   static boolean dark;
@@ -33,14 +37,17 @@ final class Ui {
         (activity.getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES;
     BG = dark ? 0xff141b27 : 0xfff7f8fb;
     CARD = dark ? 0xff222c3c : Color.WHITE;
-    INK = dark ? 0xffe4eaf4 : 0xff202637;
+    INK = dark ? 0xffe4eaf4 : 0xff202c43;
     MUTED = dark ? 0xffa8b5ca : 0xff65748b;
-    PURPLE = dark ? 0xffaa9cf2 : 0xff7163c8;
-    LILAC = dark ? 0xff34304f : 0xffeeebfc;
+    PURPLE = dark ? 0xffa9b4f5 : 0xff5b6bd5;
+    LILAC = dark ? 0xff2e3456 : 0xffeceefc;
+    ACCENT_LINE = dark ? 0xff4a5285 : 0xffc7cdf2;
+    MASTER = dark ? 0xffb3a8f0 : 0xff7b70c5;
     MINT = dark ? 0xff203e36 : 0xffe3f3ed;
-    GREEN = dark ? 0xff7ac6a6 : 0xff368769;
-    LINE = dark ? 0xff3b4960 : 0xffedf0f5;
-    RED = dark ? 0xffef96a5 : 0xffc54d60;
+    GREEN = dark ? 0xff7ac6a6 : 0xff2f8566;
+    AMBER = dark ? 0xffe0b865 : 0xff9a6e1f;
+    LINE = dark ? 0xff3b4960 : 0xffdfe5ef;
+    RED = dark ? 0xffef96a5 : 0xffc04a5c;
     THUMB = dark ? 0xffa8b5ca : Color.WHITE;
     activity.setTheme(dark ? R.style.AppThemeDark : R.style.AppTheme);
   }
@@ -70,12 +77,15 @@ final class Ui {
 
   GradientDrawable sidebarSurface() {
     return new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-        new int[] {BG, dark ? 0xff25283f : 0xffefecfc});
+        new int[] {BG, LILAC});
+  }
+
+  static ColorStateList ripple() {
+    return ColorStateList.valueOf((PURPLE & 0x00ffffff) | 0x26000000);
   }
 
   android.graphics.drawable.Drawable touch(int color, int radius) {
-    return new RippleDrawable(
-        ColorStateList.valueOf(0x227163c8), shape(color, radius), shape(-1, radius));
+    return new RippleDrawable(ripple(), shape(color, radius), shape(-1, radius));
   }
 
   LinearLayout column() {
@@ -114,6 +124,21 @@ final class Ui {
     return c;
   }
 
+  LinearLayout emptyState(String glyph, String message, int minHeight) {
+    LinearLayout box = card();
+    box.setGravity(Gravity.CENTER);
+    box.setMinimumHeight(dp(minHeight));
+    FrameLayout badge = new FrameLayout(context);
+    badge.setBackground(shape(LILAC, 28));
+    badge.addView(icon(glyph, PURPLE), new FrameLayout.LayoutParams(dp(28), dp(28), Gravity.CENTER));
+    box.addView(badge, new LinearLayout.LayoutParams(dp(56), dp(56)));
+    gap(box, 16);
+    TextView text = text(message, 14, MUTED);
+    text.setGravity(Gravity.CENTER);
+    box.addView(text, new LinearLayout.LayoutParams(-1, -2));
+    return box;
+  }
+
   void gap(LinearLayout parent, int height) {
     parent.addView(new View(context), new LinearLayout.LayoutParams(1, dp(height)));
   }
@@ -135,7 +160,7 @@ final class Ui {
     b.setText(label);
     b.setAllCaps(false);
     b.setTextSize(15);
-    b.setTextColor(primary ? (dark ? 0xff171323 : Color.WHITE) : PURPLE);
+    b.setTextColor(primary ? (dark ? 0xff141b27 : Color.WHITE) : PURPLE);
     b.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
     b.setBackgroundTintList(null);
     b.setBackground(touch(primary ? PURPLE : LILAC, 16));
@@ -207,7 +232,7 @@ final class Ui {
     LinearLayout tile = compact ? row() : column();
     tile.setGravity(Gravity.CENTER);
     tile.setPadding(dp(compact ? 12 : 4), dp(compact ? 6 : 12), dp(compact ? 12 : 4), dp(compact ? 6 : 12));
-    tile.setBackground(new RippleDrawable(ColorStateList.valueOf(0x227163c8),
+    tile.setBackground(new RippleDrawable(ripple(),
         outlinedShape(selected ? LILAC : CARD, 22, selected ? PURPLE : LINE), shape(-1, 22)));
     FrameLayout badge = new FrameLayout(context);
     badge.setBackground(outlinedShape(selected ? CARD : BG, 15, selected ? PURPLE : LINE));
@@ -351,22 +376,18 @@ final class Ui {
         case "settings":
           for (int i = 0; i < 3; i++) {
             int y = 5 + i * 7;
-            line(c, 3, y, 21, y);
-            p.setStyle(Paint.Style.FILL);
-            p.setColor(BG);
-            c.drawCircle(i == 1 ? 15 : 8, y, 2.6f, p);
-            p.setColor(color);
-            p.setStyle(Paint.Style.STROKE);
-            c.drawCircle(i == 1 ? 15 : 8, y, 2.6f, p);
+            float knob = i == 1 ? 15 : 8;
+            line(c, 3, y, knob - 2.6f, y);
+            line(c, knob + 2.6f, y, 21, y);
+            c.drawCircle(knob, y, 2.6f, p);
           }
           break;
         case "clipboard":
-          rect(c, 5, 4, 19, 22, 2);
-          p.setStyle(Paint.Style.FILL);
-          p.setColor(CARD);
-          rect(c, 9, 2, 15, 6, 1);
-          p.setStyle(Paint.Style.STROKE);
-          p.setColor(color);
+          Path sheet = new Path();
+          sheet.moveTo(9, 4); sheet.lineTo(7, 4); sheet.quadTo(5, 4, 5, 6); sheet.lineTo(5, 20);
+          sheet.quadTo(5, 22, 7, 22); sheet.lineTo(17, 22); sheet.quadTo(19, 22, 19, 20);
+          sheet.lineTo(19, 6); sheet.quadTo(19, 4, 17, 4); sheet.lineTo(15, 4);
+          c.drawPath(sheet, p);
           rect(c, 9, 2, 15, 6, 1);
           line(c, 8, 11, 16, 11);
           line(c, 8, 15, 14, 15);

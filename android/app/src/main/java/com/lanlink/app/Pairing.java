@@ -183,15 +183,30 @@ public final class Pairing implements AutoCloseable {
   }
   public synchronized String ownId() { return invitation == null ? "" : invitation.optString("id"); }
   public JSONObject join(String code, String targetId) throws Exception {
+    return join(code, targetId, null);
+  }
+  public JSONObject join(String code, String targetId, String host) throws Exception {
     if (!code.matches("[0-9]{8}")) throw new IllegalArgumentException("请输入八位数字配对码");
+    if (host != null) {
+      host = host.trim();
+      String[] parts = host.split("\\.", -1);
+      if (parts.length != 4) throw new IllegalArgumentException("请输入有效的 IPv4 地址");
+      for (String part : parts)
+        if (!part.matches("[0-9]{1,3}") || Integer.parseInt(part) > 255)
+          throw new IllegalArgumentException("请输入有效的 IPv4 地址");
+    }
     Map<String, JSONObject> offers = new HashMap<>(); String nonce = randomHex();
     try (DatagramSocket probe = new DatagramSocket()) {
       probe.setBroadcast(true); probe.setSoTimeout(200); byte[] query = bytes(obj("kind", "lanlink-pair-find-v2", "nonce", nonce).toString());
       Set<InetAddress> destinations = new HashSet<>(); destinations.add(InetAddress.getByName("255.255.255.255")); destinations.add(InetAddress.getByName("127.0.0.1"));
       Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces(); while (interfaces.hasMoreElements()) for (InterfaceAddress a : interfaces.nextElement().getInterfaceAddresses()) if (a.getBroadcast() != null) destinations.add(a.getBroadcast());
+      if (host != null) {
+        destinations.clear();
+        destinations.add(InetAddress.getByName(host));
+      }
       long until = System.currentTimeMillis() + 1100, nextSend = 0;
       while (System.currentTimeMillis() < until) {
-        if (System.currentTimeMillis() >= nextSend) { for (InetAddress host : destinations) probe.send(new DatagramPacket(query, query.length, host, DISCOVERY_PORT)); nextSend = System.currentTimeMillis() + 450; }
+        if (System.currentTimeMillis() >= nextSend) { for (InetAddress destination : destinations) probe.send(new DatagramPacket(query, query.length, destination, DISCOVERY_PORT)); nextSend = System.currentTimeMillis() + 450; }
         try { DatagramPacket p = new DatagramPacket(new byte[513], 513); probe.receive(p); if (p.getLength() > 512) continue; JSONObject m = new JSONObject(new String(p.getData(), 0, p.getLength(), java.nio.charset.StandardCharsets.UTF_8)); String id = m.optString("id"); int port = m.optInt("port");
           if (offers.size() < 16 && m.optString("kind").equals("lanlink-pair-offer-v2") && m.optString("nonce").equals(nonce) && id.matches("[a-f0-9]{32}") && !id.equals(ownId()) && (targetId == null || targetId.equals(id)) && port > 0 && port <= 65535) { m.put("host", p.getAddress().getHostAddress()); offers.put(id, m); }
         } catch (Exception ignored) {}

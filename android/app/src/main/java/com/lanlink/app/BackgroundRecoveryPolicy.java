@@ -17,9 +17,9 @@ final class BackgroundRecoveryPolicy {
   }
 
   static boolean offerGuide(String reason, int exitReason, boolean wasBackground,
-      boolean connected, boolean rebooted) {
-    return wasBackground && connected && !rebooted
-        && ("restricted".equals(reason)
+      boolean rebooted) {
+    return wasBackground && !rebooted
+        && ("low-memory".equals(reason) || "restricted".equals(reason)
             || "unknown".equals(reason) && (exitReason == -1 || exitReason == 0 || exitReason == 2));
   }
 

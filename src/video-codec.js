@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const stopping = new WeakMap();
+const accessUnitEnd = Buffer.from([0, 0, 0, 1, 9, 240]);
 // FFmpeg can stay blocked on pipe input after SIGTERM. Close owned pipes first,
 // then bound its shutdown so repeated stream changes cannot leak codec workers.
 export function stopVideoProcess(child) {
@@ -91,9 +92,39 @@ export async function chooseEncoder(exe, signal) {
   try { const result = await entry.promise; return signal?.aborted ? null : result; }
   finally { signal?.removeEventListener('abort', release); release(); }
 }
-export function createDecoder(exe, onFrame, onError) {
-  const p = spawn(exe, ['-hide_banner', '-loglevel', 'error', '-flags', 'low_delay', '-probesize', '32', '-analyzeduration', '0', '-f', 'h264', '-i', 'pipe:0', '-an', '-threads', '2', '-c:v', 'mjpeg', '-q:v', '3', '-fps_mode', 'passthrough', '-f', 'image2pipe', '-flush_packets', '1', 'pipe:1'], { windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] });
-  let stopped = false, needKey = true; const parser = new JpegParser(onFrame);
+class RawFrameParser {
+  constructor(size, emit) { this.size = size; this.emit = emit; this.offset = 0; }
+  push(data) {
+    while (data.length) {
+      this.buffer ??= Buffer.allocUnsafe(this.size);
+      const count = Math.min(data.length, this.size - this.offset);
+      data.copy(this.buffer, this.offset, 0, count);
+      data = data.subarray(count);
+      this.offset += count;
+      if (this.offset !== this.size) continue;
+      const frame = this.buffer;
+      this.buffer = null;
+      this.offset = 0;
+      this.emit(frame);
+    }
+  }
+}
+export function createDecoder(exe, onFrame, onError, raw) {
+  if (raw && (!Number.isInteger(raw.width) || !Number.isInteger(raw.height) ||
+      raw.width < 1 || raw.height < 1 || raw.width > 4096 || raw.height > 4096 ||
+      raw.width * raw.height > 4096 * 2048)) throw Error('VIDEO_SURFACE_FAILED: 视频尺寸超出显示缓冲');
+  const output = raw
+    ? ['-vf', `scale=${raw.width}:${raw.height}:flags=fast_bilinear`, '-pix_fmt', 'bgra', '-c:v', 'rawvideo', '-threads:v', '1', '-f', 'rawvideo']
+    : ['-c:v', 'mjpeg', '-threads:v', '1', '-q:v', '3', '-f', 'image2pipe'];
+  // Frame threading retains reference frames before output. One decode thread
+  // with slice threading presents immediately, including a static final frame.
+  const p = spawn(exe, ['-hide_banner', '-loglevel', 'error', '-flags', 'low_delay', '-probesize', '32', '-analyzeduration', '0', '-threads', '1', '-thread_type', 'slice', '-f', 'h264', '-i', 'pipe:0', '-an', ...output, '-fps_mode', 'passthrough', '-flush_packets', '1', 'pipe:1'], { windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] });
+  let stopped = false, needKey = true;
+  const parser = raw ? new RawFrameParser(raw.width * raw.height * 4, onFrame) : new JpegParser(onFrame);
   p.stdout.on('data', d => { if (!stopped) try { parser.push(d); } catch (e) { onError(e); } }); p.stdin.on('error', () => {}); p.on('error', e => { if (!stopped) onError(e); }); p.on('exit', () => { if (!stopped) onError(Error('视频解码器已退出')); });
-  return { push(frame) { if (stopped || p.stdin.destroyed || !p.stdin.writable) return false; if (p.stdin.writableLength > 256 * 1024) { needKey = true; return false; } if (needKey && !frame.key) return false; needKey = false; p.stdin.write(frame.data); return true; }, close() { stopped = true; parser.buffer = Buffer.alloc(0); return stopVideoProcess(p); } };
+  return { push(frame) { if (stopped || p.stdin.destroyed || !p.stdin.writable) return false; if (p.stdin.writableLength > 256 * 1024) { needKey = true; return false; } if (needKey && !frame.key) return false; needKey = false;
+    // The authenticated channel already delimits access units. Preserve that
+    // boundary in FFmpeg's byte stream so its parser need not await another image.
+    p.stdin.write(Buffer.concat([frame.data, accessUnitEnd])); return true;
+  }, close() { stopped = true; parser.buffer = Buffer.alloc(0); return stopVideoProcess(p); } };
 }

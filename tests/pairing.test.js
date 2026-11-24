@@ -65,6 +65,23 @@ test('complete discovery-to-short-code exchange resolves the target invitation',
   const result = await client.join(info.code, info.id); assert.equal(result.token, f.service.config.token);
   assert.equal(result.port, 45831); assert.equal(f.pairing.current(), null);
 });
+
+test('IP pairing uses unicast when broadcast destinations are unavailable', async t => {
+  const f = await fixture(t, true), info = f.pairing.show();
+  const client = new Pairing({
+    options: { pairingDestinations: [], pairingDiscoveryPort: f.pairing.udp.address().port },
+    config: {}, log() {}
+  });
+  await assert.rejects(client.join(info.code), /未找到/);
+  for (const host of ['', '999.1.1.1', 'localhost', '127.0.0.1:45833', '::1']) {
+    await assert.rejects(client.join(info.code, undefined, false, host), /IPv4/);
+  }
+  const wrong = info.code === '00000000' ? '11111111' : '00000000';
+  await assert.rejects(client.join(wrong, undefined, false, '127.0.0.1'), /配对码/);
+  const result = await client.join(info.code, undefined, false, ' 127.0.0.1 ');
+  assert.equal(result.token, f.service.config.token);
+  assert.equal(result.host, '127.0.0.1');
+});
 test('native pairing API hides QR initially; short-code join persists account and connects encrypted peer', async t => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'lanlink-code-')); const services = [];
   t.after(async () => { await Promise.all(services.map(s => s.close())); await rm(dir, { recursive: true, force: true }); });

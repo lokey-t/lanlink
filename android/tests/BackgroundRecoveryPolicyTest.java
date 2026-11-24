@@ -15,7 +15,7 @@ public final class BackgroundRecoveryPolicyTest {
           check(BackgroundRecoveryPolicy.reason(stopped, background, restricted).equals("user-stop"), "user action wins");
         for (int other : new int[] {1, 7, 8, 9, 12, 13, 14, 15, 16}) {
           check(BackgroundRecoveryPolicy.reason(other, background, restricted).equals("unknown"), "no invented battery cause");
-          check(!BackgroundRecoveryPolicy.offerGuide("unknown", other, background, true, false), "do not nudge for known unrelated exits");
+          check(!BackgroundRecoveryPolicy.offerGuide("unknown", other, background, false), "do not nudge for known unrelated exits");
         }
       }
     }
@@ -23,13 +23,14 @@ public final class BackgroundRecoveryPolicyTest {
       check(BackgroundRecoveryPolicy.reason(uncertain, true, true).equals("restricted"), "restricted snapshot is evidence");
       check(BackgroundRecoveryPolicy.reason(uncertain, true, false).equals("unknown"), "ordinary battery optimization proves nothing");
       check(BackgroundRecoveryPolicy.reason(uncertain, false, true).equals("unknown"), "foreground termination is not background restriction");
-      check(BackgroundRecoveryPolicy.offerGuide("unknown", uncertain, true, true, false), "uncertain interruption can offer qualified guidance");
-      check(!BackgroundRecoveryPolicy.offerGuide("unknown", uncertain, false, true, false), "no foreground nudge");
-      check(!BackgroundRecoveryPolicy.offerGuide("unknown", uncertain, true, false, false), "no unrelated disconnected session nudge");
-      check(!BackgroundRecoveryPolicy.offerGuide("unknown", uncertain, true, true, true), "reboot is not a background kill");
+      check(BackgroundRecoveryPolicy.offerGuide("unknown", uncertain, true, false), "uncertain interruption can offer qualified guidance");
+      check(!BackgroundRecoveryPolicy.offerGuide("unknown", uncertain, false, false), "no foreground nudge");
+      check(!BackgroundRecoveryPolicy.offerGuide("unknown", uncertain, true, true), "reboot is not a background kill");
     }
-    for (String confirmed : new String[] {"crash", "user-stop", "low-memory"})
-      check(!BackgroundRecoveryPolicy.offerGuide(confirmed, 0, true, true, false), "no battery nudge for known causes");
+    for (String confirmed : new String[] {"crash", "user-stop"})
+      check(!BackgroundRecoveryPolicy.offerGuide(confirmed, 0, true, false), "no battery nudge for known causes");
+    check(BackgroundRecoveryPolicy.offerGuide("low-memory", 3, true, false), "background memory pressure offers qualified guidance");
+    check(!BackgroundRecoveryPolicy.offerGuide("low-memory", 3, false, false), "foreground memory pressure is silent");
     check(BackgroundRecoveryPolicy.manufacturer("XIAOMI", "POCO").equals("xiaomi"), "Xiaomi variants");
     check(BackgroundRecoveryPolicy.manufacturer("HONOR", "honor").equals("huawei"), "Honor variant");
     check(BackgroundRecoveryPolicy.manufacturer("OnePlus", null).equals("oppo"), "OnePlus variant");

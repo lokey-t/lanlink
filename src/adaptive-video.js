@@ -35,3 +35,36 @@ export class VideoFeedback {
     this.peak = 0; this.frames = 0; return report;
   }
 }
+
+export class AdaptiveFrameRate {
+  constructor(maximum, now = () => performance.now()) {
+    this.maximum = maximum === 60 ? 60 : 30;
+    this.fps = 30;
+    this.now = now;
+    this.good = 0;
+    this.changedAt = -Infinity;
+  }
+  feedback(report = {}, bitrate, queued = 0) {
+    if (![report.rttMs, report.delayMs, report.sampleAgeMs, report.stalledMs, report.frames]
+      .every(value => Number.isFinite(value) && value >= 0)) return false;
+    const now = this.now();
+    const poor = bitrate < 2_000_000 || report.rttMs > 120 || report.delayMs > 75 ||
+      queued >= 64 * 1024 || report.stalledMs > 1500;
+    const stable = report.frames >= 12 && report.sampleAgeMs < 1500 && report.rttMs > 0 &&
+      report.rttMs <= 45 && report.delayMs <= 22 && queued < 16 * 1024 && !report.needKey;
+    let next = this.fps;
+    if (poor) {
+      next = this.fps === 60 && bitrate >= 2_000_000 ? 30 : 24;
+      this.good = 0;
+    } else {
+      this.good = stable ? this.good + 1 : 0;
+      if (this.good >= 5 && now - this.changedAt >= 6000)
+        next = this.fps === 24 ? 30 : bitrate >= 3_500_000 ? this.maximum : this.fps;
+    }
+    if (next === this.fps) return false;
+    this.fps = next;
+    this.good = 0;
+    this.changedAt = now;
+    return true;
+  }
+}

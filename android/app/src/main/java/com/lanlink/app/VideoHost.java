@@ -17,9 +17,13 @@ final class VideoHost implements AutoCloseable {
   final ArrayBlockingQueue<VideoWire.Frame> frames = new ArrayBlockingQueue<>(8);
   volatile long expires = System.currentTimeMillis() + 10000, sendingAt;
   volatile boolean closed, needKey = true;
+  private volatile boolean sentVideo;
   volatile Socket socket;
   volatile VideoWire wire;
   volatile VideoSource encoder;
+  private volatile StreamAudio.Host audio;
+  private final boolean audioRequested;
+  private final int maxFps;
   volatile VideoTransport rtc;String rtcAnswer;long quicChannel;
 
   VideoHost(LinkService service, Wire peer, boolean h264) throws Exception {
@@ -29,6 +33,12 @@ final class VideoHost implements AutoCloseable {
     this(service,peer,h264,offer,0);
   }
   VideoHost(LinkService service, Wire peer, boolean h264,String offer,long channel) throws Exception {
+    this(service,peer,h264,offer,channel,false);
+  }
+  VideoHost(LinkService service, Wire peer, boolean h264,String offer,long channel,boolean audioRequested) throws Exception {
+    this(service,peer,h264,offer,channel,audioRequested,30);
+  }
+  VideoHost(LinkService service, Wire peer, boolean h264,String offer,long channel,boolean audioRequested,int maxFps) throws Exception {
     if ((service.rootEnabled() || service.privilegedScreenReady()) && !h264)
       throw new IOException("VIDEO_H264_REQUIRED: ADB / Root 投屏需要 H.264，请升级控制端后重试");
     this.service = service;
@@ -37,6 +47,8 @@ final class VideoHost implements AutoCloseable {
     server = new ServerSocket(0);
     if(channel>0){try{rtc=service.quic.video(peer,channel);quicChannel=channel;rtc.keyCallback(()->{needKey=true;if(encoder!=null)encoder.requestKey();});}catch(Exception error){server.close();throw error;}}
     else if(offer!=null){try{RtcVideo stream=new RtcVideo(service);rtc=stream;rtcAnswer=stream.answer(offer);}catch(Exception error){if(rtc!=null)rtc.close();server.close();throw error;}}
+    this.audioRequested = audioRequested;
+    this.maxFps = maxFps == 60 ? 60 : 30;
     service.screenSessionStarted();
     server.setSoTimeout(5000);
     new Thread(
@@ -89,7 +101,7 @@ final class VideoHost implements AutoCloseable {
                   if(frame!=null&&frame.h264&&System.currentTimeMillis()-frame.time>150){frames.clear();needKey=true;if(encoder!=null)encoder.requestKey();continue;}
                   if (frame != null) {
                     sendingAt = System.currentTimeMillis();
-                    if(rtc!=null){if(!rtc.send(frame)){needKey=true;if(adaptive.congested(Math.max(rtc.queued(),128*1024))&&encoder!=null)encoder.setBitrate(adaptive.rate);if(encoder!=null)encoder.requestKey();}}else wire.send(frame);
+                    if(rtc!=null){if(!rtc.send(frame)){needKey=true;if(adaptive.congested(Math.max(rtc.queued(),128*1024))&&encoder!=null)encoder.setBitrate(adaptive.rate);if(encoder!=null)encoder.requestKey();} else if(!frame.heartbeat) sentVideo=true;}else { wire.send(frame); if(!frame.heartbeat) sentVideo=true; }
                     sentAt = System.currentTimeMillis();
                     sendingAt = 0;
                   }
@@ -132,22 +144,45 @@ final class VideoHost implements AutoCloseable {
         "port",
         server.getLocalPort(),
         "h264Only",
-        service.rootEnabled() || service.privilegedScreenReady());if(rtcAnswer!=null)info.put("rtc",rtcAnswer);if(quicChannel>0)info.put("quic",quicChannel);return info;
+        service.rootEnabled() || service.privilegedScreenReady());if(rtcAnswer!=null)info.put("rtc",rtcAnswer);if(quicChannel>0)info.put("quic",quicChannel);return offerAudio(info);
+  }
+
+  private synchronized JSONObject offerAudio(JSONObject info) throws Exception {
+    if (!audioRequested || closed) return info;
+    if (!service.adbAudioAvailable()) {
+      stopAudio();
+      return info.put("audioStatus", "adb-required");
+    }
+    if (!service.ownsRemoteAudio(peer)) {
+      if (audio == null) return info;
+      stopAudio();
+      return info.put("audioStatus", "inactive");
+    }
+    if (audio == null || !audio.running()) try { audio = new StreamAudio.Host(service, peer); }
+    catch (IOException error) { return info.put("audioStatus", "unavailable"); }
+    return info.put("audio", audio.info());
+  }
+
+  void stopAudio() {
+    StreamAudio.Host sound = audio;
+    if (sound != null) sound.close();
   }
 
   JSONObject keep(Wire p, JSONObject feedback) throws Exception {
     if (p != peer || closed) throw new IOException("串流已结束");
     service.requireScreen(peer);
     expires = System.currentTimeMillis() + 10000;
+    if (sentVideo) service.keepRemoteDisplay(peer);
     if(feedback!=null && feedback.optBoolean("needKey") && encoder!=null)encoder.requestKey();
-    if (adaptive.feedback(
-            feedback, Math.max(rtc!=null?rtc.queued():0,sendingAt != 0 && System.currentTimeMillis() - sendingAt > 100 ? 100000 : 0))
-        && encoder != null) encoder.setBitrate(adaptive.rate);
-    return Wire.obj("bitrate", adaptive.rate);
+    long queued = Math.max(rtc!=null?rtc.queued():0,sendingAt != 0 && System.currentTimeMillis() - sendingAt > 100 ? 100000 : 0);
+    if (adaptive.feedback(feedback, queued) && encoder != null) encoder.setBitrate(adaptive.rate);
+    if (encoder != null && adaptive.updateFrameRate(feedback, queued, maxFps)) encoder.setFrameRate(adaptive.fps);
+    return offerAudio(Wire.obj("bitrate", adaptive.rate));
   }
 
   public void close() {
     synchronized(this){if (closed) return;closed = true;}
+    stopAudio();
     if(rtc!=null)rtc.close();
     try {
       server.close();

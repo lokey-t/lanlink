@@ -303,13 +303,24 @@ final class TouchpadCenterProbe {
       capture("control-center-touchpad");
       test.runOnMainSync(() -> {
         View row = find(activity.getWindow().getDecorView(),
-            "原生触控板测试电脑，在线 · 已授权，打开全屏触控板");
+            "原生触控板测试电脑，在线 · 已授权，打开触控板");
         check(row != null && row.performClick(), "open touchpad from the control center");
         try { session[0] = (TouchpadDialog) field(activity, "viewer"); }
         catch (Exception failure) { throw new RuntimeException(failure); }
       });
+      capture("touchpad-portrait");
       long enteredAt = SystemClock.uptimeMillis();
       await(() -> ONLINE.equals(service.active) && acquired.get() > 0, "input-only control acquired");
+      test.waitForIdleSync();
+      test.runOnMainSync(() -> {
+        View decor = session[0].getWindow().getDecorView();
+        check(decor.getHeight() > decor.getWidth(), "touchpad opens in portrait");
+        check(find(decor, "原生触控板测试电脑") != null, "portrait identifies the device");
+        check(find(decor, "全屏").performClick(), "explicit fullscreen button enters landscape");
+      });
+      await(() -> session[0].getWindow().getDecorView().getWidth()
+          > session[0].getWindow().getDecorView().getHeight(), "fullscreen layout rotated");
+      check(acquired.get() == 1, "fullscreen reuses the portrait control session");
       test.waitForIdleSync();
       capture("touchpad-session");
       int[] fullWidth = {0};
@@ -320,7 +331,8 @@ final class TouchpadCenterProbe {
           check(drawsIntroHint(pad), "first ten seconds show the touch area hint");
           View decor = session[0].getWindow().getDecorView();
           check(decor.getWidth() > decor.getHeight(), "touchpad opens in landscape");
-          check(find(decor, "原生触控板测试电脑") == null, "device name stays off the touch surface");
+          View hiddenTitle = find(decor, "原生触控板测试电脑");
+          check(hiddenTitle == null || !hiddenTitle.isShown(), "device name stays off the touch surface");
           View back = find(decor, "返回"), keyboard = find(decor, "键盘");
           View left = find(decor, "左键"), right = find(decor, "右键");
           check(back != null && keyboard != null && left != null && right != null, "four side controls");
@@ -393,6 +405,15 @@ final class TouchpadCenterProbe {
         } catch (Exception failure) { throw new RuntimeException(failure); }
       });
       capture("touchpad-idle");
+      test.runOnMainSync(() -> {
+        session[0].onBackPressed();
+        check(find(session[0].getWindow().getDecorView(), "退出全屏").performClick(),
+            "fullscreen menu returns to portrait");
+      });
+      await(() -> session[0].getWindow().getDecorView().getHeight()
+          > session[0].getWindow().getDecorView().getWidth(), "portrait restored after fullscreen");
+      check(ONLINE.equals(service.active) && acquired.get() == 1,
+          "leaving fullscreen preserves the same input lease");
       test.runOnMainSync(session[0]::dismiss);
       await(() -> released.get() > 0 && !ONLINE.equals(service.active), "dismiss releases the native control lease");
       // Reopen, drop the actual encrypted connection, then exercise the visible recovery action.
@@ -416,7 +437,7 @@ final class TouchpadCenterProbe {
       await(() -> ONLINE.equals(service.active) && acquired.get() > 2, "fresh connection works after returning to list");
       test.runOnMainSync(session[0]::dismiss);
       return "PASS touchpad center: three aligned outlined tiles, capability/offline/permission filtering, "
-          + "landscape rails, native mouse input, ten-second hint, contact glow, side menu, clean release, offline recovery and new-connection reuse; "
+          + "portrait entry, explicit fullscreen without reacquiring input, landscape rails, native mouse input, ten-second hint, contact glow, side menu, clean release, offline recovery and new-connection reuse; "
           + "screenshots: ui-check/control-center-touchpad.png, ui-check/touchpad-session.png, ui-check/touchpad-menu.png";
     } finally {
       if (session[0] != null) test.runOnMainSync(session[0]::dismiss);

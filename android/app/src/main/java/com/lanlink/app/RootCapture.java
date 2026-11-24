@@ -8,6 +8,10 @@ final class RootCapture implements AutoCloseable {
   private java.net.ServerSocket server;
   private java.net.Socket socket;
   private BufferedWriter commands;
+  private boolean keyPending, ratePending;
+  private int frameRate = 30, pendingFps;
+  private long dimSession;
+  private String pendingAudio;
   private volatile VideoEncoder.Output listener;
   private long syncAt;
   private int bitrate = 4_000_000;
@@ -79,9 +83,11 @@ final class RootCapture implements AutoCloseable {
                   server.close();
                   server = null;
                   commands = new BufferedWriter(new OutputStreamWriter(child.getOutputStream(), "UTF-8"));
-                  send("rate " + bitrate);
-                  send("key");
+                  ratePending = keyPending = true;
                 }
+                Thread writer = new Thread(() -> writeCommands(service), "lanlink-root-video-commands");
+                writer.setDaemon(true);
+                writer.start();
                 try (DataInputStream input =
                     new DataInputStream(new BufferedInputStream(child.getInputStream()))) {
                   if (input.readInt() != RootStream.MAGIC) throw new IOException("屏幕串流协议不匹配");
@@ -131,13 +137,14 @@ final class RootCapture implements AutoCloseable {
   synchronized VideoSource attach(VideoEncoder.Output target) throws IOException {
     if (closed) throw new IOException("屏幕串流已停止，请重试");
     listener = target;
-    send("key");
+    queueKey();
     return new VideoSource() {
       public void setBitrate(int rate) {
         synchronized (RootCapture.this) {
           if (listener == target) {
             bitrate = Math.max(500_000, Math.min(8_000_000, rate));
-            send("rate " + bitrate);
+            ratePending = true;
+            RootCapture.this.notifyAll();
           }
         }
       }
@@ -147,8 +154,17 @@ final class RootCapture implements AutoCloseable {
           long now = android.os.SystemClock.elapsedRealtime();
           if (listener == target && now - syncAt >= 500) {
             syncAt = now;
-            send("key");
+            queueKey();
           }
+        }
+      }
+
+      public void setFrameRate(int fps) {
+        if (fps != 24 && fps != 30 && fps != 60) return;
+        synchronized (RootCapture.this) {
+          if (listener != target || frameRate == fps) return;
+          frameRate = pendingFps = fps;
+          RootCapture.this.notifyAll();
         }
       }
 
@@ -160,13 +176,46 @@ final class RootCapture implements AutoCloseable {
     };
   }
 
-  private synchronized void send(String command) {
-    if (commands == null || closed) return;
+  private synchronized void queueKey() {
+    keyPending = true;
+    notifyAll();
+  }
+
+  synchronized void keepDim(long session) {
+    if (closed) return;
+    dimSession = session;
+    notifyAll();
+  }
+
+  synchronized void startAudio(int port, String secret) throws IOException {
+    if (closed) throw new IOException("ADB 图像助手已结束");
+    pendingAudio = "audio " + port + " " + secret + "\n";
+    notifyAll();
+  }
+
+  private void writeCommands(LinkService service) {
     try {
-      commands.write(command);
-      commands.newLine();
-      commands.flush();
-    } catch (IOException ignored) {
+      while (true) {
+        BufferedWriter output;
+        String batch;
+        synchronized (this) {
+          while (!closed && !ratePending && !keyPending && dimSession == 0 && pendingFps == 0 && pendingAudio == null) wait();
+          if (closed) return;
+          output = commands;
+          batch = (ratePending ? "rate " + bitrate + "\n" : "")
+              + (pendingFps != 0 ? "fps " + pendingFps + "\n" : "")
+              + (keyPending ? "key\n" : "") + (dimSession != 0 ? "dim " + dimSession + "\n" : "")
+              + (pendingAudio != null ? pendingAudio : "");
+          ratePending = keyPending = false;
+          dimSession = 0;
+          pendingFps = 0;
+          pendingAudio = null;
+        }
+        output.write(batch);
+        output.flush();
+      }
+    } catch (Exception error) {
+      if (!closed) fail(service);
     }
   }
 
@@ -176,8 +225,8 @@ final class RootCapture implements AutoCloseable {
 
   public synchronized void close() {
     if (closed) return;
-    send("stop");
     closed = true;
+    notifyAll();
     listener = null;
     try { if (socket != null) socket.close(); } catch (IOException ignored) {}
     try { if (server != null) server.close(); } catch (IOException ignored) {}
