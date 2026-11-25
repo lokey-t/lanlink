@@ -34,9 +34,13 @@ class WindowsSetup {
   }
   static void NotRunning(){foreach(var p in Process.GetProcessesByName("LanLink")){try{if(p.MainModule.FileName.StartsWith(Home+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase))throw new IOException(T("请先从托盘菜单退出 LanLink。","Exit LanLink from its tray menu first."));}catch(System.ComponentModel.Win32Exception){throw new IOException("Cannot inspect running LanLink; close it before installation.");}finally{p.Dispose();}}}
   static void Shortcut(string name){Type type=Type.GetTypeFromProgID("WScript.Shell");dynamic shell=Activator.CreateInstance(type);dynamic link=shell.CreateShortcut(name);link.TargetPath=Path.Combine(Home,"LanLink.exe");link.WorkingDirectory=Home;link.IconLocation=Path.Combine(Home,"LanLink.exe");link.Save();}
+  static void MoveDirectory(string source,string destination){
+    var timer=Stopwatch.StartNew();
+    for(;;){try{Directory.Move(source,destination);return;}catch(IOException){if(timer.ElapsedMilliseconds>=20000)throw;System.Threading.Thread.Sleep(200);}catch(UnauthorizedAccessException){if(timer.ElapsedMilliseconds>=20000)throw;System.Threading.Thread.Sleep(200);}}
+  }
   static void Install(){
     NotRunning();Directory.CreateDirectory(Path.GetDirectoryName(Home));string stage=Home+".install-"+Guid.NewGuid().ToString("N"),backup=Home+".backup-"+DateTime.UtcNow.Ticks;
-    Extract(stage);bool moved=false;try{if(Directory.Exists(Home)){Directory.Move(Home,backup);moved=true;}Directory.Move(stage,Home);}catch{if(moved&&!Directory.Exists(Home))Directory.Move(backup,Home);throw;}
+    Extract(stage);bool moved=false;try{if(Directory.Exists(Home)){MoveDirectory(Home,backup);moved=true;}MoveDirectory(stage,Home);}catch{if(moved&&!Directory.Exists(Home))MoveDirectory(backup,Home);throw;}
     Directory.CreateDirectory(Support);string self=Assembly.GetExecutingAssembly().Location,uninstall=Path.Combine(Support,"Uninstall.exe");if(!string.Equals(self,uninstall,StringComparison.OrdinalIgnoreCase))File.Copy(self,uninstall,true);
     Shortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs),"LanLink.lnk"));Shortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),"LanLink.lnk"));
     using(var key=Registry.CurrentUser.CreateSubKey(Key)){key.SetValue("DisplayName","LanLink");key.SetValue("DisplayVersion",Assembly.GetExecutingAssembly().GetName().Version.ToString(3));key.SetValue("Publisher","LanLink");key.SetValue("InstallLocation",Home);key.SetValue("DisplayIcon",Path.Combine(Home,"LanLink.exe"));key.SetValue("UninstallString","\""+uninstall+"\" --uninstall");key.SetValue("NoModify",1);key.SetValue("NoRepair",1);}

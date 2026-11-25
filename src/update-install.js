@@ -6,15 +6,27 @@ const planPath = process.argv[2];
 const plan = JSON.parse(await readFile(planPath,'utf8'));
 const alive = pid => { try { process.kill(pid,0); return true; } catch (error) { return error.code === 'EPERM'; } };
 
-async function result(phase, message, version = plan.version) {
+async function result(phase, message, details = {}) {
  if (!plan.resultFile) return;
  const temporary = plan.resultFile + '.' + process.pid + '.tmp';
- await writeFile(temporary,JSON.stringify({phase,message,version,page:plan.page,at:Date.now()}));
+ await writeFile(temporary,JSON.stringify({phase,message,version:plan.version,page:plan.page,at:Date.now(),...details}));
  await rename(temporary,plan.resultFile);
 }
 
+async function move(from, to) {
+ const deadline = Date.now() + 20000;
+ for (;;) {
+  try { await rename(from, to); return; }
+  catch (error) {
+   if (!['EBUSY','EPERM','EACCES'].includes(error.code) || Date.now() >= deadline) throw error;
+   await new Promise(resolve => setTimeout(resolve,200));
+  }
+ }
+}
+
 async function launch() {
- const child = spawn(plan.mac ? '/usr/bin/open' : plan.install+'\\LanLink.exe', plan.mac ? [plan.install] : [],
+ const args = plan.dataDir ? ['--data',plan.dataDir] : [];
+ const child = spawn(plan.mac ? '/usr/bin/open' : plan.install+'\\LanLink.exe', plan.mac ? ['-n','-a',plan.install,...(args.length ? ['--args',...args] : [])] : args,
   {cwd:plan.install,detached:true,stdio:'ignore',windowsHide:true});
  await new Promise((resolve,reject) => {
   child.once('error',reject);
@@ -36,28 +48,28 @@ while (alive(plan.parent) || alive(plan.host)) {
 const backup = plan.install+'.backup-'+Date.now();
 let moved = false, replaced = false;
 try {
- await rename(plan.install,backup);
+ await move(plan.install,backup);
  moved = true;
- await rename(plan.stage,plan.install);
+ await move(plan.stage,plan.install);
  replaced = true;
  await result('installed','已安装更新');
  await launch();
 } catch (error) {
- let message = '安装更新失败，当前版本仍可使用';
+ let message = ['EBUSY','EPERM','EACCES'].includes(error.code) ? '安装目录仍被占用或无法写入，请退出相关程序后重试或手动安装' : '安装更新失败，当前版本仍可使用';
  try {
-  if (replaced) await rename(plan.install,plan.stage);
+  if (replaced) await move(plan.install,plan.stage);
   if (moved) {
-   await rename(backup,plan.install);
+   await move(backup,plan.install);
    message = '安装更新失败，已恢复旧版本';
   }
  } catch (rollbackError) {
   message = '安装更新失败，无法恢复旧版本，请手动安装';
   await writeFile(planPath+'.error',String(error)+'\n'+String(rollbackError)).catch(()=>{});
-  await result('failed',message).catch(()=>{});
+  await result('failed',message,{code:error.code,detail:String(error),rollbackError:String(rollbackError)}).catch(()=>{});
   process.exit(1);
  }
  await writeFile(planPath+'.error',String(error)).catch(()=>{});
- await result('failed',message).catch(()=>{});
+ await result('failed',message,{code:error.code,detail:String(error)}).catch(()=>{});
  await launch().catch(()=>{});
  process.exit(1);
 }

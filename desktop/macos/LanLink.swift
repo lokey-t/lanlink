@@ -908,7 +908,7 @@ struct Device: Identifiable, Equatable {
     }
     func quit() {
         guard !closing else { return }; closing = true; poll?.cancel(); remoteTask?.cancel(); successToastTask?.cancel(); try? input.fileHandleForWriting.close()
-        Task { for _ in 0..<90 { if process?.isRunning != true { NSApp.reply(toApplicationShouldTerminate: true); return }; try? await Task.sleep(nanoseconds: 100_000_000) }; process?.terminate(); NSApp.reply(toApplicationShouldTerminate: true) }
+        Task { for _ in 0..<150 { if process?.isRunning != true { NSApp.reply(toApplicationShouldTerminate: true); return }; try? await Task.sleep(nanoseconds: 100_000_000) }; process?.terminate(); NSApp.reply(toApplicationShouldTerminate: true) }
     }
 }
 

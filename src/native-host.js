@@ -15,8 +15,10 @@ const write = value => { if (!process.stdout.destroyed) process.stdout.write(JSO
 let closing = false, inFlight = 0, mutations = Promise.resolve();
 async function close(exitCode = 0) {
   if (closing) return; closing = true;
-  const guard = setTimeout(() => process.exit(1), 8000); guard.unref();
-  await service.close().catch(() => {}); process.exit(exitCode);
+  const guard = setTimeout(() => process.exit(1), 12000); guard.unref();
+  await service.close().catch(() => {});
+  await service.native.close().catch(() => {});
+  clearTimeout(guard); process.exit(exitCode);
 }
 process.stdin.on('end', () => close()); process.on('SIGTERM', () => close()); process.on('SIGINT', () => close());
 process.stdout.on('error', () => close()); service.once('stop', () => close());

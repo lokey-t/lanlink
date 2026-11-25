@@ -204,6 +204,10 @@ test('macOS validates a staged bundle and rejects a different identity or a chan
   await verifyMacUpdate(installed,staged);
   const other = await bundle('other','com.example.other');
   await assert.rejects(verifyMacUpdate(installed,other));
+  const wrongBridge = await bundle('wrong-bridge','com.lanlink.native');
+  sign(path.join(wrongBridge,bridge),'com.example.wrong-bridge');
+  sign(wrongBridge,'com.lanlink.native');
+  await assert.rejects(verifyMacUpdate(installed,wrongBridge));
   await writeFile(path.join(staged,bridge),'changed');
   await assert.rejects(verifyMacUpdate(installed,staged));
  } finally { await rm(dir,{recursive:true,force:true}); }

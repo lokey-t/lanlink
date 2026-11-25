@@ -244,7 +244,7 @@ export class Updater{
  await rm(path.join(work,'download'),{force:true});
  const helper=path.join(work,'install.mjs'),runtime=path.join(work,mac?'node':'node.exe');await copyFile(process.execPath,runtime);const {chmod}=await import('node:fs/promises');await chmod(runtime,493);await copyFile(fileURLToPath(new URL('./update-install.js',import.meta.url)),helper);
  await writeFile(path.join(work,'plan.json'),JSON.stringify({
-  install,stage,mac,parent:process.ppid,host:process.pid,resultFile:this.resultFile,
+  install,stage,mac,parent:process.ppid,host:process.pid,resultFile:this.resultFile,dataDir:this.service.dir,
   version:manifest.version,previousVersion:buildInfo.version,page
  }));
  if(channel!==this.channel())throw Error('更新通道已更改，请重新检查更新');
@@ -276,7 +276,7 @@ export async function verifyMacUpdate(installed, staged) {
  for (const relative of ['', bridge]) {
   const previous = path.join(installed, relative);
   const next = path.join(staged, relative);
-  await run('/usr/bin/codesign', ['--verify', '--strict', next]);
+  await run('/usr/bin/codesign', ['--verify', '--strict', '-R=identifier "'+(relative ? 'com.lanlink.native.bridge' : 'com.lanlink.native')+'"', next]);
   const {stderr} = await run('/usr/bin/codesign', ['-dvv', '-r-', previous]);
   if (/^TeamIdentifier=not set$/m.test(stderr)) continue;
   const requirement = /^designated => (.+)$/m.exec(stderr)?.[1];

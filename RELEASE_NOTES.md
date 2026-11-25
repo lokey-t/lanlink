@@ -12,6 +12,19 @@
 - Refined the UI across all three platforms for a consistent appearance and interaction.
 - Added Control Center shortcuts: click a status entry to quickly access its related actions.
 
+
+## v0.93.0 修复重发 / Corrected rebuild
+
+- 修复 Windows 更新时辅助进程尚未退出导致安装目录被占用的问题；目录替换与回滚会等待短暂占用释放，并保留具体错误信息。
+- macOS 共用辅助进程退出修复，补充桥接程序标识校验；Windows/macOS 升级重启后保留自定义数据目录。
+- Android 继续沿用生产签名，内部版本码递增至 96；校验安装取消、空间/系统限制错误、重启恢复与损坏 APK 拒绝。
+- v0.92.1 使用旧版更新器，若仍提示目录占用，请完全退出后使用本版安装包覆盖更新。已安装初次 v0.93.0 的用户请手动下载修复包；同名版本不会被旧客户端自动识别为更新。便携版请保留个人配置，并在原目录外解压后替换完整安装目录。
+
+- Fixed helper shutdown and transient installation-directory locks on Windows, with bounded retries for replacement and rollback and actionable error details.
+- macOS also waits for helper exit and validates the bridge signing identifier. Desktop relaunch preserves a custom data directory.
+- Android retains the production signing key and increases versionCode to 96; installer failure/cancellation, restart recovery, and corrupt APK rejection are covered.
+- v0.92.1 still runs its old updater. If a directory lock prevents updating, quit completely and install the corrected package manually. Users of the initial v0.93.0 must also download this rebuild manually because old clients do not detect another build with the same version name. Preserve user data and replace a portable installation as a complete directory.
+
 ## 下载 / Downloads
 
 | 设备 / 安装方式 | GitHub 下载 | Gitee 发行页 |

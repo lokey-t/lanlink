@@ -94,7 +94,7 @@ namespace LanLink.Desktop {
       if (stopping) return; stopping = true;
       if (process == null) return;
       try { process.StandardInput.Close(); } catch { }
-      await Task.Run(delegate { try { if (!process.WaitForExit(9000)) process.Kill(); } catch { } });
+      await Task.Run(delegate { try { if (!process.WaitForExit(15000)) { process.Kill(); process.WaitForExit(3000); } } catch { } });
       process.Dispose();
     }
   }

@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { stopChild } from './child-lifecycle.js';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const windowsHid = path.join(root, 'runtime', 'hid', 'LanLinkHid.exe');
 export class NativeBridge extends EventEmitter {
@@ -27,6 +28,7 @@ export class NativeBridge extends EventEmitter {
   }
   fail(e) { for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(e); } this.pending.clear(); this.emit('diagnostic', e.message); }
   call(method, args = {}, timeout = 8000) {
+    if (this.closing) return Promise.reject(new Error('服务停止'));
     if (this.disabled) {
       if (method === 'clipboardSet') this.simulatedClip = { text: args.text || '', files: args.files || [] };
       if (method === 'screen') return Promise.reject(new Error('模拟模式不提供真实屏幕'));
@@ -48,11 +50,13 @@ export class NativeBridge extends EventEmitter {
         return Promise.reject(new Error('蓝牙连接凭证无效'));
       const command = find ? ['--find', value] : ['--pair', value, String(args.addressType)];
       return new Promise((resolve, reject) => {
-        execFile(windowsHid, command, { timeout, windowsHide:true, maxBuffer:4096 }, (error, stdout) => {
+        const child = execFile(windowsHid, command, { timeout, windowsHide:true, maxBuffer:4096 }, (error, stdout) => {
+          this.hidOperations?.delete(child);
           if (error) { reject(new Error('无法直接连接蓝牙，请在系统蓝牙设置中连接')); return; }
           try { resolve(JSON.parse(stdout)); }
           catch { reject(new Error('无法直接连接蓝牙，请在系统蓝牙设置中连接')); }
         });
+        (this.hidOperations ??= new Set()).add(child);
       });
     }
     if (!this.hidChild && method === 'hid-status') return Promise.resolve({});
@@ -92,5 +96,13 @@ export class NativeBridge extends EventEmitter {
       child.stdin.write(JSON.stringify({id,method,args})+'\n');
     });
   }
-  close() { this.hidChild?.stdin.end(); this.child?.kill(); this.fail(new Error('服务停止')); }
+  close() {
+    if (this.closing) return this.closing;
+    this.fail(new Error('服务停止'));
+    this.closing = Promise.all([
+      stopChild(this.hidChild), stopChild(this.child, {graceful:false}),
+      ...[...(this.hidOperations ?? [])].map(child => stopChild(child, {graceful:false})),
+    ]).then(() => {});
+    return this.closing;
+  }
 }

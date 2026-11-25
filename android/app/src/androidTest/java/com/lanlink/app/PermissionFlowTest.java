@@ -153,6 +153,7 @@ public final class PermissionFlowTest extends Instrumentation {
 
   @Override
   public void onStart() {
+    if (options != null && options.containsKey("updaterProbe")) { UpdaterProbe.run(this); return; }
     Bundle result = new Bundle();
     Activity activity = null;
     Wire peer = null;

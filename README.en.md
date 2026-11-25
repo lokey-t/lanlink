@@ -35,6 +35,8 @@ Updates default to the stable channel. In Settings, you can choose the stable or
 
 v0.93.0 improves remote streaming on Windows, macOS, and Android for smoother video and interaction, refines all three interfaces, and adds Control Center shortcuts through clickable status entries. See [release notes](RELEASE_NOTES.md).
 
+This rebuild fixes desktop helper shutdown and transient directory locks, adds Mac bridge signing-identifier validation, and preserves custom data directories. If the v0.92.1 updater fails, or you already installed the initial v0.93.0, quit completely and install the corrected package manually. Pairing and settings are kept outside the installation directory by default.
+
 On Android, Settings → About brings together version information, update controls, and log export. On systems that support predictive back, the back gesture previews the parent settings page.
 
 ### Where LanLink fits alongside other tools
