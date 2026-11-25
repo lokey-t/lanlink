@@ -29,6 +29,7 @@ fn wait_socket(socket:&UdpSocket,timeout:Duration){
 }
 fn emit(events:&Events,v:Value){push(events,Event::Json(v));}
 fn body(v:&Value)->Result<Vec<u8>,String>{let b=B64.decode(v["data"].as_str().unwrap_or("")).map_err(|_|"invalid base64")?;if b.len()>LIMIT{return Err("payload too large".into())}Ok(b)}
+fn legacy_motion(bytes:&[u8])->bool{serde_json::from_slice::<Value>(bytes).is_ok_and(|v|matches!(v["kind"].as_str(),Some("move"|"relative")))}
 fn encode(kind:u8,data:&[u8])->Vec<u8>{let mut b=Vec::with_capacity(data.len()+1);b.push(kind);b.extend_from_slice(data);b}
 fn random()->Vec<u8>{let mut b=vec![0;16];rand::thread_rng().fill_bytes(&mut b);b}
 fn hex(bytes:&[u8])->String{bytes.iter().map(|b|format!("{b:02x}")).collect()}
@@ -84,7 +85,7 @@ fn run(socket:UdpSocket,local:SocketAddr,mut cfg:quiche::Config,rx:mpsc::Receive
         if !s.ready{return Err("connection not authenticated".into())}
         if op=="request" {if s.requests.len()>=32{return Err("request limit".into())}let bytes=body(&cmd)?;let stream=s.next;s.next+=4;let _=s.conn.stream_priority(stream,if cmd["priority"].as_u64()==Some(0){0}else{127},true);s.writes.insert(stream,Write{bytes:encode(1,&bytes),at:0});s.requests.insert(stream,(id.clone(),Instant::now()+Duration::from_millis(cmd["timeout"].as_u64().unwrap_or(15000).min(120000))));return Ok(None);}
         if op=="reply" {let stream=cmd["stream"].as_u64().ok_or("stream required")?;s.writes.insert(stream,Write{bytes:encode(2,&body(&cmd)?),at:0});return Ok(Some(json!({})));}
-        if op=="datagram" {let b=body(&cmd)?;if b.len()>1024{return Err("datagram too large".into())}let mut p=vec![1];p.extend(b);s.conn.dgram_send(&p).map_err(|e|e.to_string())?;return Ok(Some(json!({"queued":s.conn.dgram_send_queue_byte_size()})));}
+        if op=="datagram" {let b=body(&cmd)?;if b.len()>1024{return Err("datagram too large".into())}if legacy_motion(&b){s.conn.dgram_purge_outgoing(|queued|queued.first()==Some(&1)&&legacy_motion(&queued[1..]));}let mut p=vec![1];p.extend(b);s.conn.dgram_send(&p).map_err(|e|e.to_string())?;return Ok(Some(json!({"queued":s.conn.dgram_send_queue_byte_size()})));}
         if op=="video" {
           let bytes=body(&cmd)?;if bytes.len()<16||bytes.len()>4*1024*1024{return Err("video size".into())}
           let channel=cmd["channel"].as_u64().ok_or("channel required")? as u32;let seq=s.seq.entry(channel).or_insert(0);let frame=*seq;*seq=seq.wrapping_add(1);
