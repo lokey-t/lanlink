@@ -242,9 +242,9 @@ export class Updater{
   validate:mac?()=>verifyMacUpdate(install,stage):undefined,
  });
  await rm(path.join(work,'download'),{force:true});
- const helper=path.join(work,'install.mjs'),runtime=path.join(work,mac?'node':'node.exe');await copyFile(process.execPath,runtime);const {chmod}=await import('node:fs/promises');await chmod(runtime,493);await copyFile(fileURLToPath(new URL('./update-install.js',import.meta.url)),helper);
+ const helper=path.join(work,'install.mjs'),runtime=path.join(work,mac?'node':'node.exe');await copyFile(process.execPath,runtime);const {chmod}=await import('node:fs/promises');await chmod(runtime,493);await copyFile(path.join(stage,mac?'Contents/Resources/src/update-install.js':'src/update-install.js'),helper);
  await writeFile(path.join(work,'plan.json'),JSON.stringify({
-  install,stage,mac,parent:process.ppid,host:process.pid,resultFile:this.resultFile,dataDir:this.service.dir,
+  install,stage,mac,parent:process.ppid,host:process.pid,resultFile:this.resultFile,dataDir:this.service.dir,port:this.service.options?.port,noDiscovery:this.service.options?.noDiscovery,
   version:manifest.version,previousVersion:buildInfo.version,page
  }));
  if(channel!==this.channel())throw Error('更新通道已更改，请重新检查更新');

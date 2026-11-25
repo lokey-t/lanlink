@@ -11,7 +11,7 @@ New-Item -ItemType Directory -Path $stage -Force|Out-Null
 $assembly=Join-Path $stage 'AssemblyInfo.cs'
 [IO.File]::WriteAllText($assembly,"using System.Reflection;[assembly:AssemblyVersion(`"$version.0`")][assembly:AssemblyFileVersion(`"$version.0`")]")
 $framework=Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319'
-& (Join-Path $framework 'csc.exe') /nologo /target:winexe /platform:x64 "/out:$output" "/resource:$PayloadZip,payload.zip" /reference:System.dll /reference:System.Core.dll /reference:Microsoft.CSharp.dll /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.IO.Compression.dll /reference:System.IO.Compression.FileSystem.dll $assembly (Join-Path $PSScriptRoot 'WindowsSetup.cs')
+& (Join-Path $framework 'csc.exe') /nologo /target:winexe /platform:x64 "/out:$output" "/resource:$PayloadZip,payload.zip" /reference:System.dll /reference:System.Core.dll /reference:Microsoft.CSharp.dll /reference:System.Web.Extensions.dll /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.IO.Compression.dll /reference:System.IO.Compression.FileSystem.dll $assembly (Join-Path $PSScriptRoot 'WindowsSetup.cs')
 if($LASTEXITCODE -ne 0){throw 'Setup compilation failed'}
 $verify=Join-Path $stage 'verify'
 $process=Start-Process -FilePath $output -ArgumentList @('--verify-payload',$verify) -WindowStyle Hidden -Wait -PassThru

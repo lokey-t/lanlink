@@ -34,13 +34,21 @@ class WindowsSetup {
   }
   static void NotRunning(){foreach(var p in Process.GetProcessesByName("LanLink")){try{if(p.MainModule.FileName.StartsWith(Home+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase))throw new IOException(T("请先从托盘菜单退出 LanLink。","Exit LanLink from its tray menu first."));}catch(System.ComponentModel.Win32Exception){throw new IOException("Cannot inspect running LanLink; close it before installation.");}finally{p.Dispose();}}}
   static void Shortcut(string name){Type type=Type.GetTypeFromProgID("WScript.Shell");dynamic shell=Activator.CreateInstance(type);dynamic link=shell.CreateShortcut(name);link.TargetPath=Path.Combine(Home,"LanLink.exe");link.WorkingDirectory=Home;link.IconLocation=Path.Combine(Home,"LanLink.exe");link.Save();}
-  static void MoveDirectory(string source,string destination){
-    var timer=Stopwatch.StartNew();
-    for(;;){try{Directory.Move(source,destination);return;}catch(IOException){if(timer.ElapsedMilliseconds>=20000)throw;System.Threading.Thread.Sleep(200);}catch(UnauthorizedAccessException){if(timer.ElapsedMilliseconds>=20000)throw;System.Threading.Thread.Sleep(200);}}
+  static void ReplaceInstallation(string stage){
+    // Use the same tested transaction as the in-app updater, from outside Home.
+    Directory.CreateDirectory(Support);string work=Path.Combine(Support,"update-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(work);
+    string runtime=Path.Combine(work,"node.exe"),helper=Path.Combine(work,"install.mjs"),plan=Path.Combine(work,"plan.json");
+    File.Copy(Path.Combine(stage,"runtime","node.exe"),runtime);File.Copy(Path.Combine(stage,"src","update-install.js"),helper);
+    File.WriteAllText(plan,new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(new{install=Home,stage=stage,mac=false,noLaunch=true,waitForExit=false,version=Assembly.GetExecutingAssembly().GetName().Version.ToString(3),resultFile=Path.Combine(work,"result.json")}));
+    using(var child=Process.Start(new ProcessStartInfo(runtime,"\""+helper+"\" \""+plan+"\""){WorkingDirectory=work,UseShellExecute=false,CreateNoWindow=true,RedirectStandardError=true})){
+      string errors=child.StandardError.ReadToEnd();child.WaitForExit();if(child.ExitCode!=0){string detail=File.Exists(plan+".error")?File.ReadAllText(plan+".error"):errors;throw new IOException(T("安装未完成，已保留旧版本。诊断目录：","Installation did not finish; the old version was retained. Diagnostics: ")+work+"\r\n"+detail);}
+    }
+    string expected=Path.GetFullPath(Support)+Path.DirectorySeparatorChar;
+    if(!Path.GetFullPath(work).StartsWith(expected,StringComparison.OrdinalIgnoreCase))throw new IOException("Invalid cleanup path");try{Directory.Delete(work,true);}catch(IOException){}catch(UnauthorizedAccessException){}
   }
   static void Install(){
-    NotRunning();Directory.CreateDirectory(Path.GetDirectoryName(Home));string stage=Home+".install-"+Guid.NewGuid().ToString("N"),backup=Home+".backup-"+DateTime.UtcNow.Ticks;
-    Extract(stage);bool moved=false;try{if(Directory.Exists(Home)){MoveDirectory(Home,backup);moved=true;}MoveDirectory(stage,Home);}catch{if(moved&&!Directory.Exists(Home))MoveDirectory(backup,Home);throw;}
+    NotRunning();Directory.CreateDirectory(Path.GetDirectoryName(Home));string stage=Home+".install-"+Guid.NewGuid().ToString("N");
+    Extract(stage);if(Directory.Exists(Home))ReplaceInstallation(stage);else Directory.Move(stage,Home);
     Directory.CreateDirectory(Support);string self=Assembly.GetExecutingAssembly().Location,uninstall=Path.Combine(Support,"Uninstall.exe");if(!string.Equals(self,uninstall,StringComparison.OrdinalIgnoreCase))File.Copy(self,uninstall,true);
     Shortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs),"LanLink.lnk"));Shortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),"LanLink.lnk"));
     using(var key=Registry.CurrentUser.CreateSubKey(Key)){key.SetValue("DisplayName","LanLink");key.SetValue("DisplayVersion",Assembly.GetExecutingAssembly().GetName().Version.ToString(3));key.SetValue("Publisher","LanLink");key.SetValue("InstallLocation",Home);key.SetValue("DisplayIcon",Path.Combine(Home,"LanLink.exe"));key.SetValue("UninstallString","\""+uninstall+"\" --uninstall");key.SetValue("NoModify",1);key.SetValue("NoRepair",1);}

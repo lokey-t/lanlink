@@ -57,3 +57,11 @@ Android 以已安装的 APK 为基础重建新 APK，按全量包的大小和 SH
 GitHub 发布的 Android 0.91.0 和 0.91.1 使用不同签名，升级时需要先保留加入原组的方式，再卸载旧版、安装新版并重新加入原组。后续发行版沿用 0.91.1 的发布签名，以支持覆盖安装。
 
 All three clients fall back to a full download if the base is incompatible or the delta cannot be used. Desktop replacement occurs after both processes exit, with directory rollback on replacement errors and a retained backup. Android uses the system installer after permission is granted and keeps the verified APK available if installation is canceled. Test upgrades from the exact previous release and full fallback on all three platforms before publishing.
+
+## 更新安装实现参考 / Installer references
+
+Windows 优先尝试整目录切换；若资源管理器等进程只持有目录句柄，则参考 [electron-builder NSIS 的 un.atomicRMDir / un.restoreFiles](https://github.com/electron-userland/electron-builder/blob/master/packages/app-builder-lib/templates/nsis/uninstaller.nsh)，在保留目录对象的情况下先备份文件、再安装新文件，失败时恢复旧文件。事务记录保存在安装目录之外，便于中断后恢复；独立安装器与客户端复用同一段安装代码。持续的文件占用会触发失败回滚，不自动结束外部进程。
+
+外部占用与失败恢复也参考 [Velopack Windows 更新说明](https://github.com/velopack/velopack.docs/blob/master/docs/packaging/operating-systems/windows.mdx)。macOS 保持完整应用包替换、签名身份校验及回滚，参考 [Sparkle SUPlainInstaller](https://github.com/sparkle-project/Sparkle/blob/2.x/Autoupdate/SUPlainInstaller.m)。
+
+Windows first attempts a whole-tree replacement, then uses the NSIS backup-and-restore pattern when only directory objects are locked. A journal outside the installation supports recovery after interruption. The standalone installer reuses the same transaction. External processes are not terminated automatically. macOS replaces the complete signed application bundle and preserves the original profile and startup options.
