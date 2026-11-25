@@ -8,6 +8,26 @@
 This file preserves the original release notes in Chinese, with same-version addenda grouped together.
 Historical entries describe their version at the time. For current behavior, permission defaults, build instructions, and validation scope, use the READMEs and the latest validation reports.
 
+## 0.93.0 · 串流、界面与控制中心 / Streaming, UI, and Control Center
+
+- 优化 Windows、macOS 和 Android 的远程串流逻辑，使远程画面与操作更流畅。
+- 优化三端 UI，统一界面样式与交互。
+- 新增控制中心，点击状态栏目即可快捷执行相关操作。
+
+- Optimized remote streaming across Windows, macOS, and Android for smoother video and interaction.
+- Refined the UI across all three platforms for a consistent appearance and interaction.
+- Added Control Center shortcuts: click a status entry to quickly access its related actions.
+
+### 下载 / Downloads
+
+| 设备 / 安装方式 | GitHub 下载 | Gitee 发行页 |
+| --- | --- | --- |
+| Windows 10/11 x64 · 便携版 | [LanLink-0.93.0-windows-x64.zip](https://github.com/lokey-t/lanlink/releases/download/v0.93.0/LanLink-0.93.0-windows-x64.zip) | [发行页](https://gitee.com/lokey-t/lanlink/releases/tag/v0.93.0) |
+| Windows 10/11 x64 · 安装版 | [LanLink-0.93.0-windows-x64-setup.exe](https://github.com/lokey-t/lanlink/releases/download/v0.93.0/LanLink-0.93.0-windows-x64-setup.exe) | [发行页](https://gitee.com/lokey-t/lanlink/releases/tag/v0.93.0) |
+| macOS 14+ · Apple Silicon DMG | [LanLink-0.93.0-macos-arm64.dmg](https://github.com/lokey-t/lanlink/releases/download/v0.93.0/LanLink-0.93.0-macos-arm64.dmg) | [发行页](https://gitee.com/lokey-t/lanlink/releases/tag/v0.93.0) |
+| macOS 14+ · Apple Silicon ZIP | [LanLink-0.93.0-macos-arm64.zip](https://github.com/lokey-t/lanlink/releases/download/v0.93.0/LanLink-0.93.0-macos-arm64.zip) | [发行页](https://gitee.com/lokey-t/lanlink/releases/tag/v0.93.0) |
+| Android 10+ · 正式签名 | [LanLink-0.93.0-android.apk](https://github.com/lokey-t/lanlink/releases/download/v0.93.0/LanLink-0.93.0-android.apk) | [发行页](https://gitee.com/lokey-t/lanlink/releases/tag/v0.93.0) |
+
 ## 0.92.1 · 修复 HID 跨屏返回 / HID cross-screen return fix
 
 - 修复 Windows 与 macOS 组内蓝牙 HID 跨屏后鼠标无法返回的问题。回程使用被控端的实际光标位置，光标回报中断时自动恢复本机操作。

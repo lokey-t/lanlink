@@ -13,27 +13,27 @@ LanLink 让同一局域网里的电脑和 Android 手机一起工作：把鼠标
 
 无需注册账号，日常协作不依赖云端服务或互联网。设备通过临时数字码或二维码加入同一组，再以加密直连传输数据。桌面采用原生窗口，运行环境随软件包提供。
 
-> **当前版本：0.92.1。** 本文描述当前工作树的实现，不等同于所有平台均已完成实机验收。构建与测试范围见[验证状态](#validation)。
+> **当前版本：0.93.0。** 本文描述当前工作树的实现，不等同于所有平台均已完成实机验收。构建与测试范围见[验证状态](#validation)。
 
 
 <a id="downloads"></a>
-## v0.92 下载与更新
+## v0.93.0 下载与更新
 
-发行版本为 **0.92.1**，标签为 `v0.92.1`。下列链接指向该版本 Release，按你的设备选择附件。
+发行版本为 **0.93.0**，标签为 `v0.93.0`。下列链接指向该版本 Release，按你的设备选择附件。
 
 | 设备 / 安装方式 | GitHub 下载 | Gitee 发行页 |
 | --- | --- | --- |
-| Windows 10/11 x64 · 便携版 | [LanLink-0.92.1-windows-x64.zip](https://github.com/lokey-t/lanlink/releases/download/v0.92.1/LanLink-0.92.1-windows-x64.zip) | [发行页](https://gitee.com/lokey-t/lanlink/releases/tag/v0.92.1) |
-| Windows 10/11 x64 · 安装版 | [LanLink-0.92.1-windows-x64-setup.exe](https://github.com/lokey-t/lanlink/releases/download/v0.92.1/LanLink-0.92.1-windows-x64-setup.exe) | [发行页](https://gitee.com/lokey-t/lanlink/releases/tag/v0.92.1) |
-| macOS 14+ · Apple Silicon DMG | [LanLink-0.92.1-macos-arm64.dmg](https://github.com/lokey-t/lanlink/releases/download/v0.92.1/LanLink-0.92.1-macos-arm64.dmg) | [发行页](https://gitee.com/lokey-t/lanlink/releases/tag/v0.92.1) |
-| macOS 14+ · Apple Silicon ZIP | [LanLink-0.92.1-macos-arm64.zip](https://github.com/lokey-t/lanlink/releases/download/v0.92.1/LanLink-0.92.1-macos-arm64.zip) | [发行页](https://gitee.com/lokey-t/lanlink/releases/tag/v0.92.1) |
-| Android 10+ · 正式签名 | [LanLink-0.92.1-android.apk](https://github.com/lokey-t/lanlink/releases/download/v0.92.1/LanLink-0.92.1-android.apk) | [发行页](https://gitee.com/lokey-t/lanlink/releases/tag/v0.92.1) |
+| Windows 10/11 x64 · 便携版 | [LanLink-0.93.0-windows-x64.zip](https://github.com/lokey-t/lanlink/releases/download/v0.93.0/LanLink-0.93.0-windows-x64.zip) | [发行页](https://gitee.com/lokey-t/lanlink/releases/tag/v0.93.0) |
+| Windows 10/11 x64 · 安装版 | [LanLink-0.93.0-windows-x64-setup.exe](https://github.com/lokey-t/lanlink/releases/download/v0.93.0/LanLink-0.93.0-windows-x64-setup.exe) | [发行页](https://gitee.com/lokey-t/lanlink/releases/tag/v0.93.0) |
+| macOS 14+ · Apple Silicon DMG | [LanLink-0.93.0-macos-arm64.dmg](https://github.com/lokey-t/lanlink/releases/download/v0.93.0/LanLink-0.93.0-macos-arm64.dmg) | [发行页](https://gitee.com/lokey-t/lanlink/releases/tag/v0.93.0) |
+| macOS 14+ · Apple Silicon ZIP | [LanLink-0.93.0-macos-arm64.zip](https://github.com/lokey-t/lanlink/releases/download/v0.93.0/LanLink-0.93.0-macos-arm64.zip) | [发行页](https://gitee.com/lokey-t/lanlink/releases/tag/v0.93.0) |
+| Android 10+ · 正式签名 | [LanLink-0.93.0-android.apk](https://github.com/lokey-t/lanlink/releases/download/v0.93.0/LanLink-0.93.0-android.apk) | [发行页](https://gitee.com/lokey-t/lanlink/releases/tag/v0.93.0) |
 
 Windows 安装版创建开始菜单和桌面快捷方式，可从系统“已安装的应用”卸载；便携版无需安装。macOS 将 DMG 中的应用拖到 Applications；当前构建使用 ad-hoc 签名，未公证。Android 安装需系统确认，并须与旧 APK 使用相同签名才能覆盖升级。
 
 软件默认检测正式版。设置中可切换正式版或测试版，也可关闭自动检测并手动检查。Windows x64、macOS arm64 和 Android 各有独立的增量更新包；跨版本、补丁不可用或校验失败时自动使用对应平台全量更新。桌面下载完成后退出软件安装；Android 通过系统安装器确认。首次从尚无更新功能的旧版升级，请手动下载。详见[更新与发布说明](docs/updates.md)。
 
-v0.92.1 修复组内蓝牙 HID 跨屏后鼠标无法返回的问题。HID 通道可在「本组设备权限」中打开。详见[更新日志](RELEASE_NOTES.md)。
+v0.93.0 优化 Windows、macOS 和 Android 的远程串流逻辑，使画面与操作更流畅；优化三端 UI，新增控制中心，点击状态栏目即可快捷执行相关操作。详见[更新日志](RELEASE_NOTES.md)。
 
 Android 的「设置 → 关于」集中提供版本信息、更新设置和日志导出。支持预测式返回的系统可在设置子页面预览上一级页面。
 
@@ -77,7 +77,7 @@ Android 的「设置 → 关于」集中提供版本信息、更新设置和日�
 | **网络变慢时继续操作** | 鼠标队列合并相邻移动、丢弃过时轨迹，画面根据延迟和积压调整码率，文件传输为正在进行的控制与画面留出带宽。 |
 | **利用已有数据线或有线网络** | 电脑与 Android 可使用已信任的 USB 调试辅助通道；电脑之间可使用系统提供的第二条 IP 网络。根据链路情况选择路径，局域网仍保持在线。 |
 
-**0.3.46 的重点改进：** 修复剪贴板回切与重复文件上传；逐项管理手机对电脑的权限；补齐文件取消、重试和保存；所有页面可见错误并能重启服务；为安装包记录源码指纹。详见 [修复与验收记录](docs/FIXES-0.3.46-2026-10-09.md)。完整历史见 [CHANGELOG.md](CHANGELOG.md)。
+**本版重点：** 更流畅的三端远程串流、统一的 UI，以及状态栏目快捷操作。控制中心集中提供常用操作，减少页面之间的切换。完整历史见 [CHANGELOG.md](CHANGELOG.md)。
 
 <a id="platforms"></a>
 ## 平台与能力
@@ -100,7 +100,7 @@ macOS 打包脚本有 `arm64` / `x64` 路径，当前验证记录覆盖 Apple Si
 
 ### 1. 启动客户端
 
-先按下方[构建说明](#build)生成对应平台的软件包。Windows 解压完整目录后运行 `LanLink.exe`；macOS 打开 `LanLink.app`；Android 安装构建生成的 APK。桌面包自带 Node.js，使用软件包无需另装 Node.js。
+从上方[下载区](#downloads)获取对应平台的软件包，也可按[构建说明](#build)自行编译。Windows 解压完整目录后运行 `LanLink.exe`；macOS 打开 `LanLink.app`；Android 安装构建生成的 APK。桌面包自带 Node.js，使用软件包无需另装 Node.js。
 
 关闭桌面主窗口会隐藏窗口并返回本机键鼠，程序仍在后台运行；彻底退出请使用托盘或应用菜单中的“退出 LanLink”。
 
@@ -167,7 +167,7 @@ npm run icons
 npm start
 ```
 
-输出：`dist/LanLink-0.92.1-windows-x64/` 与同名 `.zip`。`-VideoRuntime` 可省略，但缺少 FFmpeg 时桌面仅有 JPEG 兼容路径，无法查看只提供 H.264 的手机画面。打包脚本要求先完成 QUIC 原生库构建。
+输出：`dist/LanLink-0.93.0-windows-x64/` 与同名 `.zip`。`-VideoRuntime` 可省略，但缺少 FFmpeg 时桌面仅有 JPEG 兼容路径，无法查看只提供 H.264 的手机画面。打包脚本要求先完成 QUIC 原生库构建。
 
 </details>
 
@@ -183,7 +183,7 @@ npm start
 
 脚本编译 Swift 界面、系统桥接与 Rust QUIC 库，默认从固定版本源码构建并捆绑 FFmpeg。也可通过 `LANLINK_FFMPEG_DIST` 指定已有视频运行时目录，须含 `bin/ffmpeg` 和 `LICENSE.txt`。
 
-Apple Silicon 输出：`dist/LanLink-0.92.1-macos-arm64/LanLink.app` 与 `dist/LanLink-0.92.1-macos-arm64.zip`。Intel 路径使用 `macos-x64`，仍待验证。当前脚本使用 ad-hoc 签名，未进行 Apple 开发者签名或公证。
+Apple Silicon 输出：`dist/LanLink-0.93.0-macos-arm64/LanLink.app` 与 `dist/LanLink-0.93.0-macos-arm64.zip`。Intel 路径使用 `macos-x64`，仍待验证。当前脚本使用 ad-hoc 签名，未进行 Apple 开发者签名或公证。
 
 </details>
 
