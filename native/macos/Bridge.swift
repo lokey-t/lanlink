@@ -42,6 +42,10 @@ var physicalModifiers = Set<CGKeyCode>()
 var localModifierUps = Set<CGKeyCode>()
 var buttons = Set<Int>()
 var tap: CFMachPort?
+var tapSource: CFRunLoopSource?
+var inputUnavailable = true
+var tapRecoveryPending = false
+var tapRetryAfter = Date.distantPast
 var clipboardCount = NSPasteboard.general.changeCount
 func post(_ event: CGEvent?) { event?.setIntegerValueField(.eventSourceUserData, value: marker); event?.post(tap: .cghidEventTap) }
 func flags() -> CGEventFlags {
@@ -65,16 +69,25 @@ func mouseButton(_ button: Int, _ down: Bool) {
 }
 func releaseAll() { wheelPending=0; for k in Array(held) { key(k, false) }; for b in Array(buttons) { mouseButton(b, false) } }
 func stopCapture() {
- bluetoothHid.reset()
  remote = false
  remoteBluetooth = false
  if cursorDetached { _ = CGAssociateMouseAndMouseCursorPosition(1); cursorDetached = false }
  capturedCursorPosition = nil
  if let display = capturedDisplay { _ = CGDisplayShowCursor(display); capturedDisplay = nil }
  releaseAll()
+ bluetoothHid.reset()
 }
 let callback: CGEventTapCallBack = { _, type, event, _ in
- if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput { stopCapture(); if let t = tap { CGEvent.tapEnable(tap: t, enable: true) }; emit(["type":"emergency"]); return Unmanaged.passUnretained(event) }
+ if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+  // Fail open immediately. TCC can disable a tap while permissions are being
+  // revoked; re-enabling it here can repeatedly seize the system input path.
+  if !tapRecoveryPending {
+   tapRecoveryPending = true
+   DispatchQueue.main.async { interruptInput() }
+  }
+  return Unmanaged.passUnretained(event)
+ }
+ guard !inputUnavailable && !tapRecoveryPending else { return Unmanaged.passUnretained(event) }
  if event.getIntegerValueField(.eventSourceUserData) == marker { return Unmanaged.passUnretained(event) }
  if [.mouseMoved,.leftMouseDragged,.rightMouseDragged,.otherMouseDragged].contains(type) { syntheticCursor = false }
  let code = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
@@ -180,14 +193,16 @@ func command(_ message: [String: Any]) {
  case "compactMotion": motionOutputLock.lock();compactMotionOutput=a["enabled"] as? Bool ?? false;motionOutputLock.unlock();reply(id)
  case "mouse-feel":
   mouseSmooth=a["smooth"] as? Bool ?? false;mouseReverse=a["reverse"] as? Bool ?? false;mouseDisableAcceleration=a["disableAcceleration"] as? Bool ?? false;mouseSensitivity=max(0.2,min(3,(a["sensitivity"] as? NSNumber)?.doubleValue ?? 1));wheelPending=0;reply(id)
- case "capabilities": ensureInputTap(); reply(id,["mouseFeel":1,"inputBatch":1,"compactMotion":1,"relativeInput":true,"host":AXIsProcessTrusted() && (tap.map { CGEvent.tapIsEnabled(tap: $0) } ?? false),"input":AXIsProcessTrusted(),"inputMonitoring":CGPreflightListenEventAccess(),"screen":CGPreflightScreenCaptureAccess(),"clipboard":true,"shutdown":true,"width":bounds.width,"height":bounds.height])
+ case "capabilities": ensureInputTap(); reply(id,["mouseFeel":1,"inputBatch":1,"compactMotion":1,"relativeInput":true,"host":!inputUnavailable && !tapRecoveryPending && AXIsProcessTrusted() && (tap.map { CGEvent.tapIsEnabled(tap: $0) } ?? false),"input":AXIsProcessTrusted(),"inputMonitoring":CGPreflightListenEventAccess(),"screen":CGPreflightScreenCaptureAccess(),"clipboard":true,"shutdown":true,"width":bounds.width,"height":bounds.height])
  case "mode":
   wheelPending=0
   if a["remote"] as? Bool == true {
    ensureInputTap()
+   guard inputSessionActive else { failure(id,"CONTROL_ENDED: 本机系统会话未激活"); return }
+   guard AXIsProcessTrusted() else { failure(id,"HOST_INPUT_PERMISSION: 请在本机系统设置中开启辅助功能"); return }
+   guard CGPreflightListenEventAccess() else { failure(id,"HOST_INPUT_PERMISSION: 请在本机系统设置中开启输入监控"); return }
+   guard !inputUnavailable && !tapRecoveryPending else { failure(id,"HOST_INPUT_PERMISSION: 本机键鼠监听尚未就绪"); return }
    if !remote {
-    guard inputSessionActive else { failure(id,"CONTROL_ENDED: 本机系统会话未激活"); return }
-    guard AXIsProcessTrusted() else { failure(id,"HOST_INPUT_PERMISSION: 请在本机系统设置中开启辅助功能"); return }
     guard let tap, CGEvent.tapIsEnabled(tap: tap) else {
      failure(id,CGPreflightListenEventAccess() ? "HOST_INPUT_PERMISSION: 本机键鼠监听尚未就绪" : "HOST_INPUT_PERMISSION: 请在本机系统设置中开启输入监控")
      return
@@ -252,17 +267,49 @@ func command(_ message: [String: Any]) {
  default: failure(id,"不支持的原生操作")
  }
 }
-func ensureInputTap() {
- if let tap, CFMachPortIsValid(tap) {
-  if !CGEvent.tapIsEnabled(tap: tap) && !remote { CGEvent.tapEnable(tap: tap, enable: true) }
-  return
- }
- guard AXIsProcessTrusted() else { return }
- let types: [CGEventType] = [.keyDown,.keyUp,.flagsChanged,.mouseMoved,.leftMouseDragged,.rightMouseDragged,.otherMouseDragged,.leftMouseDown,.leftMouseUp,.rightMouseDown,.rightMouseUp,.otherMouseDown,.otherMouseUp,.scrollWheel]
- let mask = types.reduce(CGEventMask(0)) { $0 | (CGEventMask(1) << $1.rawValue) }
- tap = CGEvent.tapCreate(tap:.cghidEventTap,place:.headInsertEventTap,options:.defaultTap,eventsOfInterest:mask,callback:callback,userInfo:nil)
- if let t = tap { let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault,t,0);CFRunLoopAddSource(CFRunLoopGetMain(),source,.commonModes);CGEvent.tapEnable(tap:t,enable:true) }
+func interruptInput() {
+ let notify = !inputUnavailable
+ inputUnavailable = true
+ stopCapture()
+ if let source = tapSource { CFRunLoopRemoveSource(CFRunLoopGetMain(),source,.commonModes) }
+ tapSource = nil
+ if let t = tap { CGEvent.tapEnable(tap:t,enable:false); CFMachPortInvalidate(t) }
+ tap = nil
+ physicalModifiers.removeAll(); localModifierUps.removeAll()
+ tapRecoveryPending = false
+ tapRetryAfter = Date().addingTimeInterval(1)
+ if notify { emit(["type":"input-interrupted","blocked":true]) }
 }
+
+// Also called by the watchdog: permission revocation need not deliver a tap
+// notification, and a live heartbeat must not keep the local cursor detached.
+@discardableResult func refreshInputPermissions(accessibility: Bool, monitoring: Bool) -> Bool {
+ guard accessibility && monitoring && inputSessionActive else {
+  if !inputUnavailable || tap != nil || remote || cursorDetached || capturedDisplay != nil || !held.isEmpty || !buttons.isEmpty { interruptInput() }
+  return false
+ }
+ return true
+}
+func ensureInputTap() {
+ guard refreshInputPermissions(accessibility:AXIsProcessTrusted(),monitoring:CGPreflightListenEventAccess()) else { return }
+ guard !tapRecoveryPending, Date() >= tapRetryAfter else { return }
+ if let t = tap {
+  // Rebuild disabled/invalid ports outside the event callback, with a cooldown.
+  guard CFMachPortIsValid(t), CGEvent.tapIsEnabled(tap:t) else { interruptInput(); return }
+ } else {
+  let types: [CGEventType] = [.keyDown,.keyUp,.flagsChanged,.mouseMoved,.leftMouseDragged,.rightMouseDragged,.otherMouseDragged,.leftMouseDown,.leftMouseUp,.rightMouseDown,.rightMouseUp,.otherMouseDown,.otherMouseUp,.scrollWheel]
+  let mask = types.reduce(CGEventMask(0)) { $0 | (CGEventMask(1) << $1.rawValue) }
+  guard let t = CGEvent.tapCreate(tap:.cghidEventTap,place:.headInsertEventTap,options:.defaultTap,eventsOfInterest:mask,callback:callback,userInfo:nil),
+        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault,t,0) else { tapRetryAfter = Date().addingTimeInterval(1); return }
+  tap = t; tapSource = source
+  CFRunLoopAddSource(CFRunLoopGetMain(),source,.commonModes)
+  CGEvent.tapEnable(tap:t,enable:true)
+  guard CGEvent.tapIsEnabled(tap:t) else { interruptInput(); return }
+ }
+ if inputUnavailable { inputUnavailable = false; emit(["type":"input-restored"]) }
+}
+
+#if !LANLINK_BRIDGE_TEST
 
 @main struct BridgeMain {
 static func main() {
@@ -283,10 +330,10 @@ ensureInputTap()
 let workspace = NSWorkspace.shared.notificationCenter
 let workspaceObservers = [
  workspace.addObserver(forName: NSWorkspace.sessionDidResignActiveNotification, object: nil, queue: .main) { _ in
-  inputSessionActive = false; stopCapture(); emit(["type":"input-interrupted","blocked":true])
+  inputSessionActive = false; interruptInput()
  },
  workspace.addObserver(forName: NSWorkspace.sessionDidBecomeActiveNotification, object: nil, queue: .main) { _ in
-  inputSessionActive = true; emit(["type":"input-restored"])
+  inputSessionActive = true; ensureInputTap()
  },
  workspace.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { _ in
   stopCapture(); emit(["type":"emergency"])
@@ -299,6 +346,7 @@ Timer.scheduledTimer(withTimeInterval:0.02,repeats:true) { _ in
  if (!held.isEmpty || !buttons.isEmpty) && Date()>inputLease { releaseAll() }
  if !remote { let p=CGEvent(source:nil)?.location ?? .zero;let b=CGDisplayBounds(CGMainDisplayID());emit(["type":"cursor","x":p.x-b.minX,"y":p.y-b.minY,"width":b.width,"height":b.height,"synthetic":syntheticCursor]) }
  ticks += 1
+ if ticks%25==0 { ensureInputTap() }
  if ticks%25==0 && NSPasteboard.general.changeCount != clipboardCount { clipboardCount=NSPasteboard.general.changeCount;emit(["type":"clipboardChanged"]) }
 }
 DispatchQueue.global().async {
@@ -316,3 +364,4 @@ terminationSignal.resume()
 NSApplication.shared.run()
 }
 }
+#endif
